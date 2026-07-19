@@ -111,6 +111,10 @@ function browserTimezone() {
   }
 }
 
+function preferredScrollBehavior() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 function notificationTimezones() {
   const detected = browserTimezone();
   try {
@@ -1025,6 +1029,98 @@ function Field({ label, children }) {
   );
 }
 
+const dialogFocusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[contenteditable='true']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function useDialogLifecycle(open, onClose, closeDisabled = false) {
+  const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
+  onCloseRef.current = onClose;
+  closeDisabledRef.current = closeDisabled;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    const overlay = dialog.parentElement;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousBodyOverflow = document.body.style.overflow;
+    const backgroundNodes = overlay?.parentElement
+      ? [...overlay.parentElement.children]
+        .filter((node) => node !== overlay)
+        .map((node) => ({ node, inert: node.hasAttribute("inert"), ariaHidden: node.getAttribute("aria-hidden") }))
+      : [];
+
+    const focusableElements = () => [...dialog.querySelectorAll(dialogFocusableSelector)]
+      .filter((element) => element instanceof HTMLElement && element.getClientRects().length > 0);
+    const initialFocus = dialog.querySelector("[data-dialog-initial-focus]") || focusableElements()[0] || dialog;
+    initialFocus.focus({ preventScroll: true });
+    document.body.style.overflow = "hidden";
+    backgroundNodes.forEach(({ node }) => {
+      node.setAttribute("inert", "");
+      node.setAttribute("aria-hidden", "true");
+    });
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        if (closeDisabledRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = focusableElements();
+      if (!focusable.length) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!dialog.contains(active)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousBodyOverflow;
+      backgroundNodes.forEach(({ node, inert, ariaHidden }) => {
+        if (!inert) node.removeAttribute("inert");
+        if (ariaHidden === null) node.removeAttribute("aria-hidden");
+        else node.setAttribute("aria-hidden", ariaHidden);
+      });
+      window.requestAnimationFrame(() => {
+        if (!document.querySelector('[role="dialog"][aria-modal="true"]') && returnFocus?.isConnected) {
+          returnFocus.focus({ preventScroll: true });
+        }
+      });
+    };
+  }, [open]);
+
+  return dialogRef;
+}
+
 function useInstallableApp() {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -1109,7 +1205,7 @@ function LandingPage({ onOpen, pwa }) {
     <main className="min-h-screen bg-[#08090a] text-zinc-100">
       <nav className="relative z-20 border-b border-zinc-800 bg-black">
         <div className="mx-auto flex h-14 max-w-[1560px] items-center justify-between px-4 sm:px-6">
-          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="text-lg font-black uppercase text-white">
+          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: preferredScrollBehavior() })} className="text-lg font-black uppercase text-white">
             Outflow
           </button>
           <div className="flex items-center gap-5 text-xs font-bold uppercase text-zinc-500">
@@ -1402,6 +1498,11 @@ function Tracker({ onExit, pwa }) {
   const [csvSession, setCsvSession] = useState(null);
   const [csvMapping, setCsvMapping] = useState({});
   const [csvError, setCsvError] = useState("");
+  const accountDialogRef = useDialogLifecycle(accountOpen, closeAccountControls, Boolean(accountBusy));
+  const calendarDialogRef = useDialogLifecycle(calendarExportOpen, closeCalendarExport, Boolean(calendarFeedBusy));
+  const ledgerDialogRef = useDialogLifecycle(ledgerOpen, closeLedgerControls);
+  const alertDialogRef = useDialogLifecycle(alertSettingsOpen, () => setAlertSettingsOpen(false));
+  const csvDialogRef = useDialogLifecycle(importOpen, closeCsvImport);
 
   useEffect(() => {
     localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
@@ -1452,19 +1553,6 @@ function Tracker({ onExit, pwa }) {
       authSubscription?.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    if (!accountOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape" && !accountBusy) {
-        setAccountOpen(false);
-        setAccountEntryContext("");
-        setDeleteAccountArmed(false);
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [accountOpen, accountBusy]);
 
   useEffect(() => {
     if (!accountSession?.user?.id) {
@@ -1704,45 +1792,6 @@ function Tracker({ onExit, pwa }) {
       unsubscribe();
     };
   }, [accountSession?.user?.id, cloudLedgerSession?.ledger?.id, editingId]);
-
-  useEffect(() => {
-    if (!alertSettingsOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setAlertSettingsOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [alertSettingsOpen]);
-
-  useEffect(() => {
-    if (!ledgerOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") {
-        setLedgerOpen(false);
-        setDeleteLedgerId(null);
-        setBackupSession(null);
-        setBackupError("");
-        setLedgerMeta((current) => sanitizeLedgerMeta(current));
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [ledgerOpen]);
-
-  useEffect(() => {
-    if (!calendarExportOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape" && !calendarFeedBusy) {
-        setCalendarExportOpen(false);
-        setCalendarExportError("");
-        setCalendarFeedSecretUrl("");
-        setCalendarFeedMessage("");
-        setCalendarFeedRevokeArmed(false);
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [calendarExportOpen, calendarFeedBusy]);
 
   useEffect(() => {
     const userId = accountSession?.user?.id;
@@ -3687,9 +3736,11 @@ function Tracker({ onExit, pwa }) {
       {accountOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
           <section
+            ref={accountDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-controls-title"
+            tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
@@ -3702,7 +3753,7 @@ function Tracker({ onExit, pwa }) {
                 onClick={closeAccountControls}
                 disabled={Boolean(accountBusy)}
                 aria-label="Close account controls"
-                autoFocus
+                data-dialog-initial-focus
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
               >
                 Close
@@ -4199,9 +4250,11 @@ function Tracker({ onExit, pwa }) {
       {calendarExportOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
           <section
+            ref={calendarDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="calendar-export-title"
+            tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
@@ -4213,7 +4266,7 @@ function Tracker({ onExit, pwa }) {
                 type="button"
                 onClick={closeCalendarExport}
                 aria-label="Close calendar export"
-                autoFocus
+                data-dialog-initial-focus
                 disabled={Boolean(calendarFeedBusy)}
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
               >
@@ -4403,9 +4456,11 @@ function Tracker({ onExit, pwa }) {
       {ledgerOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
           <section
+            ref={ledgerDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="ledger-controls-title"
+            tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-3xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
@@ -4417,7 +4472,7 @@ function Tracker({ onExit, pwa }) {
                 type="button"
                 onClick={closeLedgerControls}
                 aria-label="Close ledger controls"
-                autoFocus
+                data-dialog-initial-focus
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
               >
                 Close
@@ -4686,9 +4741,11 @@ function Tracker({ onExit, pwa }) {
       {alertSettingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
           <section
+            ref={alertDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="alert-settings-title"
+            tabIndex={-1}
             className="w-full max-w-xl border border-zinc-700 bg-[#090a0b] shadow-2xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
@@ -4700,7 +4757,7 @@ function Tracker({ onExit, pwa }) {
                 type="button"
                 onClick={() => setAlertSettingsOpen(false)}
                 aria-label="Close alert controls"
-                autoFocus
+                data-dialog-initial-focus
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
               >
                 Close
@@ -4755,9 +4812,11 @@ function Tracker({ onExit, pwa }) {
       {importOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
           <section
+            ref={csvDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="csv-import-title"
+            tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-5xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-3 sm:px-4">
@@ -4769,6 +4828,7 @@ function Tracker({ onExit, pwa }) {
                 type="button"
                 onClick={closeCsvImport}
                 aria-label="Close import"
+                data-dialog-initial-focus
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
               >
                 Close
