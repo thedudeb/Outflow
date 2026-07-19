@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:account-prompts": "node --test tests/account-prompt.test.js",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
     "preview": "vite preview"
   },

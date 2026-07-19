@@ -29,6 +29,15 @@ import {
   uploadGuestWorkspace,
   updateCloudLedgerMemberRole,
 } from "./cloud";
+import {
+  ACCOUNT_NUDGE_DISMISS_DAYS,
+  ACCOUNT_NUDGE_OPEN_DAYS,
+  accountNudgeIsDue,
+  accountNudgeIsSnoozed,
+  advanceAccountNudge,
+  recordAccountNudgeActivity,
+  sanitizeAccountNudge,
+} from "./accountPrompt";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -38,6 +47,7 @@ const LEDGER_META_KEY = "outflow:ledger-meta";
 const WORKSPACE_KEY = "outflow:workspace";
 const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
+const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -1068,10 +1078,11 @@ function useInstallableApp() {
   }, []);
 
   async function install() {
-    if (!installPrompt) return;
+    if (!installPrompt) return false;
     await installPrompt.prompt();
     const choice = await installPrompt.userChoice;
     if (choice.outcome === "accepted") setInstallPrompt(null);
+    return choice.outcome === "accepted";
   }
 
   function applyUpdate() {
@@ -1318,6 +1329,15 @@ function Tracker({ onExit, pwa }) {
   const [backupSession, setBackupSession] = useState(null);
   const [backupError, setBackupError] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [accountPromptContext, setAccountPromptContext] = useState("");
+  const [accountEntryContext, setAccountEntryContext] = useState("");
+  const [accountNudge, setAccountNudge] = useState(() => {
+    try {
+      return sanitizeAccountNudge(JSON.parse(localStorage.getItem(ACCOUNT_NUDGE_KEY) || "null"));
+    } catch {
+      return sanitizeAccountNudge(null);
+    }
+  });
   const [accountEmail, setAccountEmail] = useState("");
   const [accountSession, setAccountSession] = useState(null);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
@@ -1392,6 +1412,10 @@ function Tracker({ onExit, pwa }) {
   }, [alertSettings]);
 
   useEffect(() => {
+    localStorage.setItem(ACCOUNT_NUDGE_KEY, JSON.stringify(accountNudge));
+  }, [accountNudge]);
+
+  useEffect(() => {
     if (cloudLedgerSession) setCloudLedgerNameDraft(cloudLedgerSession.ledger.name);
     else setCloudLedgerNameDraft("");
   }, [cloudLedgerSession?.ledger.id, cloudLedgerSession?.ledger.name]);
@@ -1434,6 +1458,7 @@ function Tracker({ onExit, pwa }) {
     const closeOnEscape = (event) => {
       if (event.key === "Escape" && !accountBusy) {
         setAccountOpen(false);
+        setAccountEntryContext("");
         setDeleteAccountArmed(false);
       }
     };
@@ -1859,6 +1884,38 @@ function Tracker({ onExit, pwa }) {
       && managedCloudLedger.kind !== "personal"
       && accountEntitlement?.status === "active",
   );
+  const accountPromptDetails = {
+    activity: {
+      code: "Local checkpoint",
+      title: "This workspace exists only in this browser.",
+      detail: `${workspaceRecordCount} ${workspaceRecordCount === 1 ? "record" : "records"} remain available without an account. Sign-in is optional and does not upload them.`,
+    },
+    backup: {
+      code: "Backup downloaded",
+      title: "Your portable copy is ready.",
+      detail: "An optional account can add recovery on another device after you explicitly create a cloud copy.",
+    },
+    shared: {
+      code: "Shared ledger / local",
+      title: `${ledgerMeta.name} is isolated to this browser.`,
+      detail: "An optional account is the first step toward cloud access and member invitations. The local ledger stays intact.",
+    },
+    install: {
+      code: "Installed locally",
+      title: "This install still uses browser-local data.",
+      detail: "An optional account adds identity for recovery and multi-device access only when you choose to upload.",
+    },
+  }[accountPromptContext || accountEntryContext] || null;
+
+  useEffect(() => {
+    if (accountSession) {
+      setAccountPromptContext("");
+      setAccountEntryContext("");
+      return;
+    }
+    if (!cloudConfigured || accountLoading || accountOpen || accountPromptContext) return;
+    if (accountNudgeIsDue(accountNudge)) setAccountPromptContext("activity");
+  }, [accountSession, accountLoading, accountOpen, accountPromptContext, accountNudge]);
 
   useEffect(() => {
     if (!alertSettings.deviceEnabled || notificationPermission !== "granted" || alerts.length === 0) return;
@@ -1888,6 +1945,31 @@ function Tracker({ onExit, pwa }) {
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function recordGuestAccountActivity() {
+    if (usingCloudLedger || accountSession) return;
+    setAccountNudge((current) => recordAccountNudgeActivity(current));
+  }
+
+  function presentGuestAccountPrompt(context) {
+    if (!cloudConfigured || accountLoading || accountSession || accountNudgeIsSnoozed(accountNudge)) return;
+    setAccountPromptContext(context);
+  }
+
+  function dismissGuestAccountPrompt() {
+    setAccountNudge((current) => advanceAccountNudge(current, ACCOUNT_NUDGE_DISMISS_DAYS));
+    setAccountPromptContext("");
+  }
+
+  function openAccountControls(context = "") {
+    const resolvedContext = context || accountPromptContext;
+    if (resolvedContext) {
+      setAccountNudge((current) => advanceAccountNudge(current, ACCOUNT_NUDGE_OPEN_DAYS));
+      setAccountPromptContext("");
+    }
+    setAccountEntryContext(resolvedContext);
+    setAccountOpen(true);
   }
 
   function toggleReminderLeadDay(days) {
@@ -1938,6 +2020,7 @@ function Tracker({ onExit, pwa }) {
         ? current.map((item) => (item.id === editingId ? normalizedPayload : item))
         : [...current, normalizedPayload].slice(0, MAX_SUBSCRIPTIONS),
     );
+    recordGuestAccountActivity();
     resetForm();
   }
 
@@ -1962,6 +2045,7 @@ function Tracker({ onExit, pwa }) {
   function deleteSubscription(id) {
     if (cloudLedgerWriteDisabled) return;
     setSubscriptions((current) => current.filter((subscription) => subscription.id !== id));
+    recordGuestAccountActivity();
     if (editingId === id) resetForm();
   }
 
@@ -1977,6 +2061,11 @@ function Tracker({ onExit, pwa }) {
         } : subscription,
       ),
     );
+    recordGuestAccountActivity();
+  }
+
+  async function installOutflow() {
+    if (await pwa.install()) presentGuestAccountPrompt("install");
   }
 
   function moveCalendar(months) {
@@ -2343,6 +2432,7 @@ function Tracker({ onExit, pwa }) {
   function closeAccountControls() {
     if (accountBusy) return;
     setAccountOpen(false);
+    setAccountEntryContext("");
     setDeleteAccountArmed(false);
     setRemoveMemberArmed("");
     setRevokeInviteArmed("");
@@ -2636,6 +2726,7 @@ function Tracker({ onExit, pwa }) {
     setBackupSession(null);
     resetForm();
     setLedgerOpen(false);
+    presentGuestAccountPrompt("shared");
   }
 
   function deleteLocalLedger(id) {
@@ -2672,6 +2763,7 @@ function Tracker({ onExit, pwa }) {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    presentGuestAccountPrompt("backup");
   }
 
   async function selectLedgerBackup(event) {
@@ -2701,6 +2793,7 @@ function Tracker({ onExit, pwa }) {
       .slice(0, availableImportSlots)
       .map((subscription) => normalizeBillingDate(subscription));
     setSubscriptions((current) => [...current, ...additions].slice(0, MAX_SUBSCRIPTIONS));
+    recordGuestAccountActivity();
     closeLedgerControls();
   }
 
@@ -2713,6 +2806,7 @@ function Tracker({ onExit, pwa }) {
       name: backupSession.ledger.name,
       updatedAt: new Date().toISOString(),
     }));
+    recordGuestAccountActivity();
     closeLedgerControls();
   }
 
@@ -2766,6 +2860,7 @@ function Tracker({ onExit, pwa }) {
       .map((candidate) => normalizeBillingDate(candidate.subscription));
     if (!imported.length || cloudLedgerWriteDisabled) return;
     setSubscriptions((current) => [...current, ...imported].slice(0, MAX_SUBSCRIPTIONS));
+    recordGuestAccountActivity();
     closeCsvImport();
   }
 
@@ -3071,7 +3166,7 @@ function Tracker({ onExit, pwa }) {
                 {pwa.canInstall && (
                   <button
                     type="button"
-                    onClick={pwa.install}
+                    onClick={installOutflow}
                     className="border border-amber-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-amber-300 hover:border-amber-400"
                   >
                     Install
@@ -3088,7 +3183,7 @@ function Tracker({ onExit, pwa }) {
                 )}
                 <button
                   type="button"
-                  onClick={() => setAccountOpen(true)}
+                  onClick={() => openAccountControls()}
                   aria-label={accountSession?.user?.email ? `Open account controls for ${accountSession.user.email}` : "Open optional account controls"}
                   className={`border bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
                     accountSession
@@ -3127,6 +3222,36 @@ function Tracker({ onExit, pwa }) {
               </div>
             </div>
           </header>
+
+          {accountPromptContext && accountPromptDetails && cloudConfigured && !accountSession && (
+            <section
+              role="status"
+              aria-label="Optional account prompt"
+              className="grid gap-3 border border-amber-800 bg-amber-950/15 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+            >
+              <div className="min-w-0">
+                <div className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">{accountPromptDetails.code}</div>
+                <div className="mt-1 text-sm font-black uppercase tracking-[0.06em] text-zinc-100">{accountPromptDetails.title}</div>
+                <div className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">{accountPromptDetails.detail}</div>
+              </div>
+              <div className="flex flex-wrap gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => openAccountControls(accountPromptContext)}
+                  className="h-9 border border-amber-400 bg-amber-400 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300"
+                >
+                  Create optional account
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissGuestAccountPrompt}
+                  className="h-9 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-zinc-100"
+                >
+                  Dismiss 30 days
+                </button>
+              </div>
+            </section>
+          )}
 
           {usingCloudLedger && (
             <div className={`grid gap-2 border px-3 py-2 font-mono text-[10px] uppercase sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
@@ -3601,6 +3726,15 @@ function Tracker({ onExit, pwa }) {
                   </span>
                 </div>
               </div>
+
+              {accountEntryContext && accountPromptDetails && !accountSession && (
+                <section className="border-b border-amber-900 bg-amber-950/15 px-4 py-3">
+                  <div className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">{accountPromptDetails.code}</div>
+                  <div className="mt-1 text-sm font-black uppercase tracking-[0.06em] text-zinc-100">{accountPromptDetails.title}</div>
+                  <div className="mt-1 text-xs leading-5 text-zinc-500">{accountPromptDetails.detail}</div>
+                  <div className="mt-2 font-mono text-[9px] uppercase text-zinc-700">No upload occurs until Create cloud copy is selected after sign-in.</div>
+                </section>
+              )}
 
               {cloudConfigError && (
                 <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{cloudConfigError}</div>
