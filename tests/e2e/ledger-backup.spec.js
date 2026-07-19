@@ -204,6 +204,12 @@ test("invalid and unsupported backups are rejected without changing the ledger",
 
   await uploadBackup(dialog, backupEnvelope({ schemaVersion: 99 }), "unsupported-version.json");
   await expect(error).toHaveText("This backup version is not supported.");
+
+  await uploadBackup(dialog, backupEnvelope({ subscriptions: [backupSubscription({
+    nextBillingDate: "2030-08-10",
+    trialEndDate: "2030-08-11",
+  })] }), "invalid-trial-order.json");
+  await expect(error).toHaveText("A backup first paid charge cannot precede its trial end date.");
   await expect(dialog.getByRole("button", { name: "Replace all", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Close ledger controls", exact: true }).click();
   await expect(page.getByRole("article")).toHaveCount(5);

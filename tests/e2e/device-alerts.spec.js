@@ -115,8 +115,8 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
   await addSubscription(page, {
     name: "Renewal Monitor",
     amount: 12.5,
-    date: "2026-07-24",
-    trialDate: "2026-07-26",
+    date: "2026-07-26",
+    trialDate: "2026-07-24",
     selectedLeadDays: [3],
   });
   await seedExistingLeadDays(page, "Renewal Monitor", [5, 7]);
@@ -131,16 +131,16 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
   const notifications = await page.evaluate(() => window.__outflowNotifications);
   expect(notifications).toEqual(expect.arrayContaining([
     {
-      title: "Outflow / Renewal Monitor bills 5 days",
+      title: "Outflow / Renewal Monitor bills 7 days",
       options: {
-        body: "$12.50 will leave on Fri, Jul 24 / Notify Lab / household local ledger.",
+        body: "$12.50 will leave on Sun, Jul 26 / Notify Lab / household local ledger.",
         tag: expect.stringContaining(":charge-"),
       },
     },
     {
-      title: "Outflow / Renewal Monitor trial ends 7 days",
+      title: "Outflow / Renewal Monitor trial ends 5 days",
       options: {
-        body: "$12.50 expected after the trial ends on Sun, Jul 26 / Notify Lab / household local ledger.",
+        body: "$12.50 expected after the trial ends on Fri, Jul 24 / Notify Lab / household local ledger.",
         tag: expect.stringContaining(":trial-"),
       },
     },
@@ -201,8 +201,8 @@ test("multiple per-subscription lead times can be reduced to one or disabled", a
   await addSubscription(page, {
     name: "Reminder Matrix",
     amount: 21,
-    date: "2026-07-22",
-    trialDate: "2026-07-26",
+    date: "2026-07-26",
+    trialDate: "2026-07-22",
     selectedLeadDays: [3],
   });
   await seedExistingLeadDays(page, "Reminder Matrix", [3, 7]);
@@ -217,8 +217,8 @@ test("multiple per-subscription lead times can be reduced to one or disabled", a
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
   alerts = panel(page, "Alerts");
   await expect(alerts.getByText("Reminder Matrix", { exact: true })).toHaveCount(1);
-  await expect(alerts.getByText("charge", { exact: true })).toBeVisible();
-  await expect(alerts.getByText("trial", { exact: true })).toHaveCount(0);
+  await expect(alerts.getByText("trial", { exact: true })).toBeVisible();
+  await expect(alerts.getByText("charge", { exact: true })).toHaveCount(0);
   await expect(card).toContainText("Alert 3d");
 
   await card.getByRole("button", { name: "Edit", exact: true }).click();

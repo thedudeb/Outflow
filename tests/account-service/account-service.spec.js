@@ -1030,8 +1030,9 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
 
   await expect(dialog.getByText(/Ready\s+2/)).toBeVisible();
   await expect(dialog.getByText(/Duplicate\s+2/)).toBeVisible();
-  await expect(dialog.getByText(/Invalid\s+1/)).toBeVisible();
+  await expect(dialog.getByText(/Invalid\s+2/)).toBeVisible();
   await expect(dialog.getByText("Invalid amount, Invalid reminder lead days", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("First paid charge precedes trial end", { exact: true })).toBeVisible();
   const { violations } = await new AxeBuilder({ page })
     .include('[role="dialog"]')
     .withTags(wcagTags)
@@ -1042,7 +1043,7 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   await expect(nameMapping).toHaveValue("Service");
   await nameMapping.selectOption("");
   await expect(dialog.getByText(/Ready\s+0/)).toBeVisible();
-  await expect(dialog.getByText(/Invalid\s+5/)).toBeVisible();
+  await expect(dialog.getByText(/Invalid\s+6/)).toBeVisible();
   await nameMapping.selectOption("Service");
   await dialog.getByRole("button", { name: "Import 2 subscriptions", exact: true }).click();
   await expect(dialog).toBeHidden();

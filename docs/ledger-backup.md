@@ -33,6 +33,7 @@ Bounded custom reminder values use the same 0-through-365-day, 12-timing limit a
 - Files must identify Outflow, use a supported schema version, remain under 2 MB, and contain no more than 500 subscriptions.
 - Ledger and subscription identifiers accept only ASCII letters, numbers, and hyphens; subscription identifiers must be unique within the file.
 - Every subscription is sanitized using the same limits as records created inside the tracker. A backup containing an invalid record is rejected as a unit.
+- A trial's `nextBillingDate` is its expected first paid charge and cannot precede `trialEndDate`.
 - Restore always presents a preview before changing the current ledger.
 - **Merge** keeps the current ledger and settings, then adds records whose ID and normalized name/amount/currency/cycle key are both new, up to the remaining 500-record ledger capacity.
 - **Replace all** replaces the active ledger's subscriptions, name, and application-level alert settings with the validated backup. Its local workspace slot keeps its existing ID, kind, and storage mode so another ledger cannot be overwritten or impersonated by an imported file.

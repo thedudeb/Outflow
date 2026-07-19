@@ -753,6 +753,24 @@ insert into public.subscriptions (
 
 do $$
 begin
+  begin
+    insert into public.subscriptions (
+      ledger_id, id, name, amount, currency, cycle, next_billing_date, category, tags, color,
+      trial_end_date, reminder_lead_days, paused, created_by, updated_by, source_created_by, source_updated_by
+    ) values (
+      'personal-ledger', 'invalid-trial-order', 'Early charge', 12, 'USD', 'monthly', current_date + 2,
+      'Software', array[]::text[], '#ef4444', current_date + 3, array[1], false,
+      '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
+    );
+    raise exception 'subscription accepted a first paid charge before its trial end';
+  exception
+    when check_violation then null;
+  end;
+end;
+$$;
+
+do $$
+begin
   if public.advance_notification_date('2024-01-31', 'monthly', '2024-02-01') <> '2024-02-29'::date then
     raise exception 'leap-year month-end notification date did not clamp to February 29';
   end if;

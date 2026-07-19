@@ -270,6 +270,15 @@ function isValidDate(value) {
   return Number.isFinite(parsed.getTime()) && toDateInput(parsed) === value;
 }
 
+function alignTrialBillingDate(nextBillingDate, trialEndDate) {
+  if (!isValidDate(nextBillingDate) || !isValidDate(trialEndDate)) return nextBillingDate;
+  return nextBillingDate < trialEndDate ? trialEndDate : nextBillingDate;
+}
+
+function hasPendingTrial(subscription, today = new Date()) {
+  return Boolean(subscription.trialEndDate && subscription.trialEndDate >= toDateInput(today));
+}
+
 function isValidTimestamp(value) {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -366,7 +375,7 @@ function sanitizeSubscription(value) {
     amount,
     currency,
     cycle: value.cycle,
-    nextBillingDate: value.nextBillingDate,
+    nextBillingDate: alignTrialBillingDate(value.nextBillingDate, trialEndDate),
     category: category || "Unsorted",
     tags,
     color: validColors.has(value.color) ? value.color : colorTags[0].value,
@@ -535,6 +544,13 @@ function parseLedgerBackup(value, permission = "default") {
 
   const subscriptions = value.subscriptions.map(sanitizeSubscription);
   if (subscriptions.some((subscription) => !subscription)) throw new TypeError("One or more backup subscriptions are invalid.");
+  if (value.subscriptions.some((subscription) => (
+    isValidDate(subscription?.nextBillingDate)
+      && isValidDate(subscription?.trialEndDate)
+      && subscription.nextBillingDate < subscription.trialEndDate
+  ))) {
+    throw new TypeError("A backup first paid charge cannot precede its trial end date.");
+  }
 
   return {
     exportedAt: typeof value.exportedAt === "string" && Number.isFinite(Date.parse(value.exportedAt)) ? value.exportedAt : "",
@@ -914,6 +930,7 @@ function buildCsvCandidates(rows, mapping, existingSubscriptions) {
     if (!cycle) errors.push("Invalid billing cycle");
     if (!nextBillingDate) errors.push("Invalid next billing date");
     if (trialText && !trialEndDate) errors.push("Invalid trial end date");
+    if (nextBillingDate && trialEndDate && nextBillingDate < trialEndDate) errors.push("First paid charge precedes trial end");
     if (
       reminderText &&
       !reminderOff &&
@@ -2137,6 +2154,14 @@ function Tracker({ onExit, pwa }) {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  function updateTrialEndDate(value) {
+    setForm((current) => ({
+      ...current,
+      trialEndDate: value,
+      nextBillingDate: alignTrialBillingDate(current.nextBillingDate, value),
+    }));
+  }
+
   function recordGuestAccountActivity() {
     if (usingCloudLedger || accountSession) return;
     setAccountNudge((current) => recordAccountNudgeActivity(current));
@@ -3337,11 +3362,12 @@ function Tracker({ onExit, pwa }) {
               </div>
             </div>
 
-            <Field label="Next billing date">
+            <Field label={form.trialEndDate ? "First paid charge" : "Next billing date"}>
               <input
                 type="date"
                 value={form.nextBillingDate}
                 onInput={(event) => updateField("nextBillingDate", event.currentTarget.value)}
+                min={form.trialEndDate || undefined}
                 required
                 className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
               />
@@ -3371,7 +3397,7 @@ function Tracker({ onExit, pwa }) {
               <input
                 type="date"
                 value={form.trialEndDate}
-                onInput={(event) => updateField("trialEndDate", event.currentTarget.value)}
+                onInput={(event) => updateTrialEndDate(event.currentTarget.value)}
                 className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
               />
             </Field>
@@ -3979,6 +4005,7 @@ function Tracker({ onExit, pwa }) {
                   {sortedSubscriptions.map((subscription) => {
                     const daysOut = daysBetween(toDateInput(new Date()), subscription.nextBillingDate);
                     const urgent = !subscription.paused && daysOut <= 7;
+                    const pendingTrial = hasPendingTrial(subscription);
 
                     return (
                       <article
@@ -4031,7 +4058,7 @@ function Tracker({ onExit, pwa }) {
                               )}
                               {subscription.trialEndDate && (
                                 <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/80">
-                                  Trial ends {fullDate(subscription.trialEndDate)}
+                                  Trial {pendingTrial ? "ends" : "ended"} {fullDate(subscription.trialEndDate)}
                                 </div>
                               )}
                               {ledgerMeta.kind !== "personal" && (
@@ -4075,7 +4102,9 @@ function Tracker({ onExit, pwa }) {
                         </div>
 
                         <div className="min-w-0 border border-emerald-500/60 bg-emerald-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/70">will pull</div>
+                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/70">
+                            {pendingTrial ? "first paid charge" : "will pull"}
+                          </div>
                           <div className="mt-2 font-mono text-2xl font-black leading-none text-emerald-100">{money(subscription.amount, subscription.currency)}</div>
                           <div className={`mt-3 border-t border-emerald-400/20 pt-3 font-mono ${urgent ? "text-amber-200" : "text-emerald-100"}`}>
                             <div className="text-lg font-black">{fullDate(subscription.nextBillingDate)}</div>

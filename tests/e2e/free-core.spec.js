@@ -49,6 +49,9 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await page.getByRole("textbox", { name: "Category", exact: true }).fill("Wellness");
   await page.getByRole("textbox", { name: "Tags", exact: true }).fill("health, recurring");
   await page.getByLabel("Trial ends", { exact: true }).fill("2026-07-26");
+  const firstPaidCharge = page.getByLabel("First paid charge", { exact: true });
+  await expect(firstPaidCharge).toHaveValue("2026-07-26");
+  await expect(firstPaidCharge).toHaveAttribute("min", "2026-07-26");
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
 
   let card = page.getByRole("article").filter({ hasText: "Gym Membership" });
@@ -57,7 +60,8 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await expect(card).toContainText("Wellness");
   await expect(card).toContainText("health");
   await expect(card).toContainText("recurring");
-  await expect(card).toContainText("Wed, Jul 22");
+  await expect(card).toContainText("first paid charge");
+  await expect(card).toContainText("Sun, Jul 26");
   await expect(card).toContainText("Trial ends Sun, Jul 26");
   await expect(panel(page, "Alerts")).toContainText("Gym Membership");
   await expect(panel(page, "Alerts")).toContainText("Trial ends Sun, Jul 26");
@@ -65,14 +69,14 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await page.reload();
   card = page.getByRole("article").filter({ hasText: "Gym Membership" });
   await expect(card).toHaveCount(1);
-  await expect(card).toContainText("Wed, Jul 22");
+  await expect(card).toContainText("Sun, Jul 26");
 
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Edit subscription", exact: true })).toBeVisible();
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("24");
   await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("USD");
   await page.getByRole("button", { name: "Yearly", exact: true }).click();
-  await page.getByLabel("Next billing date", { exact: true }).fill("2026-08-17");
+  await page.getByLabel("First paid charge", { exact: true }).fill("2026-08-17");
   await page.getByRole("textbox", { name: "Category", exact: true }).fill("Fitness");
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
 
@@ -97,6 +101,31 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await expect(page.getByRole("article")).toHaveCount(5);
   await page.reload();
   await expect(page.getByText("Gym Membership", { exact: true })).toHaveCount(0);
+});
+
+test("trial billing aligns the first charge and becomes a recurring withdrawal after the trial", async ({ page }) => {
+  await openTracker(page);
+  await createEmptyHouseholdLedger(page);
+
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Trial Service");
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("20");
+  await page.getByLabel("Next billing date", { exact: true }).fill("2026-07-20");
+  await page.getByLabel("Trial ends", { exact: true }).fill("2026-08-05");
+  await expect(page.getByLabel("First paid charge", { exact: true })).toHaveValue("2026-08-05");
+  await page.getByRole("button", { name: "Add subscription", exact: true }).click();
+
+  let card = page.getByRole("article").filter({ hasText: "Trial Service" });
+  await expect(card).toContainText("first paid charge");
+  await expect(card).toContainText("Trial ends Wed, Aug 05");
+  await expect(card).toContainText("Wed, Aug 05");
+
+  await page.clock.setFixedTime(new Date("2026-08-06T12:00:00-03:00"));
+  await page.reload();
+  card = page.getByRole("article").filter({ hasText: "Trial Service" });
+  await expect(card).toContainText("will pull");
+  await expect(card).not.toContainText("first paid charge");
+  await expect(card).toContainText("Trial ended Wed, Aug 05");
+  await expect(card).toContainText("Sat, Sep 05");
 });
 
 test("weekly, monthly, and yearly schedules produce exact 30, 60, and 90 day forecasts", async ({ page }) => {
