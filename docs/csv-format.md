@@ -15,6 +15,9 @@ Outflow exports UTF-8 CSV with one subscription per row. The first row contains 
 | `trialEndDate` | No | ISO date: `YYYY-MM-DD` |
 | `reminderLeadDays` | No | Pipe-separated values from `0`, `1`, `3`, `7`, `14`, and `30`; `off` disables reminders |
 | `paused` | No | `true` or `false` |
+| `createdBy` | Export only | Local change attribution label |
+| `updatedBy` | Export only | Most recent local change attribution label |
+| `updatedAt` | Export only | ISO timestamp for the most recent change |
 
 ## Compatibility
 
@@ -22,6 +25,7 @@ Outflow exports UTF-8 CSV with one subscription per row. The first row contains 
 - Common cycle abbreviations such as `wk`, `mo`, and `yr` are normalized.
 - Tag and reminder lists may use pipes, commas, or semicolons.
 - The legacy `reminderDays` column remains importable. A value of `-1` is treated as `off`.
+- Attribution columns are exported for portability and audit context. CSV imports do not trust source attribution; imported records are attributed to the local guest.
 - Duplicate rows are detected using normalized name, amount, currency, and cycle values and are skipped unless the source record is changed.
 
 ## Safety Limits

@@ -1,6 +1,6 @@
 # Outflow Ledger Backup Contract
 
-Outflow's full-ledger backup is the portable boundary between today's local guest ledger and future account synchronization. It preserves subscription records, the personal ledger identity, and application-level alert settings without including browser permissions or notification history.
+Outflow's full-ledger backup is the portable boundary between today's active local ledger and future account synchronization. It preserves that ledger's subscription records, identity metadata, and application-level alert settings without including other local ledgers, browser permissions, or notification history.
 
 ## Envelope
 
@@ -25,7 +25,7 @@ Outflow's full-ledger backup is the portable boundary between today's local gues
 }
 ```
 
-Subscription objects use the same normalized fields documented in [csv-format.md](csv-format.md), plus stable `id`, `revision`, and `updatedAt` values. `tags` and `reminderLeadDays` are JSON arrays rather than delimited strings.
+Subscription objects use the same normalized fields documented in [csv-format.md](csv-format.md), plus stable `id`, `revision`, `updatedAt`, `createdBy`, and `updatedBy` values. `tags` and `reminderLeadDays` are JSON arrays rather than delimited strings.
 
 ## Restore Rules
 
@@ -34,7 +34,7 @@ Subscription objects use the same normalized fields documented in [csv-format.md
 - Every subscription is sanitized using the same limits as records created inside the tracker. A backup containing an invalid record is rejected as a unit.
 - Restore always presents a preview before changing the current ledger.
 - **Merge** keeps the current ledger and settings, then adds records whose ID and normalized name/amount/currency/cycle key are both new, up to the remaining 500-record ledger capacity.
-- **Replace all** replaces subscriptions, ledger identity, and application-level alert settings with the validated backup.
+- **Replace all** replaces the active ledger's subscriptions, name, and application-level alert settings with the validated backup. Its local workspace slot keeps its existing ID, kind, and storage mode so another ledger cannot be overwritten or impersonated by an imported file.
 - Restored active billing dates are advanced to their next valid cycle when necessary. Paused dates remain unchanged.
 - Browser notification permission is never granted or transferred by a backup.
 
@@ -44,6 +44,7 @@ Subscription objects use the same normalized fields documented in [csv-format.md
 - Previously delivered notification IDs
 - Install state and service-worker caches
 - CSV import sessions or temporary files
+- Other ledgers in the local workspace
 - Account credentials, authentication tokens, payment data, and bank information
 
 ## Guest-To-Account Migration

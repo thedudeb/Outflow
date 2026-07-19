@@ -7,6 +7,8 @@ const LEGACY_STORAGE_KEY = "drain:subscriptions";
 const NOTIFIED_ALERTS_KEY = "outflow:notified-alerts";
 const ALERT_SETTINGS_KEY = "outflow:alert-settings";
 const LEDGER_META_KEY = "outflow:ledger-meta";
+const WORKSPACE_KEY = "outflow:workspace";
+const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 
 const colorTags = [
@@ -26,6 +28,11 @@ const cycles = [
 
 const validCycles = new Set(cycles.map((cycle) => cycle.value));
 const validColors = new Set(colorTags.map((tag) => tag.value));
+const ledgerKinds = [
+  { label: "Household", value: "household" },
+  { label: "Team", value: "team" },
+];
+const validLedgerKinds = new Set(["personal", ...ledgerKinds.map((kind) => kind.value)]);
 const currencies = ["USD", "CAD", "EUR", "GBP", "AUD", "NZD", "JPY", "CHF"];
 const validCurrencies = new Set(currencies);
 const reminderLeadOptions = [
@@ -56,6 +63,7 @@ const MAX_TAGS = 10;
 const MAX_CSV_BYTES = 2 * 1024 * 1024;
 const MAX_CSV_ROWS = 1000;
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
+const MAX_LEDGERS = 12;
 
 const seedSubscriptions = [
   {
@@ -194,10 +202,12 @@ function sanitizeAlertSettings(value, permission = "default") {
 function sanitizeLedgerMeta(value) {
   const source = value && typeof value === "object" ? value : {};
   const now = new Date().toISOString();
+  const kind = validLedgerKinds.has(source.kind) ? source.kind : "personal";
+  const fallbackName = kind === "household" ? "Household" : kind === "team" ? "Team" : "Personal";
   return {
     id: typeof source.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(source.id) ? source.id : crypto.randomUUID(),
-    name: typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 60) : "Personal",
-    kind: "personal",
+    name: typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 60) : fallbackName,
+    kind,
     storage: "local",
     createdAt: isValidTimestamp(source.createdAt) ? source.createdAt : now,
     updatedAt: isValidTimestamp(source.updatedAt) ? source.updatedAt : now,
@@ -230,6 +240,12 @@ function sanitizeSubscription(value) {
   const reminderLeadDays = sanitizeReminderLeadDays(value.reminderLeadDays, value.reminderDays);
   const revision = Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0;
   const updatedAt = isValidTimestamp(value.updatedAt) ? value.updatedAt : new Date().toISOString();
+  const createdBy = typeof value.createdBy === "string" && value.createdBy.trim()
+    ? value.createdBy.trim().slice(0, 60)
+    : "Local guest";
+  const updatedBy = typeof value.updatedBy === "string" && value.updatedBy.trim()
+    ? value.updatedBy.trim().slice(0, 60)
+    : createdBy;
 
   if (
     !name ||
@@ -243,7 +259,7 @@ function sanitizeSubscription(value) {
   }
 
   return {
-    id: typeof value.id === "string" && value.id.length <= 100 ? value.id : crypto.randomUUID(),
+    id: typeof value.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(value.id) ? value.id : crypto.randomUUID(),
     name,
     amount,
     currency,
@@ -257,12 +273,96 @@ function sanitizeSubscription(value) {
     paused: value.paused === true,
     revision,
     updatedAt,
+    createdBy,
+    updatedBy,
   };
 }
 
 function sanitizeSubscriptions(value) {
   if (!Array.isArray(value)) throw new TypeError("Stored subscriptions must be an array");
   return value.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription).filter(Boolean);
+}
+
+function sanitizeWorkspace(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Workspace root must be an object.");
+  if (value.schemaVersion !== WORKSPACE_SCHEMA_VERSION) throw new TypeError("Workspace version is not supported.");
+  if (!Array.isArray(value.ledgers) || value.ledgers.length < 1 || value.ledgers.length > MAX_LEDGERS) {
+    throw new TypeError(`A workspace must contain between 1 and ${MAX_LEDGERS} ledgers.`);
+  }
+
+  const ledgerIds = new Set();
+  let personalLedgerCount = 0;
+  const ledgers = value.ledgers.map((entry) => {
+    if (!entry || typeof entry !== "object") throw new TypeError("Workspace ledger entries must be objects.");
+    if (!entry.ledger || typeof entry.ledger.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(entry.ledger.id)) {
+      throw new TypeError("Every workspace ledger must have a valid identifier.");
+    }
+    if (!validLedgerKinds.has(entry.ledger.kind)) throw new TypeError("Workspace ledger kind is invalid.");
+    if (!Array.isArray(entry.subscriptions)) throw new TypeError("Every workspace ledger must have a subscription list.");
+    if (entry.subscriptions.length > MAX_SUBSCRIPTIONS) {
+      throw new TypeError(`A workspace ledger may contain at most ${MAX_SUBSCRIPTIONS} subscriptions.`);
+    }
+    if (
+      entry.subscriptions.some(
+        (subscription) => !subscription || typeof subscription.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(subscription.id),
+      )
+    ) {
+      throw new TypeError("Every workspace subscription must have a valid identifier.");
+    }
+    if (new Set(entry.subscriptions.map((subscription) => subscription.id)).size !== entry.subscriptions.length) {
+      throw new TypeError("Subscription identifiers must be unique within a ledger.");
+    }
+    const ledger = sanitizeLedgerMeta(entry.ledger);
+    const subscriptions = entry.subscriptions.map(sanitizeSubscription);
+    if (subscriptions.some((subscription) => !subscription)) {
+      throw new TypeError("One or more workspace subscriptions are invalid.");
+    }
+    if (ledgerIds.has(ledger.id)) throw new TypeError("Workspace ledger identifiers must be unique.");
+    ledgerIds.add(ledger.id);
+    if (ledger.kind === "personal") personalLedgerCount += 1;
+    return {
+      ledger,
+      subscriptions: subscriptions.map((subscription) => normalizeBillingDate(subscription)),
+    };
+  });
+  if (personalLedgerCount !== 1) throw new TypeError("A workspace must contain exactly one personal ledger.");
+  const activeLedgerId = ledgerIds.has(value.activeLedgerId) ? value.activeLedgerId : ledgers[0].ledger.id;
+
+  return {
+    schemaVersion: WORKSPACE_SCHEMA_VERSION,
+    activeLedgerId,
+    ledgers,
+  };
+}
+
+function loadWorkspace() {
+  try {
+    const storedWorkspace = localStorage.getItem(WORKSPACE_KEY);
+    if (storedWorkspace) return sanitizeWorkspace(JSON.parse(storedWorkspace));
+  } catch {
+    // Fall through to the legacy single-ledger migration path.
+  }
+
+  let subscriptions;
+  let ledger;
+  try {
+    const storedSubscriptions = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    subscriptions = sanitizeSubscriptions(storedSubscriptions ? JSON.parse(storedSubscriptions) : seedSubscriptions)
+      .map((subscription) => normalizeBillingDate(subscription));
+  } catch {
+    subscriptions = sanitizeSubscriptions(seedSubscriptions).map((subscription) => normalizeBillingDate(subscription));
+  }
+  try {
+    ledger = sanitizeLedgerMeta(JSON.parse(localStorage.getItem(LEDGER_META_KEY) || "null"));
+  } catch {
+    ledger = sanitizeLedgerMeta(null);
+  }
+
+  return {
+    schemaVersion: WORKSPACE_SCHEMA_VERSION,
+    activeLedgerId: ledger.id,
+    ledgers: [{ ledger, subscriptions }],
+  };
 }
 
 function createLedgerBackup(ledger, subscriptions, alertSettings) {
@@ -341,6 +441,7 @@ function normalizeBillingDate(subscription, today = new Date()) {
         nextBillingDate: normalizedDate,
         revision: subscription.revision + 1,
         updatedAt: new Date().toISOString(),
+        updatedBy: "Outflow",
       };
 }
 
@@ -557,6 +658,9 @@ function subscriptionsToCsv(subscriptions) {
     "trialEndDate",
     "reminderLeadDays",
     "paused",
+    "createdBy",
+    "updatedBy",
+    "updatedAt",
   ];
   const rows = subscriptions.map((subscription) => [
     subscription.name,
@@ -570,6 +674,9 @@ function subscriptionsToCsv(subscriptions) {
     subscription.trialEndDate,
     subscription.reminderLeadDays.join("|"),
     subscription.paused,
+    subscription.createdBy,
+    subscription.updatedBy,
+    subscription.updatedAt,
   ]);
 
   return [columns, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
@@ -687,6 +794,12 @@ function reminderLeadLabel(days) {
   return days.map((value) => value === 0 ? "day-of" : `${value}d`).join(" / ");
 }
 
+function ledgerKindLabel(kind) {
+  if (kind === "household") return "Household";
+  if (kind === "team") return "Team";
+  return "Personal";
+}
+
 function calendarDateParts(value) {
   const date = parseDate(value);
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()];
@@ -705,7 +818,7 @@ function subscriptionCalendarEvent(subscription, ledger) {
     monthly: "FREQ=MONTHLY",
     yearly: "FREQ=YEARLY",
   }[subscription.cycle];
-  const ledgerContext = `${ledger.name} / personal ${ledger.storage} ledger`;
+  const ledgerContext = `${ledger.name} / ${ledger.kind} ${ledger.storage} ledger`;
 
   return {
     productId: "Outflow Subscription Tracker",
@@ -1021,23 +1134,42 @@ function LandingPage({ onOpen, pwa }) {
 }
 
 function Tracker({ onExit, pwa }) {
-  const [subscriptions, setSubscriptions] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-      const parsed = stored ? JSON.parse(stored) : seedSubscriptions;
-      return sanitizeSubscriptions(parsed).map((item) => normalizeBillingDate(item));
-    } catch {
-      return sanitizeSubscriptions(seedSubscriptions).map((item) => normalizeBillingDate(item));
-    }
-  });
-  const [ledgerMeta, setLedgerMeta] = useState(() => {
-    try {
-      return sanitizeLedgerMeta(JSON.parse(localStorage.getItem(LEDGER_META_KEY) || "null"));
-    } catch {
-      return sanitizeLedgerMeta(null);
-    }
-  });
+  const [workspace, setWorkspace] = useState(loadWorkspace);
+  const activeLedgerRecord = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId) || workspace.ledgers[0];
+  const ledgerMeta = activeLedgerRecord.ledger;
+  const subscriptions = activeLedgerRecord.subscriptions;
+
+  function setSubscriptions(nextSubscriptions) {
+    setWorkspace((current) => ({
+      ...current,
+      ledgers: current.ledgers.map((entry) => {
+        if (entry.ledger.id !== current.activeLedgerId) return entry;
+        const next = typeof nextSubscriptions === "function"
+          ? nextSubscriptions(entry.subscriptions)
+          : nextSubscriptions;
+        return {
+          ledger: { ...entry.ledger, updatedAt: new Date().toISOString() },
+          subscriptions: next,
+        };
+      }),
+    }));
+  }
+
+  function setLedgerMeta(nextLedger) {
+    setWorkspace((current) => ({
+      ...current,
+      ledgers: current.ledgers.map((entry) => {
+        if (entry.ledger.id !== current.activeLedgerId) return entry;
+        const next = typeof nextLedger === "function" ? nextLedger(entry.ledger) : nextLedger;
+        return { ...entry, ledger: next };
+      }),
+    }));
+  }
+
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [newLedgerName, setNewLedgerName] = useState("");
+  const [newLedgerKind, setNewLedgerKind] = useState("household");
+  const [deleteLedgerId, setDeleteLedgerId] = useState(null);
   const [backupSession, setBackupSession] = useState(null);
   const [backupError, setBackupError] = useState("");
   const [form, setForm] = useState(blankForm);
@@ -1067,27 +1199,14 @@ function Tracker({ onExit, pwa }) {
   const [csvSession, setCsvSession] = useState(null);
   const [csvMapping, setCsvMapping] = useState({});
   const [csvError, setCsvError] = useState("");
-  const ledgerChangeReady = useRef(false);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
-  }, [subscriptions]);
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
+  }, [workspace]);
 
   useEffect(() => {
     localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
   }, [alertSettings]);
-
-  useEffect(() => {
-    localStorage.setItem(LEDGER_META_KEY, JSON.stringify(ledgerMeta));
-  }, [ledgerMeta]);
-
-  useEffect(() => {
-    if (!ledgerChangeReady.current) {
-      ledgerChangeReady.current = true;
-      return;
-    }
-    setLedgerMeta((current) => ({ ...current, updatedAt: new Date().toISOString() }));
-  }, [subscriptions, alertSettings]);
 
   useEffect(() => {
     if (!alertSettingsOpen) return undefined;
@@ -1103,6 +1222,7 @@ function Tracker({ onExit, pwa }) {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") {
         setLedgerOpen(false);
+        setDeleteLedgerId(null);
         setBackupSession(null);
         setBackupError("");
         setLedgerMeta((current) => sanitizeLedgerMeta(current));
@@ -1123,10 +1243,6 @@ function Tracker({ onExit, pwa }) {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [calendarExportOpen]);
-
-  useEffect(() => {
-    setSubscriptions((current) => current.map((item) => normalizeBillingDate(item)));
-  }, []);
 
   const activeSubscriptions = useMemo(
     () => subscriptions.filter((subscription) => !subscription.paused),
@@ -1231,23 +1347,25 @@ function Tracker({ onExit, pwa }) {
     try {
       const stored = JSON.parse(localStorage.getItem(NOTIFIED_ALERTS_KEY) || "[]");
       const notified = new Set(Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : []);
-      const pending = alerts.filter((alert) => !notified.has(alert.id));
+      const pending = alerts
+        .map((alert) => ({ ...alert, deliveryId: `${ledgerMeta.id}:${alert.id}` }))
+        .filter((alert) => !notified.has(alert.deliveryId));
 
       pending.forEach((alert) => {
         const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
-        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}Personal local ledger.`;
+        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} local ledger.`;
         const body = alert.type === "trial"
           ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
           : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
-        new window.Notification(`Outflow / ${title}`, { body, tag: alert.id });
-        notified.add(alert.id);
+        new window.Notification(`Outflow / ${title}`, { body, tag: alert.deliveryId });
+        notified.add(alert.deliveryId);
       });
 
       localStorage.setItem(NOTIFIED_ALERTS_KEY, JSON.stringify([...notified].slice(-200)));
     } catch {
       // Device notifications are best-effort; the in-app alert remains available.
     }
-  }, [alerts, alertSettings.deviceEnabled, notificationPermission]);
+  }, [alerts, alertSettings.deviceEnabled, notificationPermission, ledgerMeta.id, ledgerMeta.kind, ledgerMeta.name]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1286,6 +1404,8 @@ function Tracker({ onExit, pwa }) {
       paused: form.paused,
       revision: existingSubscription ? existingSubscription.revision + 1 : 0,
       updatedAt: new Date().toISOString(),
+      createdBy: existingSubscription?.createdBy || "Local guest",
+      updatedBy: "Local guest",
     });
 
     if (!payload) return;
@@ -1329,6 +1449,7 @@ function Tracker({ onExit, pwa }) {
           ...normalizeBillingDate({ ...subscription, paused: !subscription.paused }),
           revision: subscription.revision + 1,
           updatedAt: new Date().toISOString(),
+          updatedBy: "Local guest",
         } : subscription,
       ),
     );
@@ -1407,9 +1528,63 @@ function Tracker({ onExit, pwa }) {
 
   function closeLedgerControls() {
     setLedgerOpen(false);
+    setDeleteLedgerId(null);
     setBackupSession(null);
     setBackupError("");
     setLedgerMeta((current) => sanitizeLedgerMeta(current));
+  }
+
+  function switchLedger(id) {
+    if (!workspace.ledgers.some((entry) => entry.ledger.id === id)) return;
+    setWorkspace((current) => ({ ...current, activeLedgerId: id }));
+    resetForm();
+    setDeleteLedgerId(null);
+    setBackupSession(null);
+    setBackupError("");
+    setLedgerOpen(false);
+    setCalendarCursor(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    setSelectedDate(toDateInput(new Date()));
+  }
+
+  function createLocalLedger(event) {
+    event.preventDefault();
+    if (workspace.ledgers.length >= MAX_LEDGERS) return;
+    const name = newLedgerName.trim().slice(0, 60);
+    if (!name || !ledgerKinds.some((kind) => kind.value === newLedgerKind)) return;
+    const ledger = sanitizeLedgerMeta({ name, kind: newLedgerKind });
+    setWorkspace((current) => current.ledgers.length >= MAX_LEDGERS ? current : ({
+      ...current,
+      activeLedgerId: ledger.id,
+      ledgers: [...current.ledgers, { ledger, subscriptions: [] }],
+    }));
+    setNewLedgerName("");
+    setNewLedgerKind("household");
+    setDeleteLedgerId(null);
+    setBackupSession(null);
+    resetForm();
+    setLedgerOpen(false);
+  }
+
+  function deleteLocalLedger(id) {
+    const target = workspace.ledgers.find((entry) => entry.ledger.id === id);
+    if (!target || target.ledger.kind === "personal") return;
+    if (deleteLedgerId !== id) {
+      setDeleteLedgerId(id);
+      return;
+    }
+    setWorkspace((current) => {
+      const ledgers = current.ledgers.filter((entry) => entry.ledger.id !== id);
+      const fallback = ledgers.find((entry) => entry.ledger.kind === "personal") || ledgers[0];
+      return {
+        ...current,
+        activeLedgerId: current.activeLedgerId === id ? fallback.ledger.id : current.activeLedgerId,
+        ledgers,
+      };
+    });
+    setDeleteLedgerId(null);
+    setBackupSession(null);
+    resetForm();
+    setLedgerOpen(false);
   }
 
   function exportLedgerBackup() {
@@ -1460,7 +1635,11 @@ function Tracker({ onExit, pwa }) {
     if (!backupSession) return;
     setSubscriptions(backupSession.subscriptions.map((subscription) => normalizeBillingDate(subscription)));
     setAlertSettings(backupSession.alertSettings);
-    setLedgerMeta({ ...backupSession.ledger, storage: "local", kind: "personal", updatedAt: new Date().toISOString() });
+    setLedgerMeta((current) => ({
+      ...current,
+      name: backupSession.ledger.name,
+      updatedAt: new Date().toISOString(),
+    }));
     closeLedgerControls();
   }
 
@@ -1782,7 +1961,7 @@ function Tracker({ onExit, pwa }) {
                   <span className={`h-2 w-2 ${pwa.online ? "bg-emerald-400" : "bg-red-400"}`} />
                   <span className="max-w-40 truncate">{ledgerMeta.name}</span>
                   <span className="text-zinc-700">/</span>
-                  <span className="text-zinc-500">Local</span>
+                  <span className="text-zinc-500">{ledgerKindLabel(ledgerMeta.kind)} / Local</span>
                 </button>
                 <span className="text-zinc-700">/</span>
                 <span className={pwa.online ? "text-zinc-600" : "text-red-300"}>{pwa.online ? "Online" : "Offline"}</span>
@@ -2156,6 +2335,11 @@ function Tracker({ onExit, pwa }) {
                                   Trial ends {fullDate(subscription.trialEndDate)}
                                 </div>
                               )}
+                              {ledgerMeta.kind !== "personal" && (
+                                <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-red-200/45">
+                                  Updated by {subscription.updatedBy} / {new Date(subscription.updatedAt).toLocaleDateString()}
+                                </div>
+                              )}
                             </div>
                             <button
                               type="button"
@@ -2371,20 +2555,97 @@ function Tracker({ onExit, pwa }) {
             </header>
 
             <div className="min-h-0 flex-1 overflow-auto">
+              <section className="border-b border-zinc-800">
+                <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                  <span>Local ledgers</span>
+                  <span>{workspace.ledgers.length} / {MAX_LEDGERS}</span>
+                </header>
+                <div className="divide-y divide-zinc-900">
+                  {workspace.ledgers.map((entry) => {
+                    const active = entry.ledger.id === workspace.activeLedgerId;
+                    const deleting = deleteLedgerId === entry.ledger.id;
+                    return (
+                      <div key={entry.ledger.id} className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 ${active ? "bg-amber-950/15" : ""}`}>
+                        <button
+                          type="button"
+                          onClick={() => switchLedger(entry.ledger.id)}
+                          aria-current={active ? "true" : undefined}
+                          className="min-w-0 text-left"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className={`h-2.5 w-2.5 shrink-0 ${active ? "bg-amber-400" : "bg-zinc-700"}`} />
+                            <span className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{entry.ledger.name}</span>
+                            {active && <span className="border border-amber-800 px-1.5 py-0.5 font-mono text-[8px] uppercase text-amber-300">Active</span>}
+                          </span>
+                          <span className="mt-1 block pl-[18px] font-mono text-[10px] uppercase text-zinc-600">
+                            {ledgerKindLabel(entry.ledger.kind)} / {entry.subscriptions.length} records / local only
+                          </span>
+                        </button>
+                        {entry.ledger.kind !== "personal" && (
+                          <button
+                            type="button"
+                            onClick={() => deleteLocalLedger(entry.ledger.id)}
+                            className={`h-8 border px-2 font-mono text-[9px] font-black uppercase ${
+                              deleting
+                                ? "border-red-500 bg-red-950/40 text-red-200"
+                                : "border-zinc-800 text-zinc-600 hover:border-red-700 hover:text-red-300"
+                            }`}
+                          >
+                            {deleting ? `Confirm ${entry.subscriptions.length}` : "Delete"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <form onSubmit={createLocalLedger} className="grid gap-2 border-t border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-end">
+                  <Field label="New ledger">
+                    <input
+                      value={newLedgerName}
+                      maxLength={60}
+                      required
+                      placeholder="Home, Studio..."
+                      onChange={(event) => setNewLedgerName(event.target.value.slice(0, 60))}
+                      className="h-10 min-w-0 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                    />
+                  </Field>
+                  <Field label="Kind">
+                    <select
+                      value={newLedgerKind}
+                      onChange={(event) => setNewLedgerKind(event.target.value)}
+                      className="h-10 border border-zinc-700 bg-black px-3 font-mono text-xs uppercase text-zinc-300 outline-none focus:border-amber-400"
+                    >
+                      {ledgerKinds.map((kind) => <option key={kind.value} value={kind.value}>{kind.label}</option>)}
+                    </select>
+                  </Field>
+                  <button
+                    type="submit"
+                    disabled={!newLedgerName.trim() || workspace.ledgers.length >= MAX_LEDGERS}
+                    className="h-10 border border-zinc-600 bg-black px-3 text-xs font-black uppercase tracking-[0.1em] text-zinc-200 hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                  >
+                    Create local
+                  </button>
+                </form>
+                <div className="border-t border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase text-zinc-700">
+                  Local household and team ledgers stay on this browser. Member invitations and sync require the future account service.
+                </div>
+              </section>
+
               <section className="border-b border-zinc-800 p-4">
                 <Field label="Ledger name">
                   <input
                     value={ledgerMeta.name}
                     maxLength={60}
                     onChange={(event) => setLedgerMeta((current) => ({ ...current, name: event.target.value.slice(0, 60), updatedAt: new Date().toISOString() }))}
-                    onBlur={() => setLedgerMeta((current) => ({ ...current, name: current.name.trim() || "Personal" }))}
+                    onBlur={() => setLedgerMeta((current) => ({ ...current, name: current.name.trim() || ledgerKindLabel(current.kind) }))}
                     className="h-10 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
                   />
                 </Field>
 
                 <div className="mt-3 grid grid-cols-2 border border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
                   <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
-                    Kind <span className="ml-1 text-zinc-200">Personal</span>
+                    Kind <span className="ml-1 text-zinc-200">{ledgerKindLabel(ledgerMeta.kind)}</span>
                   </div>
                   <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
                     Storage <span className="ml-1 text-zinc-200">Local</span>
@@ -2500,7 +2761,7 @@ function Tracker({ onExit, pwa }) {
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
-                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Personal local ledger</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">{ledgerKindLabel(ledgerMeta.kind)} local ledger</div>
                 <h2 id="alert-settings-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Alert controls</h2>
               </div>
               <button
