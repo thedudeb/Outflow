@@ -4,6 +4,7 @@ import Papa from "papaparse";
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
 const NOTIFIED_ALERTS_KEY = "outflow:notified-alerts";
+const ALERT_SETTINGS_KEY = "outflow:alert-settings";
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -24,15 +25,15 @@ const validCycles = new Set(cycles.map((cycle) => cycle.value));
 const validColors = new Set(colorTags.map((tag) => tag.value));
 const currencies = ["USD", "CAD", "EUR", "GBP", "AUD", "NZD", "JPY", "CHF"];
 const validCurrencies = new Set(currencies);
-const reminderOptions = [
-  { label: "Off", value: -1 },
+const reminderLeadOptions = [
   { label: "Same day", value: 0 },
   { label: "1 day before", value: 1 },
   { label: "3 days before", value: 3 },
   { label: "7 days before", value: 7 },
   { label: "14 days before", value: 14 },
+  { label: "30 days before", value: 30 },
 ];
-const validReminderDays = new Set(reminderOptions.map((option) => option.value));
+const validReminderLeadDays = new Set(reminderLeadOptions.map((option) => option.value));
 const csvImportFields = [
   { key: "name", label: "Name", required: true, aliases: ["name", "subscription", "service"] },
   { key: "amount", label: "Amount", required: true, aliases: ["amount", "price", "cost"] },
@@ -42,7 +43,7 @@ const csvImportFields = [
   { key: "category", label: "Category", aliases: ["category", "group"] },
   { key: "tags", label: "Tags", aliases: ["tags", "labels"] },
   { key: "trialEndDate", label: "Trial end date", aliases: ["trialenddate", "trialends", "trialdate"] },
-  { key: "reminderDays", label: "Reminder days", aliases: ["reminderdays", "alertdays", "reminder"] },
+  { key: "reminderLeadDays", label: "Reminder lead days", aliases: ["reminderleaddays", "reminderdays", "alertdays", "reminder"] },
   { key: "paused", label: "Paused", aliases: ["paused", "status"] },
   { key: "color", label: "Color", aliases: ["color", "colour", "tagcolor"] },
 ];
@@ -64,7 +65,7 @@ const seedSubscriptions = [
     tags: ["personal", "video"],
     color: "#ef4444",
     trialEndDate: "",
-    reminderDays: 7,
+    reminderLeadDays: [7],
     paused: false,
   },
   {
@@ -78,7 +79,7 @@ const seedSubscriptions = [
     tags: ["personal", "audio"],
     color: "#84cc16",
     trialEndDate: "2026-07-26",
-    reminderDays: 7,
+    reminderLeadDays: [7, 1],
     paused: false,
   },
   {
@@ -92,7 +93,7 @@ const seedSubscriptions = [
     tags: ["cloud"],
     color: "#22d3ee",
     trialEndDate: "",
-    reminderDays: 7,
+    reminderLeadDays: [7],
     paused: false,
   },
   {
@@ -106,7 +107,7 @@ const seedSubscriptions = [
     tags: ["work", "development"],
     color: "#94a3b8",
     trialEndDate: "",
-    reminderDays: 7,
+    reminderLeadDays: [7, 1],
     paused: false,
   },
   {
@@ -120,7 +121,7 @@ const seedSubscriptions = [
     tags: ["work"],
     color: "#f59e0b",
     trialEndDate: "",
-    reminderDays: 7,
+    reminderLeadDays: [14, 3],
     paused: true,
   },
 ];
@@ -135,7 +136,7 @@ const blankForm = {
   tags: "",
   color: colorTags[0].value,
   trialEndDate: "",
-  reminderDays: 7,
+  reminderLeadDays: [7],
   paused: false,
 };
 
@@ -153,6 +154,33 @@ function isValidDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = parseDate(value);
   return Number.isFinite(parsed.getTime()) && toDateInput(parsed) === value;
+}
+
+function sanitizeReminderLeadDays(value, legacyValue) {
+  const source = Array.isArray(value)
+    ? value
+    : value === "" || value == null
+      ? legacyValue === "" || legacyValue == null
+        ? [7]
+        : Number(legacyValue) < 0
+          ? []
+          : [legacyValue]
+      : String(value).split(/[|;,]/);
+
+  return [...new Set(
+    source
+      .map(Number)
+      .filter((days) => validReminderLeadDays.has(days)),
+  )].sort((a, b) => b - a);
+}
+
+function sanitizeAlertSettings(value, permission = "default") {
+  const source = value && typeof value === "object" ? value : {};
+  const deviceRequested = typeof source.deviceEnabled === "boolean" ? source.deviceEnabled : permission === "granted";
+  return {
+    deviceEnabled: permission === "granted" && deviceRequested,
+    includePausedSchedules: source.includePausedSchedules === true,
+  };
 }
 
 function sanitizeSubscription(value) {
@@ -178,7 +206,7 @@ function sanitizeSubscription(value) {
     : isValidDate(value.trialEndDate)
       ? value.trialEndDate
       : "";
-  const reminderDays = validReminderDays.has(Number(value.reminderDays)) ? Number(value.reminderDays) : 7;
+  const reminderLeadDays = sanitizeReminderLeadDays(value.reminderLeadDays, value.reminderDays);
 
   if (
     !name ||
@@ -202,7 +230,7 @@ function sanitizeSubscription(value) {
     tags,
     color: validColors.has(value.color) ? value.color : colorTags[0].value,
     trialEndDate,
-    reminderDays,
+    reminderLeadDays,
     paused: value.paused === true,
   };
 }
@@ -390,38 +418,42 @@ function weeklyForecast(events, days) {
   });
 }
 
-function buildAlerts(subscriptions, today = toDateInput(new Date())) {
+function buildAlerts(subscriptions, includePausedSchedules = false, today = toDateInput(new Date())) {
   return subscriptions
-    .filter((subscription) => !subscription.paused && subscription.reminderDays >= 0)
+    .filter((subscription) => (!subscription.paused || includePausedSchedules) && subscription.reminderLeadDays.length > 0)
     .flatMap((subscription) => {
       const alerts = [];
       const chargeDays = daysBetween(today, subscription.nextBillingDate);
 
-      if (chargeDays >= 0 && chargeDays <= subscription.reminderDays) {
+      if (chargeDays >= 0 && subscription.reminderLeadDays.includes(chargeDays)) {
         alerts.push({
-          id: `charge-${subscription.id}-${subscription.nextBillingDate}`,
+          id: `charge-${subscription.id}-${subscription.nextBillingDate}-${chargeDays}`,
           type: "charge",
           name: subscription.name,
           date: subscription.nextBillingDate,
           daysOut: chargeDays,
+          leadDays: chargeDays,
           amount: subscription.amount,
           currency: subscription.currency,
           color: subscription.color,
+          paused: subscription.paused,
         });
       }
 
       if (subscription.trialEndDate) {
         const trialDays = daysBetween(today, subscription.trialEndDate);
-        if (trialDays >= 0 && trialDays <= subscription.reminderDays) {
+        if (trialDays >= 0 && subscription.reminderLeadDays.includes(trialDays)) {
           alerts.push({
-            id: `trial-${subscription.id}-${subscription.trialEndDate}`,
+            id: `trial-${subscription.id}-${subscription.trialEndDate}-${trialDays}`,
             type: "trial",
             name: subscription.name,
             date: subscription.trialEndDate,
             daysOut: trialDays,
+            leadDays: trialDays,
             amount: subscription.amount,
             currency: subscription.currency,
             color: subscription.color,
+            paused: subscription.paused,
           });
         }
       }
@@ -448,7 +480,7 @@ function subscriptionsToCsv(subscriptions) {
     "tags",
     "color",
     "trialEndDate",
-    "reminderDays",
+    "reminderLeadDays",
     "paused",
   ];
   const rows = subscriptions.map((subscription) => [
@@ -461,7 +493,7 @@ function subscriptionsToCsv(subscriptions) {
     subscription.tags.join("|"),
     subscription.color,
     subscription.trialEndDate,
-    subscription.reminderDays,
+    subscription.reminderLeadDays.join("|"),
     subscription.paused,
   ]);
 
@@ -520,8 +552,13 @@ function buildCsvCandidates(rows, mapping, existingSubscriptions) {
     const nextBillingDate = normalizeCsvDate(value("nextBillingDate"));
     const trialText = String(value("trialEndDate") || "").trim();
     const trialEndDate = trialText ? normalizeCsvDate(trialText) : "";
-    const reminderText = String(value("reminderDays") || "").trim();
-    const reminderDays = reminderText === "" ? 7 : Number(reminderText);
+    const reminderText = String(value("reminderLeadDays") || "").trim();
+    const reminderParts = reminderText.split(/[|;,]/).map((days) => days.trim());
+    const reminderValues = reminderParts.map(Number);
+    const reminderOff = ["off", "-1"].includes(reminderText.toLowerCase());
+    const reminderLeadDays = reminderOff
+      ? []
+      : sanitizeReminderLeadDays(reminderText, reminderText === "" ? 7 : null);
     const errors = [];
 
     if (!String(value("name") || "").trim()) errors.push("Missing name");
@@ -530,7 +567,11 @@ function buildCsvCandidates(rows, mapping, existingSubscriptions) {
     if (!cycle) errors.push("Invalid billing cycle");
     if (!nextBillingDate) errors.push("Invalid next billing date");
     if (trialText && !trialEndDate) errors.push("Invalid trial end date");
-    if (!validReminderDays.has(reminderDays)) errors.push("Invalid reminder days");
+    if (
+      reminderText &&
+      !reminderOff &&
+      reminderValues.some((days, index) => !reminderParts[index] || !validReminderLeadDays.has(days))
+    ) errors.push("Invalid reminder lead days");
 
     const subscription = errors.length ? null : sanitizeSubscription({
       id: crypto.randomUUID(),
@@ -543,7 +584,7 @@ function buildCsvCandidates(rows, mapping, existingSubscriptions) {
       tags: String(value("tags") || "").split(/[|;,]/),
       color: value("color"),
       trialEndDate,
-      reminderDays,
+      reminderLeadDays,
       paused: normalizeCsvBoolean(value("paused")),
     });
 
@@ -564,6 +605,11 @@ function dayLabel(daysOut) {
   if (daysOut === 0) return "today";
   if (daysOut === 1) return "tomorrow";
   return `${daysOut} days`;
+}
+
+function reminderLeadLabel(days) {
+  if (!days.length) return "off";
+  return days.map((value) => value === 0 ? "day-of" : `${value}d`).join(" / ");
 }
 
 function initials(name) {
@@ -865,6 +911,15 @@ function Tracker({ onExit, pwa }) {
   const [notificationPermission, setNotificationPermission] = useState(() =>
     typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported",
   );
+  const [alertSettings, setAlertSettings] = useState(() => {
+    const permission = typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported";
+    try {
+      return sanitizeAlertSettings(JSON.parse(localStorage.getItem(ALERT_SETTINGS_KEY) || "null"), permission);
+    } catch {
+      return sanitizeAlertSettings(null, permission);
+    }
+  });
+  const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
   const [calendarCursor, setCalendarCursor] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -878,6 +933,19 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
   }, [subscriptions]);
+
+  useEffect(() => {
+    localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
+  }, [alertSettings]);
+
+  useEffect(() => {
+    if (!alertSettingsOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setAlertSettingsOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [alertSettingsOpen]);
 
   useEffect(() => {
     setSubscriptions((current) => current.map((item) => normalizeBillingDate(item)));
@@ -946,7 +1014,10 @@ function Tracker({ onExit, pwa }) {
   const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.count), 0);
   const calendarMonthTotals = totalsByCurrency(calendarEvents);
   const nextCharge = timeline[0];
-  const alerts = useMemo(() => buildAlerts(subscriptions), [subscriptions]);
+  const alerts = useMemo(
+    () => buildAlerts(subscriptions, alertSettings.includePausedSchedules),
+    [subscriptions, alertSettings.includePausedSchedules],
+  );
   const csvCandidates = useMemo(
     () => csvSession ? buildCsvCandidates(csvSession.rows, csvMapping, subscriptions) : [],
     [csvSession, csvMapping, subscriptions],
@@ -954,11 +1025,12 @@ function Tracker({ onExit, pwa }) {
   const importableCandidates = csvCandidates.filter((candidate) => candidate.subscription && !candidate.duplicate);
   const invalidImportCount = csvCandidates.filter((candidate) => candidate.errors.length > 0).length;
   const duplicateImportCount = csvCandidates.filter((candidate) => candidate.duplicate).length;
+  const configuredAlertCount = subscriptions.filter((subscription) => subscription.reminderLeadDays.length > 0).length;
   const availableImportSlots = Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
   const importConfirmCount = Math.min(importableCandidates.length, availableImportSlots);
 
   useEffect(() => {
-    if (notificationPermission !== "granted" || alerts.length === 0) return;
+    if (!alertSettings.deviceEnabled || notificationPermission !== "granted" || alerts.length === 0) return;
 
     try {
       const stored = JSON.parse(localStorage.getItem(NOTIFIED_ALERTS_KEY) || "[]");
@@ -967,9 +1039,10 @@ function Tracker({ onExit, pwa }) {
 
       pending.forEach((alert) => {
         const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
+        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}Personal local ledger.`;
         const body = alert.type === "trial"
-          ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)}.`
-          : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)}.`;
+          ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
+          : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
         new window.Notification(`Outflow / ${title}`, { body, tag: alert.id });
         notified.add(alert.id);
       });
@@ -978,10 +1051,19 @@ function Tracker({ onExit, pwa }) {
     } catch {
       // Device notifications are best-effort; the in-app alert remains available.
     }
-  }, [alerts, notificationPermission]);
+  }, [alerts, alertSettings.deviceEnabled, notificationPermission]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleReminderLeadDay(days) {
+    setForm((current) => ({
+      ...current,
+      reminderLeadDays: current.reminderLeadDays.includes(days)
+        ? current.reminderLeadDays.filter((value) => value !== days)
+        : [...current.reminderLeadDays, days].sort((a, b) => b - a),
+    }));
   }
 
   function resetForm() {
@@ -1003,7 +1085,7 @@ function Tracker({ onExit, pwa }) {
       tags: form.tags,
       color: form.color,
       trialEndDate: form.trialEndDate,
-      reminderDays: Number(form.reminderDays),
+      reminderLeadDays: form.reminderLeadDays,
       paused: form.paused,
     });
 
@@ -1031,7 +1113,7 @@ function Tracker({ onExit, pwa }) {
       tags: subscription.tags.join(", "),
       color: subscription.color,
       trialEndDate: subscription.trialEndDate,
-      reminderDays: subscription.reminderDays,
+      reminderLeadDays: subscription.reminderLeadDays,
       paused: subscription.paused,
     });
   }
@@ -1069,6 +1151,19 @@ function Tracker({ onExit, pwa }) {
     if (!("Notification" in window)) return;
     const permission = await window.Notification.requestPermission();
     setNotificationPermission(permission);
+    setAlertSettings((current) => ({ ...current, deviceEnabled: permission === "granted" }));
+  }
+
+  async function setDeviceAlertsEnabled(enabled) {
+    if (!enabled) {
+      setAlertSettings((current) => ({ ...current, deviceEnabled: false }));
+      return;
+    }
+    if (notificationPermission !== "granted") {
+      await requestDeviceAlerts();
+      return;
+    }
+    setAlertSettings((current) => ({ ...current, deviceEnabled: true }));
   }
 
   function exportCsv() {
@@ -1281,27 +1376,46 @@ function Tracker({ onExit, pwa }) {
               />
             </Field>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              <Field label="Trial ends">
-                <input
-                  type="date"
-                  value={form.trialEndDate}
-                  onInput={(event) => updateField("trialEndDate", event.currentTarget.value)}
-                  className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
-                />
-              </Field>
+            <Field label="Trial ends">
+              <input
+                type="date"
+                value={form.trialEndDate}
+                onInput={(event) => updateField("trialEndDate", event.currentTarget.value)}
+                className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+              />
+            </Field>
 
-              <Field label="Alert timing">
-                <select
-                  value={form.reminderDays}
-                  onChange={(event) => updateField("reminderDays", Number(event.target.value))}
-                  className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
-                >
-                  {reminderOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </Field>
+            <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+              <div className="flex items-center justify-between gap-3">
+                <span>Alert lead times</span>
+                <span className={form.reminderLeadDays.length ? "font-mono text-amber-300" : "font-mono text-zinc-700"}>
+                  {form.reminderLeadDays.length ? `${form.reminderLeadDays.length} armed` : "Off"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 border border-zinc-700 bg-zinc-950" role="group" aria-label="Alert lead times">
+                {reminderLeadOptions.map((option, index) => {
+                  const selected = form.reminderLeadDays.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      title={option.label}
+                      className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 border-zinc-800 font-mono text-[10px] tracking-normal ${
+                        index < 3 ? "border-b" : ""
+                      } ${index % 3 < 2 ? "border-r" : ""} ${
+                        selected ? "bg-zinc-800 text-amber-300" : "bg-black text-zinc-500 hover:text-zinc-200"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleReminderLeadDay(option.value)}
+                        className="h-3 w-3 accent-amber-400"
+                      />
+                      {option.value === 0 ? "DAY" : `${option.value}D`}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
             <Field label="Color tag">
@@ -1402,24 +1516,17 @@ function Tracker({ onExit, pwa }) {
                     Update ready
                   </button>
                 )}
-                {notificationPermission === "default" && (
-                  <button
-                    type="button"
-                    onClick={requestDeviceAlerts}
-                    className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-amber-400 hover:text-amber-300"
-                  >
-                    Enable device alerts
-                  </button>
-                )}
-                {notificationPermission !== "default" && (
-                  <span className={`border px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
-                    notificationPermission === "granted"
-                      ? "border-emerald-700 text-emerald-300"
-                      : "border-zinc-800 text-zinc-600"
-                  }`}>
-                    Alerts {notificationPermission === "granted" ? "on" : notificationPermission}
-                  </span>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setAlertSettingsOpen(true)}
+                  className={`border bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
+                    alertSettings.deviceEnabled && notificationPermission === "granted"
+                      ? "border-emerald-700 text-emerald-300 hover:border-emerald-400"
+                      : "border-zinc-700 text-zinc-400 hover:border-amber-400 hover:text-amber-300"
+                  }`}
+                >
+                  Alert rules / {alertSettings.deviceEnabled && notificationPermission === "granted" ? "On" : "Off"}
+                </button>
                 <button
                   type="button"
                   onClick={() => setImportOpen(true)}
@@ -1459,6 +1566,7 @@ function Tracker({ onExit, pwa }) {
                         }`}>
                           {alert.type}
                         </span>
+                        {alert.paused && <span className="shrink-0 border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] uppercase text-zinc-500">Paused</span>}
                       </div>
                       <div className="mt-1 font-mono text-xs text-zinc-500">
                         {alert.type === "trial" ? "Trial ends" : "Bills"} {fullDate(alert.date)} / {dayLabel(alert.daysOut)}
@@ -1468,7 +1576,7 @@ function Tracker({ onExit, pwa }) {
                   </div>
                 ))
               ) : (
-                <div className="px-3 py-6 text-sm text-zinc-500 md:col-span-2">No charges or trials inside the configured reminder windows.</div>
+                <div className="px-3 py-6 text-sm text-zinc-500 md:col-span-2">No charge or trial reminders are due today.</div>
               )}
             </div>
           </Panel>
@@ -1714,7 +1822,7 @@ function Tracker({ onExit, pwa }) {
                             <div className="px-2 py-1 text-right text-violet-100">{money(monthlyEquivalent(subscription), subscription.currency)}</div>
                           </div>
                           <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-violet-300/60">
-                            Alert {subscription.reminderDays < 0 ? "off" : `${subscription.reminderDays}d before`}
+                            Alert {reminderLeadLabel(subscription.reminderLeadDays)}
                           </div>
                         </div>
 
@@ -1834,6 +1942,75 @@ function Tracker({ onExit, pwa }) {
           </div>
         </section>
       </div>
+
+      {alertSettingsOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alert-settings-title"
+            className="w-full max-w-xl border border-zinc-700 bg-[#090a0b] shadow-2xl"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Personal local ledger</div>
+                <h2 id="alert-settings-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Alert controls</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAlertSettingsOpen(false)}
+                aria-label="Close alert controls"
+                autoFocus
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="divide-y divide-zinc-800">
+              <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-4 hover:bg-zinc-950">
+                <span className="min-w-0">
+                  <span className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Device notifications</span>
+                  <span className="mt-1 block font-mono text-[10px] uppercase text-zinc-600">
+                    Permission / {notificationPermission}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={alertSettings.deviceEnabled}
+                  disabled={notificationPermission === "unsupported"}
+                  onChange={(event) => void setDeviceAlertsEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-amber-400 disabled:opacity-30"
+                />
+              </label>
+
+              <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 py-4 hover:bg-zinc-950">
+                <span className="min-w-0">
+                  <span className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Paused schedule alerts</span>
+                  <span className="mt-1 block font-mono text-[10px] uppercase text-zinc-600">
+                    Scope / {alertSettings.includePausedSchedules ? "included" : "excluded"}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={alertSettings.includePausedSchedules}
+                  onChange={(event) => setAlertSettings((current) => ({ ...current, includePausedSchedules: event.target.checked }))}
+                  className="h-5 w-5 accent-amber-400"
+                />
+              </label>
+            </div>
+
+            <footer className="grid grid-cols-2 border-t border-zinc-800 font-mono text-[10px] uppercase text-zinc-600">
+              <div className="border-r border-zinc-800 px-4 py-3">
+                Configured <span className="text-zinc-200">{configuredAlertCount}</span>
+              </div>
+              <div className="px-4 py-3 text-right">
+                Due today <span className="text-amber-300">{alerts.length}</span>
+              </div>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {importOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
