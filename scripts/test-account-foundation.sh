@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if ! command -v initdb >/dev/null 2>&1 && command -v pg_config >/dev/null 2>&1; then
+  PATH="$(pg_config --bindir):$PATH"
+  export PATH
+fi
+
 for command in initdb pg_ctl createdb psql; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Missing PostgreSQL command: $command" >&2

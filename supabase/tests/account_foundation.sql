@@ -723,11 +723,23 @@ insert into public.subscriptions (
 
 do $$
 begin
-  if public.advance_notification_date('2024-01-31', 'monthly', '2024-02-01') <> '2024-03-02'::date then
-    raise exception 'monthly notification date does not match browser rollover behavior';
+  if public.advance_notification_date('2024-01-31', 'monthly', '2024-02-01') <> '2024-02-29'::date then
+    raise exception 'leap-year month-end notification date did not clamp to February 29';
   end if;
-  if public.advance_notification_date('2024-02-29', 'yearly', '2025-01-01') <> '2025-03-01'::date then
-    raise exception 'yearly notification date does not match browser rollover behavior';
+  if public.advance_notification_date('2025-01-31', 'monthly', '2025-02-01') <> '2025-02-28'::date then
+    raise exception 'non-leap month-end notification date did not clamp to February 28';
+  end if;
+  if public.advance_notification_date('2024-01-31', 'monthly', '2024-03-01') <> '2024-03-31'::date then
+    raise exception 'monthly notification recurrence lost its original day after clamping';
+  end if;
+  if public.advance_notification_date('2024-02-29', 'yearly', '2025-01-01') <> '2025-02-28'::date then
+    raise exception 'yearly leap-day notification date did not clamp to February 28';
+  end if;
+  if public.advance_notification_date('2024-02-29', 'yearly', '2026-01-01') <> '2026-02-28'::date then
+    raise exception 'yearly notification recurrence lost its leap-day anchor';
+  end if;
+  if public.advance_notification_date('2026-07-01', 'weekly', '2026-07-16') <> '2026-07-22'::date then
+    raise exception 'weekly notification recurrence changed unexpectedly';
   end if;
 end;
 $$;
