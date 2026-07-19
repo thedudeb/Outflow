@@ -180,6 +180,177 @@ begin
 end;
 $$;
 
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+do $$
+begin
+  if (public.can_invite_to_ledger('team-ledger') ->> 'ledgerName') <> 'Studio' then
+    raise exception 'Pro owner invitation permission was not resolved';
+  end if;
+end;
+$$;
+
+do $$
+begin
+  insert into public.ledger_invitations (
+    ledger_id, email, role, token_hash, invited_by, expires_at
+  ) values (
+    'team-ledger', 'stranger@example.com', 'editor', repeat('a', 64),
+    '11111111-1111-4111-8111-111111111111', now() + interval '7 days'
+  );
+  raise exception 'browser invitation insertion unexpectedly succeeded';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
+insert into public.ledger_invitations (
+  ledger_id, email, role, token_hash, invited_by, expires_at
+) values (
+  'team-ledger',
+  'stranger@example.com',
+  'editor',
+  encode(extensions.digest(convert_to('outflow-invitation-token-12345678901234567890', 'UTF8'), 'sha256'), 'hex'),
+  '11111111-1111-4111-8111-111111111111',
+  now() + interval '7 days'
+);
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+do $$
+begin
+  perform token_hash from public.ledger_invitations where ledger_id = 'team-ledger';
+  raise exception 'invitation token hash unexpectedly exposed';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+do $$
+begin
+  perform public.accept_ledger_invitation('outflow-invitation-token-12345678901234567890');
+  raise exception 'wrong account accepted an invitation';
+exception
+  when invalid_parameter_value then null;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+select public.accept_ledger_invitation('outflow-invitation-token-12345678901234567890') as accepted_invitation;
+
+do $$
+begin
+  if (select role from public.ledger_members where ledger_id = 'team-ledger' and user_id = auth.uid()) <> 'editor' then
+    raise exception 'invited member did not receive editor access';
+  end if;
+  if (select count(*) from public.ledgers) <> 1 then raise exception 'invited member cannot see shared ledger'; end if;
+  if (select count(*) from public.profiles) <> 2 then raise exception 'shared member profiles are not visible'; end if;
+end;
+$$;
+
+update public.ledger_members
+set role = 'viewer'
+where ledger_id = 'team-ledger' and user_id = auth.uid();
+
+do $$
+begin
+  if (select role from public.ledger_members where ledger_id = 'team-ledger' and user_id = auth.uid()) <> 'editor' then
+    raise exception 'member changed their own role';
+  end if;
+end;
+$$;
+
+do $$
+begin
+  perform public.accept_ledger_invitation('outflow-invitation-token-12345678901234567890');
+  raise exception 'accepted invitation token was reused';
+exception
+  when invalid_parameter_value then null;
+end;
+$$;
+
+reset role;
+insert into public.ledger_invitations (
+  ledger_id, email, role, token_hash, invited_by, expires_at, created_at
+) values (
+  'team-ledger',
+  'stranger@example.com',
+  'viewer',
+  encode(extensions.digest(convert_to('outflow-expired-token-1234567890123456789012', 'UTF8'), 'sha256'), 'hex'),
+  '11111111-1111-4111-8111-111111111111',
+  now() - interval '1 day',
+  now() - interval '2 days'
+);
+set role authenticated;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+
+do $$
+begin
+  perform public.accept_ledger_invitation('outflow-expired-token-1234567890123456789012');
+  raise exception 'expired invitation token was accepted';
+exception
+  when invalid_parameter_value then null;
+end;
+$$;
+
+reset role;
+update public.entitlements
+set status = 'revoked', revoked_at = now()
+where user_id = '11111111-1111-4111-8111-111111111111';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+
+do $$
+begin
+  if (select count(*) from public.ledgers) <> 1 then
+    raise exception 'existing shared access was removed with Pro entitlement';
+  end if;
+end;
+$$;
+
+reset role;
+update public.entitlements
+set status = 'active', revoked_at = null
+where user_id = '11111111-1111-4111-8111-111111111111';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+update public.ledger_members
+set role = 'viewer'
+where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222';
+
+do $$
+begin
+  if (select role from public.ledger_members where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222') <> 'viewer' then
+    raise exception 'owner could not change collaborator role';
+  end if;
+end;
+$$;
+
+do $$
+begin
+  update public.ledger_members
+  set role = 'owner'
+  where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222';
+  raise exception 'owner promoted another member to owner role';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+delete from public.ledger_members
+where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222';
+
+do $$
+begin
+  if exists (
+    select 1 from public.ledger_members
+    where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222'
+  ) then raise exception 'owner could not remove collaborator'; end if;
+end;
+$$;
+
 reset role;
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 

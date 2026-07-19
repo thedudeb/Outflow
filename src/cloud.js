@@ -58,7 +58,7 @@ export async function requestAccountLink(email) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");
   const redirect = new URL(window.location.href);
-  redirect.hash = "app";
+  redirect.hash = window.location.hash === "#app" || window.location.hash.startsWith("#app?") ? window.location.hash : "app";
   const { error } = await cloud.auth.signInWithOtp({
     email,
     options: {
@@ -88,6 +88,130 @@ export async function readProEntitlement(userId) {
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+export async function readCloudLedgerAccess(userId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+
+  const { data: ledgers, error: ledgerError } = await cloud
+    .from("ledgers")
+    .select("id, name, kind, owner_id, revision, created_at, updated_at")
+    .order("created_at", { ascending: true });
+  if (ledgerError) throw ledgerError;
+  if (!ledgers?.length) return [];
+
+  const ledgerIds = ledgers.map((ledger) => ledger.id);
+  const { data: members, error: memberError } = await cloud
+    .from("ledger_members")
+    .select("ledger_id, user_id, role, joined_at")
+    .in("ledger_id", ledgerIds)
+    .order("joined_at", { ascending: true });
+  if (memberError) throw memberError;
+
+  const userIds = [...new Set((members || []).map((member) => member.user_id))];
+  let profiles = [];
+  if (userIds.length) {
+    const { data, error } = await cloud
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", userIds);
+    if (error) throw error;
+    profiles = data || [];
+  }
+
+  const ownedLedgerIds = ledgers.filter((ledger) => ledger.owner_id === userId).map((ledger) => ledger.id);
+  let invitations = [];
+  if (ownedLedgerIds.length) {
+    const { data, error } = await cloud
+      .from("ledger_invitations")
+      .select("id, ledger_id, email, role, invited_by, expires_at, accepted_at, created_at")
+      .in("ledger_id", ownedLedgerIds)
+      .is("accepted_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    invitations = data || [];
+  }
+
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  return ledgers.map((ledger) => ({
+    id: ledger.id,
+    name: ledger.name,
+    kind: ledger.kind,
+    ownerId: ledger.owner_id,
+    revision: Number(ledger.revision || 0),
+    createdAt: ledger.created_at,
+    updatedAt: ledger.updated_at,
+    currentRole: ledger.owner_id === userId
+      ? "owner"
+      : members?.find((member) => member.ledger_id === ledger.id && member.user_id === userId)?.role || "viewer",
+    members: (members || [])
+      .filter((member) => member.ledger_id === ledger.id)
+      .map((member) => ({
+        userId: member.user_id,
+        role: member.role,
+        joinedAt: member.joined_at,
+        displayName: profileById.get(member.user_id)?.display_name || "",
+      })),
+    invitations: invitations
+      .filter((invitation) => invitation.ledger_id === ledger.id)
+      .map((invitation) => ({
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expires_at,
+        createdAt: invitation.created_at,
+      })),
+  }));
+}
+
+export async function sendCloudLedgerInvitation({ ledgerId, email, role }) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.functions.invoke("send-ledger-invite", {
+    method: "POST",
+    body: { ledgerId, email, role },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function acceptCloudLedgerInvitation(token) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("accept_ledger_invitation", { invitation_token: token });
+  if (error) throw error;
+  return data;
+}
+
+export async function updateCloudLedgerMemberRole(ledgerId, userId, role) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { error } = await cloud
+    .from("ledger_members")
+    .update({ role })
+    .eq("ledger_id", ledgerId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function removeCloudLedgerMember(ledgerId, userId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { error } = await cloud
+    .from("ledger_members")
+    .delete()
+    .eq("ledger_id", ledgerId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function revokeCloudLedgerInvitation(invitationId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { error } = await cloud.from("ledger_invitations").delete().eq("id", invitationId);
+  if (error) throw error;
 }
 
 export async function deleteCloudAccount() {

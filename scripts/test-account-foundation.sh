@@ -22,7 +22,9 @@ pg_ctl -D "$test_pg_dir" -o "-h 127.0.0.1 -p $test_pg_port -c wal_level=logical"
 createdb -h 127.0.0.1 -p "$test_pg_port" outflow_test
 
 psql -h 127.0.0.1 -p "$test_pg_port" -d outflow_test -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql >/dev/null
-psql -h 127.0.0.1 -p "$test_pg_port" -d outflow_test -v ON_ERROR_STOP=1 -f supabase/migrations/20260719133000_account_foundation.sql >/dev/null
+for migration in supabase/migrations/*.sql; do
+  psql -h 127.0.0.1 -p "$test_pg_port" -d outflow_test -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
+done
 psql -h 127.0.0.1 -p "$test_pg_port" -d outflow_test -v ON_ERROR_STOP=1 -f supabase/tests/account_foundation.sql >/dev/null
 
 echo "Account foundation database tests passed."

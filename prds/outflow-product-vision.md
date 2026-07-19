@@ -22,9 +22,9 @@ The product will remain deliberately narrower than a general personal-finance pl
 ## Current Delivery State
 
 - **Shipped locally:** Guest ledger, subscription CRUD, pause/resume, forecasts, billing calendar, trials, categories, tags, multiple currencies without implied conversion, CSV import/export, configurable device-alert lead times, paused-alert opt-in, versioned active-ledger backup/restore, isolated personal/household/team ledger switching, local change attribution, recurring iCalendar export, installable web metadata, update handling, and verified offline relaunch.
-- **Partially delivered:** Ledger status language, local personal/household/team separation, local attribution, device alerts, downloadable calendar updates, environment-gated passwordless account onboarding, transactional guest-migration schema, RLS policies, and account-deletion infrastructure are present. The selected Supabase, Resend, and Stripe services are not yet provisioned, so remote identity, members, email delivery, durable background notifications, hosted calendar publishing, and Pro entitlements remain unavailable in the default build.
-- **Not yet delivered:** A deployed account service, one-time purchase and restore, cross-device sync, account-backed shared ledgers, invitations and permissions, remote member attribution, connected calendar feeds, native mobile, and native desktop.
-- **Next architecture gate:** Provision a non-production Supabase/Resend environment, apply the migration and deletion function, then prove cross-user RLS isolation and guest-migration/deletion behavior before enabling accounts publicly or adding Stripe fulfillment.
+- **Partially delivered:** Ledger status language, local personal/household/team separation, local attribution, device alerts, downloadable calendar updates, environment-gated passwordless account onboarding, transactional guest-migration schema, owner/editor/viewer permissions, private invitation acceptance, cloud-member controls, RLS policies, and account-deletion infrastructure are present. The selected Supabase, Resend, and Stripe services are not yet provisioned, so remote identity, actual invitation email delivery, durable background notifications, hosted calendar publishing, live synchronization, and Pro purchases remain unavailable in the default build.
+- **Not yet delivered:** A deployed account service, one-time purchase and restore, cross-device sync, deployed account-backed shared ledgers and invitation email delivery, remote member attribution, connected calendar feeds, native mobile, and native desktop.
+- **Next architecture gate:** Provision a non-production Supabase/Resend environment, apply all migrations and account functions, then prove cross-user RLS isolation, guest migration, invitation delivery/acceptance, and deletion behavior before enabling accounts publicly or adding Stripe fulfillment.
 
 ## Problem And Target Users
 
@@ -118,7 +118,7 @@ The product will remain deliberately narrower than a general personal-finance pl
 - Pro users must be able to invite and remove members from household or team ledgers.
 - Shared subscriptions must expose amount, cycle, category, status, next charge, and change attribution to members.
 - The product must prevent shared-ledger totals from being silently included in a user's personal totals.
-- Permission levels and ledger ownership rules must be finalized before public release.
+- Permission levels are fixed at owner, editor, and viewer. Every ledger has one non-transferable owner in the initial release.
 
 ### Notifications
 
@@ -159,7 +159,6 @@ The product will remain deliberately narrower than a general personal-finance pl
 ## Open Questions
 
 - What numeric activation, retention, and Pro-conversion targets should be set after the beta baseline is available?
-- Which shared-ledger permissions are required at launch: owner/member only, view-only access, or more granular roles?
 - How should one-time Pro purchases transfer across app stores and direct web purchases?
 - Should CSV export remain Pro-only, or should basic export be free to reinforce user data ownership?
 - Which currencies and locales should be supported in the first multi-currency release?

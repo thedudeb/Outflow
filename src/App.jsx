@@ -2,13 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { createEvents } from "ics";
 import {
+  acceptCloudLedgerInvitation,
   cloudConfigured,
   cloudConfigError,
   deleteCloudAccount,
   getCloud,
+  readCloudLedgerAccess,
   readProEntitlement,
+  removeCloudLedgerMember,
   requestAccountLink,
+  revokeCloudLedgerInvitation,
+  sendCloudLedgerInvitation,
   uploadGuestWorkspace,
+  updateCloudLedgerMemberRole,
 } from "./cloud";
 
 const STORAGE_KEY = "outflow:subscriptions";
@@ -73,6 +79,18 @@ const MAX_CSV_BYTES = 2 * 1024 * 1024;
 const MAX_CSV_ROWS = 1000;
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
 const MAX_LEDGERS = 12;
+
+function isTrackerHash(hash = window.location.hash) {
+  return hash === "#app" || hash.startsWith("#app?");
+}
+
+function readInviteToken() {
+  const hash = window.location.hash;
+  const queryIndex = hash.indexOf("?");
+  if (!isTrackerHash(hash) || queryIndex < 0) return "";
+  const token = new URLSearchParams(hash.slice(queryIndex + 1)).get("invite") || "";
+  return /^[a-zA-Z0-9_-]{40,128}$/.test(token) ? token : "";
+}
 
 const seedSubscriptions = [
   {
@@ -1186,6 +1204,15 @@ function Tracker({ onExit, pwa }) {
   const [accountSession, setAccountSession] = useState(null);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [cloudLedgers, setCloudLedgers] = useState([]);
+  const [cloudLedgersLoading, setCloudLedgersLoading] = useState(false);
+  const [cloudAccessRefresh, setCloudAccessRefresh] = useState(0);
+  const [managedCloudLedgerId, setManagedCloudLedgerId] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("viewer");
+  const [pendingInviteToken, setPendingInviteToken] = useState(readInviteToken);
+  const [removeMemberArmed, setRemoveMemberArmed] = useState("");
+  const [revokeInviteArmed, setRevokeInviteArmed] = useState("");
   const [cloudClient, setCloudClient] = useState(null);
   const [accountLoading, setAccountLoading] = useState(cloudConfigured);
   const [accountBusy, setAccountBusy] = useState("");
@@ -1295,6 +1322,43 @@ function Tracker({ onExit, pwa }) {
       active = false;
     };
   }, [accountSession?.user?.id]);
+
+  useEffect(() => {
+    const syncInvitation = () => setPendingInviteToken(readInviteToken());
+    window.addEventListener("hashchange", syncInvitation);
+    return () => window.removeEventListener("hashchange", syncInvitation);
+  }, []);
+
+  useEffect(() => {
+    if (pendingInviteToken) setAccountOpen(true);
+  }, [pendingInviteToken]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!userId) {
+      setCloudLedgers([]);
+      setCloudLedgersLoading(false);
+      setManagedCloudLedgerId("");
+      return undefined;
+    }
+    let active = true;
+    setCloudLedgersLoading(true);
+    readCloudLedgerAccess(userId)
+      .then((ledgers) => {
+        if (!active) return;
+        setCloudLedgers(ledgers);
+        setManagedCloudLedgerId((current) => current && ledgers.some((ledger) => ledger.id === current) ? current : "");
+      })
+      .catch((error) => {
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read cloud ledger access.");
+      })
+      .finally(() => {
+        if (active) setCloudLedgersLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountSession?.user?.id, cloudAccessRefresh]);
 
   useEffect(() => {
     if (!alertSettingsOpen) return undefined;
@@ -1431,6 +1495,12 @@ function Tracker({ onExit, pwa }) {
   const workspaceRecordCount = workspace.ledgers.reduce((total, entry) => total + entry.subscriptions.length, 0);
   const sharedWorkspaceCount = workspace.ledgers.filter((entry) => entry.ledger.kind !== "personal").length;
   const cloudUploadRequiresPro = sharedWorkspaceCount > 0 && accountEntitlement?.status !== "active";
+  const managedCloudLedger = cloudLedgers.find((ledger) => ledger.id === managedCloudLedgerId) || null;
+  const canInviteToManagedLedger = Boolean(
+    managedCloudLedger?.currentRole === "owner"
+      && managedCloudLedger.kind !== "personal"
+      && accountEntitlement?.status === "active",
+  );
 
   useEffect(() => {
     if (!alertSettings.deviceEnabled || notificationPermission !== "granted" || alerts.length === 0) return;
@@ -1621,6 +1691,8 @@ function Tracker({ onExit, pwa }) {
     if (accountBusy) return;
     setAccountOpen(false);
     setDeleteAccountArmed(false);
+    setRemoveMemberArmed("");
+    setRevokeInviteArmed("");
     setAccountError("");
     setAccountMessage("");
   }
@@ -1653,6 +1725,7 @@ function Tracker({ onExit, pwa }) {
       const ledgerCount = Number(receipt?.ledgerCount ?? receipt?.ledger_count ?? workspace.ledgers.length);
       const recordCount = Number(receipt?.subscriptionCount ?? receipt?.subscription_count ?? workspaceRecordCount);
       setAccountMessage(`Cloud copy confirmed / ${ledgerCount} ledgers / ${recordCount} records. Local data remains available.`);
+      setCloudAccessRefresh((current) => current + 1);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not upload this workspace.");
     } finally {
@@ -1670,6 +1743,7 @@ function Tracker({ onExit, pwa }) {
       if (error) throw error;
       setAccountSession(null);
       setAccountEntitlement(null);
+      setCloudLedgers([]);
       setAccountMessage("Signed out. Local ledgers remain on this browser.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not sign out.");
@@ -1692,10 +1766,109 @@ function Tracker({ onExit, pwa }) {
       await cloudClient?.auth.signOut({ scope: "local" });
       setAccountSession(null);
       setAccountEntitlement(null);
+      setCloudLedgers([]);
       setDeleteAccountArmed(false);
       setAccountMessage("Cloud account deleted. Local ledgers were not removed.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not delete this cloud account.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function acceptPendingInvitation() {
+    if (!accountSession || !pendingInviteToken || accountBusy) return;
+    setAccountBusy("accept-invite");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const result = await acceptCloudLedgerInvitation(pendingInviteToken);
+      window.history.replaceState(null, "", "#app");
+      setPendingInviteToken("");
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage(`Joined ${result?.ledgerName || "shared ledger"} as ${result?.role || "member"}.`);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not accept this invitation.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function sendLedgerInvite(event) {
+    event.preventDefault();
+    const email = inviteEmail.trim().toLowerCase();
+    if (!canInviteToManagedLedger || !email || accountBusy) return;
+    setAccountBusy("send-invite");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await sendCloudLedgerInvitation({ ledgerId: managedCloudLedger.id, email, role: inviteRole });
+      setInviteEmail("");
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage(`Invitation sent to ${email}.`);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not send this invitation.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function changeCloudMemberRole(userId, role) {
+    if (!canInviteToManagedLedger || accountBusy || !["editor", "viewer"].includes(role)) return;
+    setAccountBusy(`role:${userId}`);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await updateCloudLedgerMemberRole(managedCloudLedger.id, userId, role);
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage(`Member access changed to ${role}.`);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not update this member.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function removeCloudMember(userId) {
+    if (!managedCloudLedger || managedCloudLedger.currentRole !== "owner" || accountBusy) return;
+    const actionId = `${managedCloudLedger.id}:${userId}`;
+    if (removeMemberArmed !== actionId) {
+      setRemoveMemberArmed(actionId);
+      setRevokeInviteArmed("");
+      return;
+    }
+    setAccountBusy(`remove:${userId}`);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await removeCloudLedgerMember(managedCloudLedger.id, userId);
+      setRemoveMemberArmed("");
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage("Member removed from the cloud ledger.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not remove this member.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function revokeCloudInvite(invitationId) {
+    if (!managedCloudLedger || managedCloudLedger.currentRole !== "owner" || accountBusy) return;
+    if (revokeInviteArmed !== invitationId) {
+      setRevokeInviteArmed(invitationId);
+      setRemoveMemberArmed("");
+      return;
+    }
+    setAccountBusy(`revoke:${invitationId}`);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await revokeCloudLedgerInvitation(invitationId);
+      setRevokeInviteArmed("");
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage("Pending invitation revoked.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not revoke this invitation.");
     } finally {
       setAccountBusy("");
     }
@@ -2655,7 +2828,7 @@ function Tracker({ onExit, pwa }) {
                   Cloud <span className={`ml-1 ${cloudConfigured ? "text-emerald-300" : "text-zinc-500"}`}>{cloudConfigured ? "Ready" : "Not configured"}</span>
                 </div>
                 <div className="border-r border-zinc-800 px-3 py-2">
-                  Ledgers <span className="ml-1 text-zinc-200">{workspace.ledgers.length}</span>
+                  Ledgers <span className="ml-1 text-zinc-200">{workspace.ledgers.length}L / {cloudLedgersLoading ? "..." : `${cloudLedgers.length}C`}</span>
                 </div>
                 <div className="px-3 py-2">
                   Entitlement <span className={`ml-1 ${accountEntitlement?.status === "active" ? "text-amber-300" : "text-zinc-400"}`}>
@@ -2703,13 +2876,34 @@ function Tracker({ onExit, pwa }) {
                     {accountBusy === "link" ? "Sending..." : "Email sign-in link"}
                   </button>
                   <div className="font-mono text-[9px] uppercase text-zinc-700 sm:col-span-2">
-                    Creating an account does not upload or remove local ledger data.
+                    {pendingInviteToken
+                      ? "Sign in with the address that received this private invitation. Local ledger data stays untouched."
+                      : "Creating an account does not upload or remove local ledger data."}
                   </div>
                 </form>
               )}
 
               {accountSession && (
                 <>
+                  {pendingInviteToken && (
+                    <section className="grid gap-3 border-b border-amber-900 bg-amber-950/15 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                      <div>
+                        <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-200">Private ledger invitation</div>
+                        <div className="mt-1 font-mono text-[10px] uppercase leading-5 text-zinc-500">
+                          Acceptance is limited to the account email that received this link.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={acceptPendingInvitation}
+                        disabled={Boolean(accountBusy)}
+                        className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300 disabled:opacity-40"
+                      >
+                        {accountBusy === "accept-invite" ? "Joining..." : "Accept invitation"}
+                      </button>
+                    </section>
+                  )}
+
                   <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div className="min-w-0">
                       <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Authenticated identity</div>
@@ -2745,6 +2939,169 @@ function Tracker({ onExit, pwa }) {
                     >
                       {accountBusy === "upload" ? "Uploading..." : "Create cloud copy"}
                     </button>
+                  </section>
+
+                  <section className="border-b border-zinc-800">
+                    <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cloud ledger access</span>
+                      <span className="font-mono text-[10px] uppercase text-cyan-300">
+                        {cloudLedgersLoading ? "Checking" : `${cloudLedgers.length} visible`}
+                      </span>
+                    </header>
+
+                    {!cloudLedgersLoading && cloudLedgers.length === 0 && (
+                      <div className="px-4 py-4 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                        No cloud ledgers yet. Uploading creates a durable copy; live synchronization is not enabled in this build.
+                      </div>
+                    )}
+
+                    {cloudLedgers.map((cloudLedger) => {
+                      const managing = managedCloudLedgerId === cloudLedger.id;
+                      const manageable = cloudLedger.currentRole === "owner" && cloudLedger.kind !== "personal";
+                      return (
+                        <div key={cloudLedger.id} className="border-b border-zinc-900 last:border-b-0">
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{cloudLedger.name}</div>
+                              <div className="mt-1 font-mono text-[9px] uppercase text-zinc-600">
+                                {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / {cloudLedger.members.length} {cloudLedger.members.length === 1 ? "member" : "members"} / cloud copy
+                              </div>
+                            </div>
+                            {manageable && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManagedCloudLedgerId(managing ? "" : cloudLedger.id);
+                                  setInviteEmail("");
+                                  setInviteRole("viewer");
+                                  setRemoveMemberArmed("");
+                                  setRevokeInviteArmed("");
+                                }}
+                                disabled={Boolean(accountBusy)}
+                                aria-expanded={managing}
+                                className="h-8 border border-zinc-700 px-3 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+                              >
+                                {managing ? "Close" : "Members"}
+                              </button>
+                            )}
+                          </div>
+
+                          {managing && managedCloudLedger?.id === cloudLedger.id && (
+                            <div className="border-t border-zinc-800 bg-black/40">
+                              <div className="border-b border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-zinc-600">Active members</div>
+                              {managedCloudLedger.members.map((member) => {
+                                const owner = member.role === "owner";
+                                const actionId = `${managedCloudLedger.id}:${member.userId}`;
+                                const memberName = member.userId === accountSession.user.id
+                                  ? "You"
+                                  : member.displayName || `Member ${member.userId.slice(0, 8)}`;
+                                return (
+                                  <div key={member.userId} className="grid gap-2 border-b border-zinc-900 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_120px_auto] sm:items-center">
+                                    <div className="min-w-0">
+                                      <div className="truncate text-xs font-bold text-zinc-300">{memberName}</div>
+                                      <div className="mt-1 truncate font-mono text-[9px] uppercase text-zinc-700">{member.userId}</div>
+                                    </div>
+                                    {owner ? (
+                                      <div className="font-mono text-[9px] font-black uppercase text-amber-300">Owner</div>
+                                    ) : (
+                                      <select
+                                        value={member.role}
+                                        onChange={(event) => changeCloudMemberRole(member.userId, event.target.value)}
+                                        disabled={Boolean(accountBusy) || !canInviteToManagedLedger}
+                                        aria-label={`Access level for ${memberName}`}
+                                        className="h-8 border border-zinc-700 bg-black px-2 font-mono text-[10px] uppercase text-zinc-300 outline-none focus:border-amber-400 disabled:opacity-40"
+                                      >
+                                        <option value="editor">Editor</option>
+                                        <option value="viewer">Viewer</option>
+                                      </select>
+                                    )}
+                                    {!owner && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeCloudMember(member.userId)}
+                                        disabled={Boolean(accountBusy)}
+                                        className={`h-8 border px-3 font-mono text-[9px] font-black uppercase disabled:opacity-40 ${
+                                          removeMemberArmed === actionId
+                                            ? "border-red-500 bg-red-950/30 text-red-100"
+                                            : "border-red-950 text-red-400 hover:border-red-700"
+                                        }`}
+                                      >
+                                        {accountBusy === `remove:${member.userId}` ? "Removing..." : removeMemberArmed === actionId ? "Confirm" : "Remove"}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {managedCloudLedger.invitations.length > 0 && (
+                                <>
+                                  <div className="border-b border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-zinc-600">Pending invitations</div>
+                                  {managedCloudLedger.invitations.map((invitation) => (
+                                    <div key={invitation.id} className="grid gap-2 border-b border-zinc-900 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                                      <div className="min-w-0">
+                                        <div className="truncate text-xs font-bold text-zinc-300">{invitation.email}</div>
+                                        <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">Expires {shortDate(invitation.expiresAt.slice(0, 10))}</div>
+                                      </div>
+                                      <div className="font-mono text-[9px] uppercase text-zinc-500">{invitation.role}</div>
+                                      <button
+                                        type="button"
+                                        onClick={() => revokeCloudInvite(invitation.id)}
+                                        disabled={Boolean(accountBusy)}
+                                        className={`h-8 border px-3 font-mono text-[9px] font-black uppercase disabled:opacity-40 ${
+                                          revokeInviteArmed === invitation.id
+                                            ? "border-red-500 bg-red-950/30 text-red-100"
+                                            : "border-zinc-800 text-zinc-500 hover:border-red-800 hover:text-red-300"
+                                        }`}
+                                      >
+                                        {accountBusy === `revoke:${invitation.id}` ? "Revoking..." : revokeInviteArmed === invitation.id ? "Confirm" : "Revoke"}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+
+                              {canInviteToManagedLedger ? (
+                                <form onSubmit={sendLedgerInvite} className="grid gap-2 p-4 sm:grid-cols-[minmax(0,1fr)_110px_auto] sm:items-end">
+                                  <Field label="Invite by email">
+                                    <input
+                                      type="email"
+                                      required
+                                      maxLength={254}
+                                      autoComplete="off"
+                                      value={inviteEmail}
+                                      onChange={(event) => setInviteEmail(event.target.value.slice(0, 254))}
+                                      placeholder="member@example.com"
+                                      className="h-9 min-w-0 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                                    />
+                                  </Field>
+                                  <Field label="Access">
+                                    <select
+                                      value={inviteRole}
+                                      onChange={(event) => setInviteRole(event.target.value)}
+                                      className="h-9 border border-zinc-700 bg-black px-2 font-mono text-[10px] uppercase text-zinc-300 outline-none focus:border-amber-400"
+                                    >
+                                      <option value="viewer">Viewer</option>
+                                      <option value="editor">Editor</option>
+                                    </select>
+                                  </Field>
+                                  <button
+                                    type="submit"
+                                    disabled={Boolean(accountBusy) || !inviteEmail.trim()}
+                                    className="h-9 border border-cyan-700 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-300 hover:border-cyan-400 disabled:opacity-40"
+                                  >
+                                    {accountBusy === "send-invite" ? "Sending..." : "Send invite"}
+                                  </button>
+                                </form>
+                              ) : (
+                                <div className="px-4 py-3 font-mono text-[9px] uppercase leading-5 text-zinc-700">
+                                  Pro is required for new invitations and role changes. Existing members remain visible and removable.
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </section>
 
                   <section className="grid gap-3 border-b border-red-950 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -3334,11 +3691,11 @@ function Tracker({ onExit, pwa }) {
 }
 
 function App() {
-  const [trackerOpen, setTrackerOpen] = useState(() => window.location.hash === "#app");
+  const [trackerOpen, setTrackerOpen] = useState(() => isTrackerHash());
   const pwa = useInstallableApp();
 
   useEffect(() => {
-    const syncView = () => setTrackerOpen(window.location.hash === "#app");
+    const syncView = () => setTrackerOpen(isTrackerHash());
     window.addEventListener("popstate", syncView);
     window.addEventListener("hashchange", syncView);
     return () => {

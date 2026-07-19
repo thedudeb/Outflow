@@ -13,6 +13,7 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 - Personal and shared data lives in Postgres with Row Level Security enabled on every exposed table.
 - Membership authorization is enforced in database policies, not inferred from client UI.
 - Guest migration runs as one authenticated database function and returns an idempotent receipt.
+- Shared-ledger invitations use server-generated one-use tokens, database-enforced email matching, and fixed owner/editor/viewer permissions.
 - Realtime can observe ledger, membership, and subscription changes after conflict rules are implemented.
 - Account deletion runs in an authenticated Edge Function because deleting an Auth user requires a server-only secret.
 
@@ -55,14 +56,16 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 3. Upload is explicit. The client calls `migrate_guest_workspace` with the validated versioned workspace.
 4. The database validates the entire payload, applies it transactionally, and returns an idempotent receipt.
 5. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; it does not mark the ledger synchronized.
-6. Signing out never removes the local workspace.
-7. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, and migration receipts while leaving browser-local data untouched.
+6. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
+7. Signing out never removes the local workspace.
+8. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, and migration receipts while leaving browser-local data untouched.
 
 ## Authorization Model
 
 - `owner`: manages ledger identity, members, invitations, subscriptions, and deletion.
 - `editor`: reads the ledger and manages subscriptions.
 - `viewer`: reads the ledger and upcoming schedule.
+- The ledger owner is the only `owner`; collaborators cannot be promoted into ownership. See [Shared Ledger Access](shared-ledgers.md) for the complete matrix.
 - Every remote subscription stores authenticated `created_by` and `updated_by` user IDs. Imported local labels remain separate source-attribution fields and cannot replace authenticated attribution. Those user references become null when an account is deleted so another owner's shared subscription can remain without retaining the deleted identity.
 - Entitlements are readable by their owner but writable only by trusted server code.
 - Creating or migrating household/team ledgers and issuing invitations requires an active lifetime Pro entitlement in database policy. Existing shared data remains readable after an entitlement is refunded or revoked so access to user-owned records is never held hostage.
@@ -72,8 +75,8 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 Before enabling accounts in a public build:
 
 1. Provision Supabase and apply the migration under `supabase/migrations`.
-2. Deploy `supabase/functions/delete-account` with JWT verification enabled.
-3. Configure allowed production and local origins in `OUTFLOW_ALLOWED_ORIGINS`.
+2. Deploy `supabase/functions/delete-account` and `supabase/functions/send-ledger-invite` with JWT verification enabled.
+3. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, and a verified invitation sender.
 4. Connect a verified Resend sending domain to Supabase Auth.
 5. Configure permitted Auth redirect URLs for production and local development.
 6. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
