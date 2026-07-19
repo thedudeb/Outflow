@@ -70,9 +70,16 @@ test("guest Pro gates are contextual and leave the local workspace byte-exact", 
   await reminderGroup.getByRole("checkbox").nth(1).click();
   dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Lifetime Pro / alert timing");
-  await expect(dialog).toContainText("One device reminder per subscription remains free");
+  await expect(dialog).toContainText("One preset device reminder per subscription remains free");
   await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
   await expect(reminderGroup.getByRole("checkbox").nth(1)).not.toBeChecked();
+
+  await page.getByRole("spinbutton", { name: "Custom day / Pro", exact: true }).fill("45");
+  await page.getByRole("button", { name: "Arm", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Add multiple or custom lead times with Pro");
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(page.getByLabel("Custom alert lead times")).toHaveCount(0);
 
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(workspace);
 });

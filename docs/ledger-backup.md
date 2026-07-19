@@ -26,6 +26,7 @@ Outflow's full-ledger backup is the portable boundary between today's active loc
 ```
 
 Subscription objects use the same normalized fields documented in [csv-format.md](csv-format.md), plus stable `id`, `revision`, `updatedAt`, `createdBy`, and `updatedBy` values. `tags` and `reminderLeadDays` are JSON arrays rather than delimited strings.
+Bounded custom reminder values use the same 0-through-365-day, 12-timing limit and survive merge or replacement without being reduced to presets.
 
 ## Restore Rules
 

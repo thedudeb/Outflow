@@ -844,7 +844,7 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   await expect(dialog.getByText(/Ready\s+2/)).toBeVisible();
   await expect(dialog.getByText(/Duplicate\s+2/)).toBeVisible();
   await expect(dialog.getByText(/Invalid\s+1/)).toBeVisible();
-  await expect(dialog.getByText("Invalid amount", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Invalid amount, Invalid reminder lead days", { exact: true })).toBeVisible();
   const { violations } = await new AxeBuilder({ page })
     .include('[role="dialog"]')
     .withTags(wcagTags)
@@ -859,23 +859,28 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   await nameMapping.selectOption("Service");
   await dialog.getByRole("button", { name: "Import 2 subscriptions", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
+  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toContainText("Alert 45d / 1d");
 
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Pro Matrix");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("18.50");
   await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("CAD");
   const leadTimes = page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox");
   await leadTimes.nth(2).check();
+  await page.getByRole("spinbutton", { name: "Custom day / Pro", exact: true }).fill("366");
+  await page.getByRole("button", { name: "Arm", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Enter a whole number from 0 to 365");
+  await page.getByRole("spinbutton", { name: "Custom day / Pro", exact: true }).fill("45");
+  await page.getByRole("button", { name: "Arm", exact: true }).click();
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
 
   const card = page.getByRole("article").filter({ hasText: "Pro Matrix" });
   await expect(card).toContainText("CA$18.50");
-  await expect(card).toContainText("Alert 7d / 3d");
+  await expect(card).toContainText("Alert 45d / 7d / 3d");
   expect(cloudState.checkoutRequests).toHaveLength(0);
 
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
-  await expect(page.getByRole("article").filter({ hasText: "Pro Matrix" })).toContainText("CA$18.50");
+  await expect(page.getByRole("article").filter({ hasText: "Pro Matrix" })).toContainText("Alert 45d / 7d / 3d");
 });
 
 test("entitlement loss preserves existing currency and reminder data without allowing expansion", async ({ page }) => {
@@ -888,14 +893,14 @@ test("entitlement loss preserves existing currency and reminder data without all
     const active = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId);
     const netflix = active.subscriptions.find((subscription) => subscription.name === "Netflix");
     netflix.currency = "CAD";
-    netflix.reminderLeadDays = [7, 1];
+    netflix.reminderLeadDays = [45, 7, 1];
     localStorage.setItem("outflow:workspace", JSON.stringify(workspace));
   });
   await page.reload();
 
   let card = page.getByRole("article").filter({ hasText: "Netflix" });
   await expect(card).toContainText("CA$15.49");
-  await expect(card).toContainText("Alert 7d / 1d");
+  await expect(card).toContainText("Alert 45d / 7d / 1d");
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   const currency = page.getByRole("combobox", { name: "Currency", exact: true });
   await expect(currency.locator('option[value="CAD"]')).not.toHaveAttribute("disabled", "");
@@ -905,11 +910,24 @@ test("entitlement loss preserves existing currency and reminder data without all
   await expect(page.getByRole("dialog", { name: "Account / Pro" })).toHaveCount(0);
   card = page.getByRole("article").filter({ hasText: "Netflix" });
   await expect(card).toContainText("CA$16.00");
-  await expect(card).toContainText("Alert 7d / 1d");
+  await expect(card).toContainText("Alert 45d / 7d / 1d");
+
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Remove custom 45 day lead time", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Custom day / Pro", exact: true }).fill("45");
+  await page.getByRole("button", { name: "Arm", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove custom 45 day lead time", exact: true })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Custom day / Pro", exact: true }).fill("60");
+  await page.getByRole("button", { name: "Arm", exact: true }).click();
+  let accountDialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(accountDialog).toContainText("Lifetime Pro / alert timing");
+  await accountDialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove custom 60 day lead time", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
 
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox").nth(2).click();
-  const accountDialog = page.getByRole("dialog", { name: "Account / Pro" });
+  accountDialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(accountDialog).toContainText("Lifetime Pro / alert timing");
   await expect(accountDialog).toContainText("Existing advanced rules are retained");
   await accountDialog.getByRole("button", { name: "Close account controls", exact: true }).click();

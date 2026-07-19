@@ -16,7 +16,7 @@ function backupSubscription(overrides = {}) {
     tags: ["work", "development"],
     color: "#22d3ee",
     trialEndDate: "",
-    reminderLeadDays: [3, 1],
+    reminderLeadDays: [45, 1],
     paused: false,
     revision: 2,
     updatedAt: timestamp,
@@ -130,13 +130,13 @@ test("backup merge skips ID and content duplicates while preserving active setti
   await expect(dialog.getByText(/Existing\s+2/)).toBeVisible();
   await dialog.getByRole("button", { name: "Merge 1", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
+  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toContainText("Alert 45d / 1d");
   await expect(page.getByRole("article")).toHaveCount(6);
 
   await page.getByRole("button", { name: "Alert rules / Off", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Alert controls" }).getByRole("checkbox", { name: /Paused schedule alerts/ })).toBeChecked();
   await page.reload();
-  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
+  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toContainText("Alert 45d / 1d");
 });
 
 test("backup replacement restores data and settings without replacing the local slot or permission", async ({ page, context }) => {
@@ -177,7 +177,13 @@ test("backup replacement restores data and settings without replacing the local 
     includePausedSchedules: true,
   });
   expect(restored.subscriptions).toHaveLength(1);
-  expect(restored.subscriptions[0]).toMatchObject({ id: "restored-only", name: "Restored Service", amount: 42, currency: "CAD" });
+  expect(restored.subscriptions[0]).toMatchObject({
+    id: "restored-only",
+    name: "Restored Service",
+    amount: 42,
+    currency: "CAD",
+    reminderLeadDays: [45, 1],
+  });
 
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Restored Service" })).toHaveCount(1);

@@ -139,10 +139,15 @@ begin
       select 1 from jsonb_array_elements_text(subscription_data -> 'tags') as tag
       where char_length(tag) not between 1 and 24
     ) then raise exception 'Subscription tags are invalid.'; end if;
-    if jsonb_typeof(subscription_data -> 'reminderLeadDays') <> 'array' then raise exception 'Subscription reminders are invalid.'; end if;
+    if jsonb_typeof(subscription_data -> 'reminderLeadDays') <> 'array'
+      or jsonb_array_length(subscription_data -> 'reminderLeadDays') > 12
+    then raise exception 'Subscription reminders are invalid.'; end if;
     if exists (
       select 1 from jsonb_array_elements_text(subscription_data -> 'reminderLeadDays') as reminder
-      where reminder::integer not in (0, 1, 3, 7, 14, 30)
+      where case
+        when reminder ~ '^(0|[1-9][0-9]{0,2})$' then reminder::integer > 365
+        else true
+      end
     ) then raise exception 'Subscription reminders are invalid.'; end if;
 
     insert into public.subscriptions (

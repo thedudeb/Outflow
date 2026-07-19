@@ -33,7 +33,7 @@ select public.migrate_guest_workspace($workspace$
           "tags": ["personal", "video"],
           "color": "#ef4444",
           "trialEndDate": "",
-          "reminderLeadDays": [7, 1],
+          "reminderLeadDays": [45, 7, 1],
           "paused": false,
           "revision": 2,
           "updatedAt": "2026-07-19T11:00:00.000Z",
@@ -60,7 +60,7 @@ select public.migrate_guest_workspace($workspace$
         {
           "id": "netflix", "name": "Netflix", "amount": 15.49, "currency": "USD", "cycle": "monthly",
           "nextBillingDate": "2026-08-24", "category": "Streaming", "tags": ["personal", "video"],
-          "color": "#ef4444", "trialEndDate": "", "reminderLeadDays": [7, 1], "paused": false,
+          "color": "#ef4444", "trialEndDate": "", "reminderLeadDays": [45, 7, 1], "paused": false,
           "revision": 2, "updatedAt": "2026-07-19T11:00:00.000Z", "createdBy": "Local guest", "updatedBy": "Local guest"
         }
       ]
@@ -74,8 +74,35 @@ begin
   if (select count(*) from public.ledgers) <> 1 then raise exception 'owner should see one ledger'; end if;
   if (select count(*) from public.subscriptions) <> 1 then raise exception 'owner should see one subscription'; end if;
   if (select count(*) from public.migration_receipts) <> 1 then raise exception 'idempotent migration created a second receipt'; end if;
+  if (select reminder_lead_days from public.subscriptions where id = 'netflix') <> array[45, 7, 1] then
+    raise exception 'custom reminder lead day did not survive guest migration';
+  end if;
 end;
 $$;
+
+reset role;
+do $$
+begin
+  begin
+    update public.subscriptions
+    set reminder_lead_days = array[366]
+    where ledger_id = 'personal-ledger' and id = 'netflix';
+    raise exception 'out-of-range reminder lead day was stored';
+  exception
+    when check_violation then null;
+  end;
+  begin
+    update public.subscriptions
+    set reminder_lead_days = array[45, 45]
+    where ledger_id = 'personal-ledger' and id = 'netflix';
+    raise exception 'duplicate reminder lead days were stored';
+  exception
+    when check_violation then null;
+  end;
+end;
+$$;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 
 delete from public.ledger_members
 where ledger_id = 'personal-ledger' and user_id = '11111111-1111-4111-8111-111111111111';
@@ -178,7 +205,7 @@ select public.replace_ledger_snapshot(
   [{
     "id":"figma","name":"Figma","amount":12,"currency":"USD","cycle":"monthly",
     "nextBillingDate":"2026-08-19","category":"Design","tags":["work"],"color":"#8b5cf6",
-    "trialEndDate":"","reminderLeadDays":[7,1],"paused":false,
+    "trialEndDate":"","reminderLeadDays":[45,7,1],"paused":false,
     "revision":0,"updatedAt":"2026-07-19T18:00:00.000Z","createdBy":"Owner","updatedBy":"Owner"
   }]
   $snapshot$::jsonb
@@ -195,6 +222,9 @@ do $$
 begin
   if (select revision from public.ledgers where id = 'team-ledger') <> 1 then raise exception 'ledger revision did not advance once'; end if;
   if (select count(*) from public.subscriptions where ledger_id = 'team-ledger') <> 1 then raise exception 'synchronized subscription was not stored'; end if;
+  if (select reminder_lead_days from public.subscriptions where ledger_id = 'team-ledger' and id = 'figma') <> array[45, 7, 1] then
+    raise exception 'custom reminder lead day did not survive cloud synchronization';
+  end if;
   if (select count(*) from public.ledger_sync_operations where ledger_id = 'team-ledger') <> 1 then raise exception 'idempotent sync created another operation'; end if;
 end;
 $$;
@@ -711,8 +741,8 @@ insert into public.subscriptions (
   trial_end_date, reminder_lead_days, paused, created_by, updated_by, source_created_by, source_updated_by
 ) values
   (
-    'personal-ledger', 'email-due', 'Linear', 10, 'USD', 'monthly', current_date + 7,
-    'Software', array['work'], '#8b5cf6', current_date + 1, array[7, 1], false,
+    'personal-ledger', 'email-due', 'Linear', 10, 'USD', 'monthly', current_date + 45,
+    'Software', array['work'], '#8b5cf6', current_date + 1, array[45, 1], false,
     '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
   ),
   (

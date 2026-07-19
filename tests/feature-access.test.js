@@ -30,10 +30,16 @@ test("Free currency changes are USD-only while existing currency data remains ed
 test("Free reminders allow one lead time and preserve existing advanced rules", () => {
   assert.equal(canUseReminderLeadDays([], null), true);
   assert.equal(canUseReminderLeadDays([7], null), true);
+  assert.equal(canUseReminderLeadDays([45], null), false);
+  assert.equal(canUseReminderLeadDays([45], null, [45]), true);
   assert.equal(canUseReminderLeadDays([7, 1], null), false);
   assert.equal(canUseReminderLeadDays([7, 1], null, [7, 1]), true);
   assert.equal(canUseReminderLeadDays([7, 3], null, [7, 1]), false);
   assert.equal(canUseReminderLeadDays([7, 3], pro), true);
+  assert.equal(canUseReminderLeadDays([365, 45, 1], pro), true);
+  assert.equal(canUseReminderLeadDays(Array.from({ length: 13 }, (_, index) => index + 31), pro), false);
+  assert.equal(canUseReminderLeadDays([366], pro), false);
+  assert.equal(canUseReminderLeadDays([1.5], pro), false);
 });
 
 test("downgraded users can remove and restore existing rules but cannot expand them", () => {
@@ -42,6 +48,8 @@ test("downgraded users can remove and restore existing rules but cannot expand t
   assert.equal(canToggleReminderLeadDay({ days: 1, selectedLeadDays: [7], originalLeadDays }), true);
   assert.equal(canToggleReminderLeadDay({ days: 3, selectedLeadDays: [7], originalLeadDays }), false);
   assert.equal(canToggleReminderLeadDay({ days: 3, selectedLeadDays: [], originalLeadDays }), true);
+  assert.equal(canToggleReminderLeadDay({ days: 45, selectedLeadDays: [], originalLeadDays: [45] }), true);
+  assert.equal(canToggleReminderLeadDay({ days: 45, selectedLeadDays: [], originalLeadDays }), false);
 });
 
 test("draft validation identifies the first restricted capability", () => {

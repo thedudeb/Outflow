@@ -6,7 +6,7 @@ Outflow keeps browser device alerts and account email reminders as independent c
 
 1. Every account has a private `notification_preferences` row. Email is disabled by default.
 2. The user explicitly enables email, chooses an IANA timezone, and separately decides whether paused schedules may send.
-3. Each subscription's `reminder_lead_days` controls both charge and trial timing. A shared subscription uses the same lead-day rules for each eligible member; each member controls their own email channel and paused-schedule preference.
+3. Each subscription's `reminder_lead_days` controls both charge and trial timing. Rules contain up to 12 unique whole-day values from 0 through 365, including Pro custom values. A shared subscription uses the same lead-day rules for each eligible member; each member controls their own email channel and paused-schedule preference.
 4. `claim_due_email_notifications` expands due charge and trial events in the user's local date, advances stale recurring charge dates without changing the ledger revision, and inserts a unique durable delivery record. Monthly and yearly advancement preserves the original calendar anchor while clamping to the last valid day, matching the browser ledger for month-end and leap-day schedules.
 5. The delivery row freezes the user-visible subscription and ledger fields at scheduling time, so provider retries keep the same payload even if the live record changes.
 6. A service-role worker claims rows with `FOR UPDATE SKIP LOCKED`. Concurrent workers cannot claim the same row, abandoned claims become eligible again after 15 minutes, and failed sends use bounded backoff for at most five attempts.

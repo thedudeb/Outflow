@@ -24,7 +24,7 @@ Outflow Pro is a lifetime account entitlement purchased once through Stripe-host
 
 ## Upgrade Surface
 
-The Account / Pro dialog always shows a service-independent comparison before any purchase action. Free core covers local tracking, forecasts, the billing calendar, one device or trial lead time per record, and CSV, backup, and calendar exports. Free users create new records in USD, while every existing currency and advanced reminder value remains visible and editable after an entitlement or account change. Lifetime Pro adds reviewed CSV import, new non-USD records, multiple lead times, cross-device synchronization, household and team access, durable email reminders, and hosted calendar subscriptions.
+The Account / Pro dialog always shows a service-independent comparison before any purchase action. Free core covers local tracking, forecasts, the billing calendar, one preset device or trial lead time per record, and CSV, backup, and calendar exports. Free users create new records in USD, while every existing currency and advanced reminder value remains visible and editable after an entitlement or account change. Lifetime Pro adds reviewed CSV import, new non-USD records, multiple and custom lead times, cross-device synchronization, household and team access, durable email reminders, and hosted calendar subscriptions.
 
 An unconfigured build says **Paid once** instead of inventing a price and does not render sign-in, checkout, or restore actions. A verified one-time Stripe Price is shown only after sign-in, and only then can the user open hosted Checkout. Cancelled returns preserve the Free entitlement and explicitly state that no product subscription or recurring charge was created.
 
@@ -37,7 +37,7 @@ An unconfigured build says **Paid once** instead of inventing a price and does n
 - A `pro=success` return with no server entitlement remains Free through all confirmation attempts, clears the transient URL parameter, and explains that fulfillment is pending.
 - **Restore access** adopts an active durable account entitlement without creating a checkout request and recovers it again after reload.
 - Free guests receive contextual gates for CSV import, new non-USD records, and a second reminder lead time without changing the serialized local workspace.
-- A verified entitlement unlocks the reviewed CSV import, multiple currencies, and multiple lead times without creating another checkout request.
+- A verified entitlement unlocks the reviewed CSV import, multiple currencies, and bounded custom/multiple lead times without creating another checkout request.
 - Entitlement loss keeps existing Pro-shaped records editable but prevents expanding their currency or reminder rules.
 - The signed-in offer, checkout, and Pro-only CSV state pass the automated WCAG A/AA ruleset in both viewport profiles.
 

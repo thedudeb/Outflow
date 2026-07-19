@@ -4,13 +4,13 @@ Outflow provides free in-app reminders and optional browser device notifications
 
 ## Timing And Scope
 
-- Free records select one same-day, 1-day, 3-day, 7-day, 14-day, or 30-day lead time, or disable reminders entirely. A verified lifetime Pro entitlement can select any combination.
+- Free records select one same-day, 1-day, 3-day, 7-day, 14-day, or 30-day preset, or disable reminders entirely. A verified lifetime Pro entitlement can combine presets and add custom whole-day lead times from 0 through 365, up to 12 unique timings per subscription.
 - The same selected lead times apply to the subscription's next charge and optional trial end date.
 - In-app reminders remain available even when browser notifications are disabled or unavailable.
 - Browser delivery requires both explicit notification permission and the global device-notification setting.
 - Paused subscriptions are excluded by default. A separate global opt-in includes paused charge and trial schedules in both in-app and device reminders.
 - The global device setting, paused-schedule scope, and per-subscription lead times persist across reloads.
-- Existing multiple lead times remain visible, deliver normally, and can be reduced or disabled after entitlement loss; Free users cannot expand those retained rules.
+- Existing multiple or custom lead times remain visible, deliver normally, and can be reduced or disabled after entitlement loss; Free users cannot expand those retained rules.
 
 Local browser notifications are evaluated while Outflow is running. They are best-effort convenience alerts, not background push delivery; durable account email reminders use the separate server-side contract in [email-reminders.md](email-reminders.md).
 
@@ -36,5 +36,5 @@ Every due reminder receives a stable identifier containing its ledger, subscript
 - Malformed deduplication state recovers, successful reminders are recorded, and reloads do not duplicate delivery.
 - Paused schedules deliver only after explicit opt-in.
 - Global disablement stops browser delivery while in-app reminders continue.
-- Multiple per-subscription lead times can be reduced to one or turned off, and the result survives reload.
-- The configured account-service suite verifies Pro creation of multiple lead times and downgrade-safe retention at both viewport sizes.
+- Preserved custom timing drives the correct local charge delivery, and multiple per-subscription lead times can be reduced to one or turned off across reloads.
+- The configured account-service suite verifies bounded custom timing, CSV portability, Pro creation of combined preset/custom rules, and downgrade-safe retention at both viewport sizes.

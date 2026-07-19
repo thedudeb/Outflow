@@ -40,10 +40,14 @@ import {
   sanitizeAccountNudge,
 } from "./accountPrompt";
 import {
+  MAX_REMINDER_LEAD_DAY,
+  MAX_REMINDER_LEAD_TIMES,
   canToggleReminderLeadDay,
   canUseCsvImport,
   canUseCurrency,
   hasLifetimePro,
+  isStandardReminderLeadDay,
+  isValidReminderLeadDay,
   restrictedDraftFeature,
 } from "./featureAccess";
 
@@ -89,7 +93,6 @@ const reminderLeadOptions = [
   { label: "14 days before", value: 14 },
   { label: "30 days before", value: 30 },
 ];
-const validReminderLeadDays = new Set(reminderLeadOptions.map((option) => option.value));
 const csvImportFields = [
   { key: "name", label: "Name", required: true, aliases: ["name", "subscription", "service"] },
   { key: "amount", label: "Amount", required: true, aliases: ["amount", "price", "cost"] },
@@ -285,8 +288,8 @@ function sanitizeReminderLeadDays(value, legacyValue) {
   return [...new Set(
     source
       .map(Number)
-      .filter((days) => validReminderLeadDays.has(days)),
-  )].sort((a, b) => b - a);
+      .filter(isValidReminderLeadDay),
+  )].sort((a, b) => b - a).slice(0, MAX_REMINDER_LEAD_TIMES);
 }
 
 function sanitizeAlertSettings(value, permission = "default") {
@@ -908,7 +911,11 @@ function buildCsvCandidates(rows, mapping, existingSubscriptions) {
     if (
       reminderText &&
       !reminderOff &&
-      reminderValues.some((days, index) => !reminderParts[index] || !validReminderLeadDays.has(days))
+      (
+        reminderValues.length > MAX_REMINDER_LEAD_TIMES
+        || new Set(reminderValues).size !== reminderValues.length
+        || reminderValues.some((days, index) => !reminderParts[index] || !isValidReminderLeadDay(days))
+      )
     ) errors.push("Invalid reminder lead days");
 
     const subscription = errors.length ? null : sanitizeSubscription({
@@ -1502,6 +1509,8 @@ function Tracker({ onExit, pwa }) {
   const [accountError, setAccountError] = useState("");
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [form, setForm] = useState(blankForm);
+  const [customReminderLeadDay, setCustomReminderLeadDay] = useState("");
+  const [customReminderError, setCustomReminderError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
   const [notificationPermission, setNotificationPermission] = useState(() =>
@@ -2035,8 +2044,8 @@ function Tracker({ onExit, pwa }) {
     },
     "pro-reminders": {
       code: "Lifetime Pro / alert timing",
-      title: "Add multiple lead times with Pro.",
-      detail: "One device reminder per subscription remains free. Existing advanced rules are retained and can always be reduced or disabled.",
+      title: "Add multiple or custom lead times with Pro.",
+      detail: "One preset device reminder per subscription remains free. Existing advanced rules are retained and can always be reduced or disabled.",
     },
   }[accountPromptContext || accountEntryContext] || null;
 
@@ -2133,10 +2142,49 @@ function Tracker({ onExit, pwa }) {
         ? current.reminderLeadDays.filter((value) => value !== days)
         : [...current.reminderLeadDays, days].sort((a, b) => b - a),
     }));
+    setCustomReminderError("");
+  }
+
+  function addCustomReminderLeadDay() {
+    const days = Number(customReminderLeadDay);
+    if (!isValidReminderLeadDay(days) || String(days) !== customReminderLeadDay.trim()) {
+      setCustomReminderError(`Enter a whole number from 0 to ${MAX_REMINDER_LEAD_DAY}.`);
+      return;
+    }
+    if (isStandardReminderLeadDay(days)) {
+      setCustomReminderError(`${days === 0 ? "Same day" : `${days} days`} is already available in the preset grid.`);
+      return;
+    }
+    if (form.reminderLeadDays.includes(days)) {
+      setCustomReminderError(`${days} days is already armed.`);
+      return;
+    }
+    if (form.reminderLeadDays.length >= MAX_REMINDER_LEAD_TIMES) {
+      setCustomReminderError(`A subscription can arm up to ${MAX_REMINDER_LEAD_TIMES} lead times.`);
+      return;
+    }
+    if (!canToggleReminderLeadDay({
+      days,
+      selectedLeadDays: form.reminderLeadDays,
+      entitlement: accountEntitlement,
+      originalLeadDays: editingSubscription?.reminderLeadDays,
+    })) {
+      setCustomReminderError("");
+      openAccountControls("pro-reminders");
+      return;
+    }
+    setForm((current) => ({
+      ...current,
+      reminderLeadDays: [...current.reminderLeadDays, days].sort((a, b) => b - a),
+    }));
+    setCustomReminderLeadDay("");
+    setCustomReminderError("");
   }
 
   function resetForm() {
     setForm(blankForm);
+    setCustomReminderLeadDay("");
+    setCustomReminderError("");
     setEditingId(null);
   }
 
@@ -2205,6 +2253,8 @@ function Tracker({ onExit, pwa }) {
       reminderLeadDays: subscription.reminderLeadDays,
       paused: subscription.paused,
     });
+    setCustomReminderLeadDay("");
+    setCustomReminderError("");
   }
 
   function deleteSubscription(id) {
@@ -3302,6 +3352,69 @@ function Tracker({ onExit, pwa }) {
                   );
                 })}
               </div>
+              <div className="border border-zinc-800 bg-black">
+                <div className="flex items-center justify-between border-b border-zinc-800 px-2 py-1.5 font-mono text-[9px] tracking-normal text-zinc-600">
+                  <label htmlFor="custom-reminder-lead-day">Custom day / Pro</label>
+                  <span>0-{MAX_REMINDER_LEAD_DAY}D</span>
+                </div>
+                <div className="grid grid-cols-[minmax(0,1fr)_64px]">
+                  <input
+                    id="custom-reminder-lead-day"
+                    type="number"
+                    min="0"
+                    max={MAX_REMINDER_LEAD_DAY}
+                    step="1"
+                    inputMode="numeric"
+                    value={customReminderLeadDay}
+                    onChange={(event) => {
+                      setCustomReminderLeadDay(event.target.value);
+                      setCustomReminderError("");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addCustomReminderLeadDay();
+                    }}
+                    aria-describedby={customReminderError ? "custom-reminder-lead-day-error" : undefined}
+                    aria-invalid={Boolean(customReminderError)}
+                    placeholder="45"
+                    className="h-9 min-w-0 border-0 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-800 focus:bg-zinc-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustomReminderLeadDay}
+                    disabled={!customReminderLeadDay.trim()}
+                    className="border-l border-zinc-800 bg-zinc-950 font-mono text-[9px] font-black uppercase text-amber-300 hover:bg-zinc-900 disabled:text-zinc-700"
+                  >
+                    Arm
+                  </button>
+                </div>
+                {form.reminderLeadDays.some((days) => !isStandardReminderLeadDay(days)) && (
+                  <div className="flex flex-wrap gap-px border-t border-zinc-800 bg-zinc-800" aria-label="Custom alert lead times">
+                    {form.reminderLeadDays.filter((days) => !isStandardReminderLeadDay(days)).map((days) => (
+                      <button
+                        key={days}
+                        type="button"
+                        onClick={() => toggleReminderLeadDay(days)}
+                        aria-label={`Remove custom ${days} day lead time`}
+                        title={`Remove ${days} day lead time`}
+                        className="h-7 bg-zinc-950 px-2 font-mono text-[9px] tracking-normal text-amber-300 hover:bg-zinc-900 hover:text-zinc-100"
+                      >
+                        {days}D / X
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {customReminderError && (
+                <LiveMessage
+                  id="custom-reminder-lead-day-error"
+                  kind="alert"
+                  className="font-mono text-[9px] normal-case tracking-normal text-red-300"
+                >
+                  {customReminderError}
+                </LiveMessage>
+              )}
             </div>
 
             <Field label="Color tag">
@@ -4035,7 +4148,7 @@ function Tracker({ onExit, pwa }) {
                       <li className="py-1.5">Cross-device sync and shared access</li>
                       <li className="py-1.5">Reviewed CSV import</li>
                       <li className="py-1.5">Multiple currencies / no conversion</li>
-                      <li className="py-1.5">Multiple reminder lead times</li>
+                      <li className="py-1.5">Multiple and custom reminder lead times</li>
                       <li className="py-1.5">Durable email reminders</li>
                       <li className="py-1.5">Hosted calendar subscription</li>
                     </ul>

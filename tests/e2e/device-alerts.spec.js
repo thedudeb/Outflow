@@ -115,11 +115,11 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
   await addSubscription(page, {
     name: "Renewal Monitor",
     amount: 12.5,
-    date: "2026-07-22",
+    date: "2026-07-24",
     trialDate: "2026-07-26",
     selectedLeadDays: [3],
   });
-  await seedExistingLeadDays(page, "Renewal Monitor", [3, 7]);
+  await seedExistingLeadDays(page, "Renewal Monitor", [5, 7]);
   await page.evaluate(() => localStorage.setItem("outflow:notified-alerts", "{broken"));
 
   const dialog = await openAlertControls(page);
@@ -131,9 +131,9 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
   const notifications = await page.evaluate(() => window.__outflowNotifications);
   expect(notifications).toEqual(expect.arrayContaining([
     {
-      title: "Outflow / Renewal Monitor bills 3 days",
+      title: "Outflow / Renewal Monitor bills 5 days",
       options: {
-        body: "$12.50 will leave on Wed, Jul 22 / Notify Lab / household local ledger.",
+        body: "$12.50 will leave on Fri, Jul 24 / Notify Lab / household local ledger.",
         tag: expect.stringContaining(":charge-"),
       },
     },

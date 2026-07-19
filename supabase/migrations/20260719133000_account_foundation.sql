@@ -357,7 +357,16 @@ begin
       if subscription_data ->> 'cycle' not in ('weekly', 'monthly', 'yearly') then raise exception 'Subscription cycle is invalid.'; end if;
       if subscription_data ->> 'nextBillingDate' !~ '^\d{4}-\d{2}-\d{2}$' then raise exception 'Subscription billing date is invalid.'; end if;
       if jsonb_typeof(subscription_data -> 'tags') <> 'array' or jsonb_array_length(subscription_data -> 'tags') > 10 then raise exception 'Subscription tags are invalid.'; end if;
-      if jsonb_typeof(subscription_data -> 'reminderLeadDays') <> 'array' then raise exception 'Subscription reminders are invalid.'; end if;
+      if jsonb_typeof(subscription_data -> 'reminderLeadDays') <> 'array'
+        or jsonb_array_length(subscription_data -> 'reminderLeadDays') > 12
+      then raise exception 'Subscription reminders are invalid.'; end if;
+      if exists (
+        select 1 from jsonb_array_elements_text(subscription_data -> 'reminderLeadDays') as reminder
+        where case
+          when reminder ~ '^(0|[1-9][0-9]{0,2})$' then reminder::integer > 365
+          else true
+        end
+      ) then raise exception 'Subscription reminders are invalid.'; end if;
 
       insert into public.subscriptions (
         ledger_id, id, name, amount, currency, cycle, next_billing_date, category, tags, color,
