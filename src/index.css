@@ -26,7 +26,6 @@
 
 body {
   margin: 0;
-  min-width: 320px;
   min-height: 100vh;
   background:
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
