@@ -7,6 +7,10 @@ const authStorageKey = "sb-127-auth-token";
 const editorUserId = "22222222-2222-4222-8222-222222222222";
 const invitedUserId = "33333333-3333-4333-8333-333333333333";
 const invitationToken = "outflow-private-invitation-token-12345678901234567890";
+const calendarTokens = [
+  "abcdefghijklmnopqrstuvwxyzABCDEFGH012345678",
+  "ZYXWVUTSRQPONMLKJIHGFEDCBAabcdefgh012345678",
+];
 const fixtureUser = {
   id: "11111111-1111-4111-8111-111111111111",
   aud: "authenticated",
@@ -58,6 +62,12 @@ function createCloudState({
     removedMembers: [],
     revokedInvitations: [],
     acceptedInvitations: [],
+    notificationPreferences: null,
+    notificationPreferenceWrites: [],
+    calendarFeed: null,
+    calendarFeedToken: "",
+    calendarFeedTokens: [],
+    calendarOperations: [],
     ledger: {
       id: "studio-cloud",
       name: "Studio Cloud",
@@ -188,7 +198,9 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
         : reply([], 200, { "Content-Range": "0-0/0" });
     }
     if (url.pathname.endsWith("/rest/v1/notification_preferences")) {
-      return reply([], 200, { "Content-Range": "0-0/0" });
+      return cloudState?.notificationPreferences
+        ? reply(cloudState.notificationPreferences)
+        : reply([], 200, { "Content-Range": "0-0/0" });
     }
     if (url.pathname.endsWith("/rest/v1/ledgers")) {
       return reply(cloudState?.accessGranted ? [cloudState.ledger] : []);
@@ -224,6 +236,73 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
     }
     if (url.pathname.endsWith("/rest/v1/rpc/can_sync_ledger")) {
       return reply(Boolean(cloudState?.accessGranted && cloudState.canSync));
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/save_notification_preferences") && cloudState) {
+      if (entry.body?.requested_email_enabled && cloudState.entitlementStatus !== "active") {
+        return reply({ message: "Outflow Pro is required for email automation." }, 403);
+      }
+      const updatedAt = new Date().toISOString();
+      cloudState.notificationPreferences = {
+        email_enabled: entry.body?.requested_email_enabled === true,
+        paused_schedule_enabled: entry.body?.requested_paused_schedule_enabled === true,
+        timezone: entry.body?.requested_timezone,
+        updated_at: updatedAt,
+      };
+      cloudState.notificationPreferenceWrites.push(entry.body);
+      return reply({
+        emailEnabled: cloudState.notificationPreferences.email_enabled,
+        pausedScheduleEnabled: cloudState.notificationPreferences.paused_schedule_enabled,
+        timezone: cloudState.notificationPreferences.timezone,
+        updatedAt,
+      });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/get_calendar_feed") && cloudState) {
+      return reply(cloudState.calendarFeed);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/create_or_rotate_calendar_feed") && cloudState) {
+      if (cloudState.entitlementStatus !== "active" || !cloudState.accessGranted) {
+        return reply({ message: "Outflow Pro is required for hosted calendars." }, 403);
+      }
+      const token = calendarTokens[cloudState.calendarFeedTokens.length % calendarTokens.length];
+      const now = new Date().toISOString();
+      const createdAt = cloudState.calendarFeed?.createdAt || now;
+      cloudState.calendarFeed = {
+        id: "44444444-4444-4444-8444-444444444444",
+        ledgerId: cloudState.ledger.id,
+        ledgerName: cloudState.ledger.name,
+        includePaused: entry.body?.requested_include_paused === true,
+        createdAt,
+        updatedAt: now,
+        rotatedAt: now,
+        lastAccessAt: null,
+      };
+      cloudState.calendarFeedToken = token;
+      cloudState.calendarFeedTokens.push(token);
+      cloudState.calendarOperations.push({ type: "publish", body: entry.body, token });
+      return reply({ ...cloudState.calendarFeed, token });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/set_calendar_feed_options") && cloudState) {
+      if (!cloudState.calendarFeed || cloudState.entitlementStatus !== "active") {
+        return reply({ message: "An active Pro ledger membership is required." }, 403);
+      }
+      cloudState.calendarFeed = {
+        ...cloudState.calendarFeed,
+        includePaused: entry.body?.requested_include_paused === true,
+        updatedAt: new Date().toISOString(),
+      };
+      cloudState.calendarOperations.push({ type: "scope", body: entry.body });
+      return reply(cloudState.calendarFeed);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/revoke_calendar_feed") && cloudState) {
+      const revoked = Boolean(cloudState.calendarFeed);
+      cloudState.calendarOperations.push({
+        type: "revoke",
+        body: entry.body,
+        token: cloudState.calendarFeedToken,
+      });
+      cloudState.calendarFeed = null;
+      cloudState.calendarFeedToken = "";
+      return reply(revoked);
     }
     if (url.pathname.endsWith("/rest/v1/rpc/accept_ledger_invitation") && cloudState) {
       if (entry.body?.invitation_token !== cloudState.inviteToken || !verifiedUser) {
@@ -573,5 +652,149 @@ test("invited account accepts the private token without changing its local works
   expect(cloudState.members).toEqual(expect.arrayContaining([
     expect.objectContaining({ user_id: invitedUserId, role: "viewer" }),
   ]));
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("email reminders persist independently and remain disableable after Pro is refunded", async ({ page }) => {
+  const cloudState = createCloudState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localAlertSettings = await page.evaluate(() => localStorage.getItem("outflow:alert-settings"));
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  const emailEnabled = dialog.getByRole("checkbox", { name: /Email reminders/ });
+  const pausedSchedules = dialog.getByRole("checkbox", { name: /Paused schedules/ });
+  await expect(emailEnabled).not.toBeChecked();
+  await emailEnabled.check();
+  await pausedSchedules.check();
+  await dialog.getByRole("combobox", { name: "Reminder timezone", exact: true }).selectOption("UTC");
+  await dialog.getByRole("button", { name: "Save email rules", exact: true }).click();
+  await expect(dialog.getByText("Email reminders enabled. Subscription lead times control each delivery.", { exact: true })).toBeVisible();
+  expect(cloudState.notificationPreferenceWrites).toEqual([{
+    requested_email_enabled: true,
+    requested_paused_schedule_enabled: true,
+    requested_timezone: "UTC",
+  }]);
+  expect(await page.evaluate(() => localStorage.getItem("outflow:alert-settings"))).toBe(localAlertSettings);
+
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /Paused schedules/ })).toBeChecked();
+  await expect(dialog.getByRole("combobox", { name: "Reminder timezone", exact: true })).toHaveValue("UTC");
+
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  cloudState.entitlementStatus = "refunded";
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  const refundableEmailToggle = dialog.getByRole("checkbox", { name: /Email reminders/ });
+  await expect(refundableEmailToggle).toBeChecked();
+  await expect(refundableEmailToggle).toBeEnabled();
+  await expect(dialog.getByText("Suspended", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Paused schedules/ })).toBeDisabled();
+  await refundableEmailToggle.uncheck();
+  await dialog.getByRole("button", { name: "Save email rules", exact: true }).click();
+  await expect(dialog.getByText("Email reminders disabled. Device alert settings were not changed.", { exact: true })).toBeVisible();
+  expect(cloudState.notificationPreferenceWrites[1]).toEqual({
+    requested_email_enabled: false,
+    requested_paused_schedule_enabled: true,
+    requested_timezone: "UTC",
+  });
+  expect(await page.evaluate(() => localStorage.getItem("outflow:alert-settings"))).toBe(localAlertSettings);
+});
+
+test("hosted calendar feed keeps its token one-time, rotates, suspends, and revokes cleanly", async ({ page }) => {
+  const cloudState = createCloudState();
+  const fixture = await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+  await openStudioCloud(page);
+
+  await page.getByRole("button", { name: "Export calendar", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Calendar export" });
+  await expect(dialog.getByText("Not published", { exact: true })).toBeVisible();
+  const pausedScope = dialog.getByRole("checkbox", { name: /Feed paused schedules/ });
+  await expect(pausedScope).not.toBeChecked();
+  await dialog.getByRole("button", { name: "Publish feed", exact: true }).click();
+  await expect(dialog.getByText("Hosted feed published. This secret URL is shown once.", { exact: true })).toBeVisible();
+
+  const secretUrl = dialog.getByRole("textbox", { name: "Secret hosted calendar feed URL", exact: true });
+  const firstUrl = new URL(await secretUrl.inputValue());
+  const firstToken = firstUrl.searchParams.get("token");
+  expect(firstUrl.pathname).toBe("/supabase/functions/v1/calendar-feed");
+  expect([...firstUrl.searchParams.keys()]).toEqual(["token"]);
+  expect(firstToken).toBe(calendarTokens[0]);
+  expect(cloudState.calendarOperations[0]).toEqual({
+    type: "publish",
+    body: { target_ledger_id: "studio-cloud", requested_include_paused: false },
+    token: calendarTokens[0],
+  });
+  expect(cloudState.calendarFeed).not.toHaveProperty("token");
+
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+
+  await pausedScope.check();
+  await dialog.getByRole("button", { name: "Save scope", exact: true }).click();
+  await expect(dialog.getByText("Hosted feed scope updated.", { exact: true })).toBeVisible();
+  await expect(secretUrl).toHaveValue(firstUrl.toString());
+  expect(cloudState.calendarFeedToken).toBe(firstToken);
+  expect(cloudState.calendarOperations[1]).toEqual({
+    type: "scope",
+    body: { target_ledger_id: "studio-cloud", requested_include_paused: true },
+  });
+
+  await dialog.getByRole("button", { name: "Rotate URL", exact: true }).click();
+  await expect(dialog.getByText("Feed URL rotated. The previous URL is inactive.", { exact: true })).toBeVisible();
+  const secondUrl = new URL(await secretUrl.inputValue());
+  const secondToken = secondUrl.searchParams.get("token");
+  expect(secondToken).toBe(calendarTokens[1]);
+  expect(secondToken).not.toBe(firstToken);
+  expect(cloudState.calendarFeedTokens).toEqual([firstToken, secondToken]);
+
+  await dialog.getByRole("button", { name: "Close calendar export", exact: true }).click();
+  await page.getByRole("button", { name: "Export calendar", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Calendar export" });
+  await expect(dialog.getByText("Published", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: "Secret hosted calendar feed URL", exact: true })).toHaveCount(0);
+  const metadataReads = fixture.traffic.filter((request) => request.path.endsWith("/rest/v1/rpc/get_calendar_feed"));
+  expect(metadataReads.length).toBeGreaterThanOrEqual(2);
+  expect(metadataReads.every((request) => !JSON.stringify(request).includes(firstToken) && !JSON.stringify(request).includes(secondToken))).toBe(true);
+
+  await dialog.getByRole("button", { name: "Close calendar export", exact: true }).click();
+  cloudState.entitlementStatus = "refunded";
+  cloudState.canSync = false;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await openStudioCloud(page);
+  await page.getByRole("button", { name: "Export calendar", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Calendar export" });
+  await expect(dialog.getByText("Suspended", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Feed paused schedules/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Rotate URL", exact: true })).toHaveCount(0);
+  const revoke = dialog.getByRole("button", { name: "Revoke", exact: true });
+  await expect(revoke).toBeEnabled();
+  await revoke.click();
+  await expect(dialog.getByText("Confirm revocation to disable the hosted URL.", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Confirm revoke", exact: true }).click();
+  await expect(dialog.getByText("Hosted calendar feed revoked.", { exact: true })).toBeVisible();
+  expect(cloudState.calendarFeed).toBeNull();
+  expect(cloudState.calendarFeedToken).toBe("");
+  expect(cloudState.calendarOperations.at(-1)).toEqual({
+    type: "revoke",
+    body: { target_ledger_id: "studio-cloud" },
+    token: secondToken,
+  });
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
 });

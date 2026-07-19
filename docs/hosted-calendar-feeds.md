@@ -40,6 +40,14 @@ Stable UIDs and increasing subscription revisions allow clients to update an exi
 
 A downloaded `.ics` file remains available for local and cloud ledgers without publishing anything. Hosted feeds are never created automatically.
 
+## Automated Browser Contract
+
+`npm run test:account-service` exercises the hosted-calendar UI against a stateful RPC fixture in desktop and mobile Chromium profiles. It verifies explicit publication, a token-only private URL, WCAG A/AA compliance in the authenticated published state, scope changes without token rotation, deliberate rotation to a new token, and two-step revocation.
+
+Closing and reopening the dialog recovers only feed metadata: the plaintext URL is absent and metadata requests contain neither the current nor prior token. After a simulated Pro refund, the feed is visibly suspended, mutation controls are locked, revocation remains available for data control, and the serialized browser-local workspace remains unchanged.
+
+The PostgreSQL contract separately proves hashed-token storage, old-token invalidation, live entitlement and membership checks, scope behavior, and revocation through `npm run test:account-foundation`.
+
 ## Deployment Checks
 
 1. Apply `20260720143000_hosted_calendar_feeds.sql` and deploy `calendar-feed` with its function-specific configuration in `supabase/config.toml`.

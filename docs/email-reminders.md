@@ -24,6 +24,12 @@ The isolated database contract verifies leap and non-leap month ends, consecutiv
 - The scheduled function uses a server-only Supabase secret and requires a separate, high-entropy `OUTFLOW_CRON_SECRET` on every call.
 - Claims recheck email opt-in, Pro status, ledger membership, and paused-schedule policy. A refund, membership removal, subscription deletion, opt-out, or account deletion therefore stops new sends without browser cooperation.
 
+## Automated Browser Contract
+
+`npm run test:account-service` runs the configured account UI against a stateful PostgREST-compatible fixture at desktop and narrow mobile widths. It verifies that a Pro user can enable email, include paused schedules, choose an IANA timezone, save the exact RPC payload, and recover the authoritative settings after reload without changing serialized local device-alert settings.
+
+The same contract simulates a refund while email remains opted in. The channel becomes visibly **Suspended**, unavailable sub-rules are locked, and the master email control remains available so the user can opt out. Saving that opt-out succeeds without Pro and still leaves local device alerts untouched.
+
 ## Deployment
 
 Deploy `send-due-reminders` with JWT verification disabled only after setting all values in `supabase/functions/.env.example`. The function performs its own constant-time bearer-secret check.

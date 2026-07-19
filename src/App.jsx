@@ -4068,9 +4068,17 @@ function Tracker({ onExit, pwa }) {
                     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Email reminder channel</span>
                       <span className={`font-mono text-[9px] font-black uppercase ${
-                        emailPreferences.emailEnabled ? "text-amber-300" : "text-zinc-600"
+                        emailPreferences.emailEnabled && accountEntitlement?.status === "active"
+                          ? "text-amber-300"
+                          : emailPreferences.emailEnabled
+                            ? "text-red-300"
+                            : "text-zinc-600"
                       }`}>
-                        {emailPreferencesLoading ? "Loading" : emailPreferences.emailEnabled ? "Enabled" : "Disabled"}
+                        {emailPreferencesLoading
+                          ? "Loading"
+                          : emailPreferences.emailEnabled
+                            ? accountEntitlement?.status === "active" ? "Enabled" : "Suspended"
+                            : "Disabled"}
                       </span>
                     </header>
                     <div className="grid sm:grid-cols-2">
@@ -4099,7 +4107,7 @@ function Tracker({ onExit, pwa }) {
                         <input
                           type="checkbox"
                           checked={emailPreferences.pausedScheduleEnabled}
-                          disabled={emailPreferencesLoading || (accountEntitlement?.status !== "active" && !emailPreferences.emailEnabled)}
+                          disabled={emailPreferencesLoading || accountEntitlement?.status !== "active"}
                           onChange={(event) => setEmailPreferences((current) => ({ ...current, pausedScheduleEnabled: event.target.checked }))}
                           className="h-5 w-5 accent-amber-400 disabled:opacity-30"
                         />
