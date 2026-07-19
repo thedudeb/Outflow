@@ -12,6 +12,18 @@ jobs:
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v6
@@ -20,6 +32,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm run test:account-foundation
+        env:
+          OUTFLOW_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55439/postgres
 
   web:
     runs-on: ubuntu-latest
