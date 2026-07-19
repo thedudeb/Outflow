@@ -1013,7 +1013,7 @@ function initials(name) {
 
 function Panel({ title, marker, action, children, className = "" }) {
   return (
-    <section className={`border border-zinc-800 bg-black/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${className}`}>
+    <section className={`min-w-0 border border-zinc-800 bg-black/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${className}`}>
       <header className="flex min-h-10 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/70 px-3">
         <div className="flex min-w-0 items-center gap-2">
           {marker && <span className="h-3 w-1 shrink-0 bg-amber-400" />}
@@ -3771,9 +3771,9 @@ function Tracker({ onExit, pwa }) {
               <Panel
                 title="Active subscriptions"
                 marker
-                action={<span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">identity / subscription / withdrawal</span>}
+                action={<span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500 sm:inline">identity / subscription / withdrawal</span>}
               >
-                <div className="grid gap-3 p-3">
+                <div className="grid min-w-0 gap-3 p-3">
                   <div className="hidden grid-cols-[220px_minmax(0,1fr)_280px] gap-3 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-600 lg:grid">
                     <div>Logo / Plan</div>
                     <div>Subscription</div>
@@ -3787,11 +3787,11 @@ function Tracker({ onExit, pwa }) {
                     return (
                       <article
                         key={subscription.id}
-                        className={`grid gap-2 border border-zinc-800 bg-zinc-950/70 p-2 transition hover:border-zinc-700 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3 ${
+                        className={`grid min-w-0 max-w-full gap-2 border border-zinc-800 bg-zinc-950/70 p-2 transition hover:border-zinc-700 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3 ${
                           subscription.paused ? "border-zinc-700 bg-black/70" : ""
                         }`}
                       >
-                        <div className="border border-violet-500/60 bg-violet-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                        <div className="min-w-0 border border-violet-500/60 bg-violet-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                           <div className="flex items-center justify-between gap-3">
                             <div
                               className="grid h-12 w-12 shrink-0 place-items-center border border-violet-300/70 bg-black font-mono text-sm font-black text-violet-200"
@@ -3815,7 +3815,7 @@ function Tracker({ onExit, pwa }) {
                           </div>
                         </div>
 
-                        <div className="border border-red-500/60 bg-red-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                        <div className="min-w-0 border border-red-500/60 bg-red-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                           <div className="flex min-w-0 items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate text-lg font-black uppercase tracking-[0.08em] text-red-50">{subscription.name}</div>
@@ -3878,7 +3878,7 @@ function Tracker({ onExit, pwa }) {
                           </div>
                         </div>
 
-                        <div className="border border-emerald-500/60 bg-emerald-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                        <div className="min-w-0 border border-emerald-500/60 bg-emerald-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/70">will pull</div>
                           <div className="mt-2 font-mono text-2xl font-black leading-none text-emerald-100">{money(subscription.amount, subscription.currency)}</div>
                           <div className={`mt-3 border-t border-emerald-400/20 pt-3 font-mono ${urgent ? "text-amber-200" : "text-emerald-100"}`}>
