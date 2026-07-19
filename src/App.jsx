@@ -3735,7 +3735,7 @@ function Tracker({ onExit, pwa }) {
                               )}
                               {ledgerMeta.kind !== "personal" && (
                                 <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-red-200/45">
-                                  Updated by {subscription.updatedBy} / {new Date(subscription.updatedAt).toLocaleDateString()}
+                                  Added by {subscription.createdBy} / Updated by {subscription.updatedBy} / {new Date(subscription.updatedAt).toLocaleDateString()}
                                 </div>
                               )}
                             </div>

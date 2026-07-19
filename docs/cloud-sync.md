@@ -40,6 +40,18 @@ The visible runtime states are:
 | `conflict` | A stale write was rejected; refresh is required before retrying |
 | `offline` | A pre-commit cloud request failed; local ledgers remain available |
 
+## Automated Browser Contract
+
+`npm run test:account-service` runs a stateful PostgREST-compatible fixture at desktop and narrow mobile widths. It verifies that:
+
+- Opening a cloud team ledger replaces, rather than combines with, the active local totals while leaving the serialized local workspace unchanged.
+- Shared records display distinct server-resolved creator and updater identities.
+- A write sends the full snapshot, expected revision, and a fresh operation UUID, then adopts the confirmed authoritative revision.
+- A conflict rejects the optimistic value, loads the server winner, announces the conflict, and blocks another write until refresh.
+- Signing out closes the cloud session and restores the untouched local ledger and totals.
+
+The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration.
+
 ## Offline Boundary
 
 The installable guest tracker and local ledgers remain usable offline. Cloud writes are not queued in this release: failures before commit roll back visibly instead of creating an ambiguous offline mutation queue. A committed write whose confirmation cannot be loaded is retained and marked stale. Durable queued cloud writes require a future operation log, background retry policy, and conflict UX before they can be enabled safely.
