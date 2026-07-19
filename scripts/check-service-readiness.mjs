@@ -190,7 +190,7 @@ function legacyKeyHasRole(value, expectedRole) {
   }
 }
 
-function supabaseKeys(env, errors) {
+export function resolveSupabaseKeys(env, errors = []) {
   const namedPublishable = namedSupabaseKey(env, "SUPABASE_PUBLISHABLE_KEYS", "sb_publishable_", errors);
   const namedSecret = namedSupabaseKey(env, "SUPABASE_SECRET_KEYS", "sb_secret_", errors);
   const localPublishable = String(env.SUPABASE_PUBLISHABLE_KEY || "").trim();
@@ -225,7 +225,7 @@ export function validateServiceEnvironment(env, { allowLocal = false } = {}) {
   for (const name of uniqueSorted(Object.values(FUNCTION_POLICIES).flatMap((policy) => policy.env))) {
     values[name] = required(env, name, errors);
   }
-  const { publishableKey } = supabaseKeys(env, errors);
+  const { publishableKey } = resolveSupabaseKeys(env, errors);
 
   if (values.SUPABASE_URL && (!validUrl(values.SUPABASE_URL) || !new URL(values.SUPABASE_URL).hostname.endsWith(".supabase.co") || new URL(values.SUPABASE_URL).origin !== values.SUPABASE_URL)) {
     errors.push("SUPABASE_URL: expected an exact HTTPS project origin on supabase.co.");

@@ -84,9 +84,11 @@ For a durable repository-side record, configure the protected GitHub `staging` e
 | `OUTFLOW_SUPABASE_URL` | Variable | Exact hosted Supabase project origin |
 | `OUTFLOW_APP_URL` | Variable | Staging application HTTPS URL |
 | `OUTFLOW_ALLOWED_ORIGINS` | Variable | Comma-separated exact HTTPS origins |
+| `OUTFLOW_SUPABASE_PROJECT_REF` | Variable | Exact 20-character staging project reference |
 | `OUTFLOW_SUPABASE_PUBLISHABLE_KEY` | Secret | Browser-safe Supabase publishable key |
+| `OUTFLOW_SUPABASE_SECRET_KEY` | Secret | Server-only key used only by the account-plane setup and cleanup harness |
 
-The workflow has read-only repository permissions, does not receive Supabase secret/service-role, Resend, Stripe, webhook, or cron credentials, and runs only by manual dispatch against the protected environment. A successful run writes the commit, actor, project host, app origin, timestamp, and ordered migration inventory to its GitHub summary. That summary is evidence for the public boundary step only; it deliberately does not mark the full staging acceptance matrix complete.
+The **Staging Boundary** workflow has read-only repository permissions, does not receive the Supabase secret/service-role, Resend, Stripe, webhook, or cron credentials, and runs only by manual dispatch against the protected environment. A successful run writes the commit, actor, project host, app origin, timestamp, and ordered migration inventory to its GitHub summary. That summary is evidence for the public boundary step only; it deliberately does not mark the full staging acceptance matrix complete.
 
 The first command tests the probe itself without network access. The second uses only the project URL, publishable key, application URL, and allowed origins. It sends CORS preflights plus deliberately invalid JWT, Stripe signature, cron-secret, and calendar-token requests. A pass proves:
 
@@ -98,6 +100,12 @@ The first command tests the probe itself without network access. The second uses
 The probe never sends a secret/service-role key, valid session, valid webhook, valid cron secret, or user calendar token. It does not create, update, or delete data. HTTP 404 alone is not accepted for undeployed functions: each endpoint has a distinct expected response.
 
 ## 7. Staging Acceptance
+
+After the public boundary passes, manually dispatch **Staging Account Plane**. It requires the protected server-only Supabase key to create two randomized, confirmed synthetic accounts, grant one synthetic test entitlement, and clean up all test identities. The harness refuses to run unless the configured project hostname matches `OUTFLOW_SUPABASE_PROJECT_REF` and `OUTFLOW_ACCEPTANCE_MODE` is the literal workflow-controlled value `staging`.
+
+The authenticated assertions use publishable-key clients and real user sessions. They cover transactional guest migration and replay, pre-membership RLS isolation, private invitation acceptance, viewer denial, editor writes, idempotent replay, stale-revision conflicts, member removal, the deployed account-deletion function, and cascade cleanup. Its GitHub summary contains fixed check names and deployment metadata only. It never records synthetic email addresses, user IDs, passwords, session tokens, invitation tokens, provider keys, or response bodies.
+
+The server-only secret is not passed to the public-boundary job and no Resend, Stripe, webhook, or cron credential is passed to either repository workflow. Protect the `staging` environment with required reviewers and restrict secret access to the two manually dispatched jobs.
 
 The local account-service suite performs the same Realtime refresh, stale-edit, and reconnect flow through two isolated browser contexts and a Phoenix-protocol fixture. Repeat it against the provisioned project because the fixture cannot prove publication configuration, network behavior, or hosted authorization.
 

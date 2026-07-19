@@ -1,0 +1,42 @@
+name: Staging Account Plane
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-staging-account-plane
+  cancel-in-progress: false
+
+jobs:
+  account-plane:
+    name: Authenticated account-plane acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify service contract
+        run: npm run test:service-readiness
+      - name: Verify account-plane harness contract
+        run: npm run test:staging-account-plane
+      - name: Run authenticated account-plane acceptance
+        run: npm run check:staging-account-plane -- --summary-file "$GITHUB_STEP_SUMMARY"
+        env:
+          SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.OUTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.OUTFLOW_SUPABASE_SECRET_KEY }}
+          OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          OUTFLOW_ACCEPTANCE_MODE: staging
