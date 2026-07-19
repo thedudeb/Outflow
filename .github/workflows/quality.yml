@@ -62,6 +62,7 @@ jobs:
       - run: npm run test:account-prompts
       - run: npm run test:feature-access
       - run: npm run test:service-readiness
+      - run: npm run test:staging-boundaries
       - run: npm run test:account-service
       - run: npm run test:pwa-cache
       - run: npm run test:pwa

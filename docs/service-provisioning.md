@@ -68,7 +68,25 @@ Deploy from the repository root so `supabase/config.toml` supplies the reviewed 
 
 After deployment, run the repository readiness, function type, and function runtime checks again. A JWT or Supabase key-mode change must update both the shared runtime and `scripts/check-service-readiness.mjs` in the same review.
 
-## 6. Staging Acceptance
+## 6. Probe The Deployed Boundary
+
+After migrations, secrets, and all six functions are deployed, run the non-destructive public boundary probe with the same ignored full-runtime environment file:
+
+```sh
+npm run test:staging-boundaries
+node scripts/check-staging-boundaries.mjs --env-file /absolute/path/to/outflow-stage.env
+```
+
+The first command tests the probe itself without network access. The second uses only the project URL, publishable key, application URL, and allowed origins. It sends CORS preflights plus deliberately invalid JWT, Stripe signature, cron-secret, and calendar-token requests. A pass proves:
+
+- All three account-facing functions return exact-origin CORS headers and reject an invalid user JWT at the gateway.
+- The Stripe webhook reaches configured code and rejects an invalid signature before fulfillment.
+- The reminder worker reaches configured code and rejects an invalid cron bearer secret before claiming deliveries.
+- The calendar function can reach its resolver and returns no feed for an unknown private token.
+
+The probe never sends a secret/service-role key, valid session, valid webhook, valid cron secret, or user calendar token. It does not create, update, or delete data. HTTP 404 alone is not accepted for undeployed functions: each endpoint has a distinct expected response.
+
+## 7. Staging Acceptance
 
 Complete these tests with synthetic accounts and Stripe test mode:
 
@@ -81,4 +99,4 @@ Complete these tests with synthetic accounts and Stripe test mode:
 
 Record the project, deployment commit, migration list, tester, date, and pass/fail result without recording tokens or customer data. Promote only after every applicable matrix is green.
 
-References: [Supabase Edge Function environment variables](https://supabase.com/docs/guides/functions/secrets), [Supabase function configuration](https://supabase.com/docs/guides/functions/function-configuration), and [Supabase Edge Function authentication](https://supabase.com/docs/guides/functions/auth).
+References: [Supabase Edge Function environment variables](https://supabase.com/docs/guides/functions/secrets), [Supabase function configuration](https://supabase.com/docs/guides/functions/function-configuration), [Supabase authorization headers](https://supabase.com/docs/guides/functions/auth-headers), and [Supabase CORS handling](https://supabase.com/docs/guides/functions/cors).
