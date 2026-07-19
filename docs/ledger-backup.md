@@ -25,7 +25,7 @@ Outflow's full-ledger backup is the portable boundary between today's local gues
 }
 ```
 
-Subscription objects use the same normalized fields documented in [csv-format.md](csv-format.md), plus their stable `id` value. `tags` and `reminderLeadDays` are JSON arrays rather than delimited strings.
+Subscription objects use the same normalized fields documented in [csv-format.md](csv-format.md), plus stable `id`, `revision`, and `updatedAt` values. `tags` and `reminderLeadDays` are JSON arrays rather than delimited strings.
 
 ## Restore Rules
 

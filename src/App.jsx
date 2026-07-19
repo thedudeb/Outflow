@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
+import { createEvents } from "ics";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -159,6 +160,10 @@ function isValidDate(value) {
   return Number.isFinite(parsed.getTime()) && toDateInput(parsed) === value;
 }
 
+function isValidTimestamp(value) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 function sanitizeReminderLeadDays(value, legacyValue) {
   const source = Array.isArray(value)
     ? value
@@ -189,14 +194,13 @@ function sanitizeAlertSettings(value, permission = "default") {
 function sanitizeLedgerMeta(value) {
   const source = value && typeof value === "object" ? value : {};
   const now = new Date().toISOString();
-  const validTimestamp = (timestamp) => typeof timestamp === "string" && Number.isFinite(Date.parse(timestamp));
   return {
     id: typeof source.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(source.id) ? source.id : crypto.randomUUID(),
     name: typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 60) : "Personal",
     kind: "personal",
     storage: "local",
-    createdAt: validTimestamp(source.createdAt) ? source.createdAt : now,
-    updatedAt: validTimestamp(source.updatedAt) ? source.updatedAt : now,
+    createdAt: isValidTimestamp(source.createdAt) ? source.createdAt : now,
+    updatedAt: isValidTimestamp(source.updatedAt) ? source.updatedAt : now,
   };
 }
 
@@ -224,6 +228,8 @@ function sanitizeSubscription(value) {
       ? value.trialEndDate
       : "";
   const reminderLeadDays = sanitizeReminderLeadDays(value.reminderLeadDays, value.reminderDays);
+  const revision = Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0;
+  const updatedAt = isValidTimestamp(value.updatedAt) ? value.updatedAt : new Date().toISOString();
 
   if (
     !name ||
@@ -249,6 +255,8 @@ function sanitizeSubscription(value) {
     trialEndDate,
     reminderLeadDays,
     paused: value.paused === true,
+    revision,
+    updatedAt,
   };
 }
 
@@ -328,7 +336,12 @@ function normalizeBillingDate(subscription, today = new Date()) {
   const normalizedDate = toDateInput(nextDate);
   return normalizedDate === subscription.nextBillingDate
     ? subscription
-    : { ...subscription, nextBillingDate: normalizedDate };
+    : {
+        ...subscription,
+        nextBillingDate: normalizedDate,
+        revision: subscription.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
 }
 
 function daysBetween(start, end) {
@@ -674,6 +687,56 @@ function reminderLeadLabel(days) {
   return days.map((value) => value === 0 ? "day-of" : `${value}d`).join(" / ");
 }
 
+function calendarDateParts(value) {
+  const date = parseDate(value);
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()];
+}
+
+function calendarTimestampParts(value) {
+  const date = new Date(value);
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes()];
+}
+
+function subscriptionCalendarEvent(subscription, ledger) {
+  const endDate = parseDate(subscription.nextBillingDate);
+  endDate.setDate(endDate.getDate() + 1);
+  const recurrenceRule = {
+    weekly: "FREQ=WEEKLY",
+    monthly: "FREQ=MONTHLY",
+    yearly: "FREQ=YEARLY",
+  }[subscription.cycle];
+  const ledgerContext = `${ledger.name} / personal ${ledger.storage} ledger`;
+
+  return {
+    productId: "Outflow Subscription Tracker",
+    calName: `Outflow / ${ledger.name}`,
+    uid: `${subscription.id}.${ledger.id}@outflow.local`,
+    sequence: subscription.revision,
+    start: calendarDateParts(subscription.nextBillingDate),
+    end: [endDate.getFullYear(), endDate.getMonth() + 1, endDate.getDate()],
+    title: `${subscription.name} / ${money(subscription.amount, subscription.currency)}`,
+    description: `${subscription.paused ? "Paused schedule / " : ""}${subscription.cycle} charge / ${ledgerContext}`,
+    categories: ["Outflow", subscription.category],
+    status: subscription.paused ? "TENTATIVE" : "CONFIRMED",
+    busyStatus: "FREE",
+    transp: "TRANSPARENT",
+    classification: "PRIVATE",
+    recurrenceRule,
+    lastModified: calendarTimestampParts(subscription.updatedAt),
+  };
+}
+
+function createSubscriptionCalendar(subscriptions, ledger) {
+  return createEvents(
+    subscriptions.map((subscription) => subscriptionCalendarEvent(subscription, ledger)),
+    {
+      productId: "Outflow Subscription Tracker",
+      calName: `Outflow / ${ledger.name}`,
+      method: "PUBLISH",
+    },
+  );
+}
+
 function initials(name) {
   return name
     .split(/\s|\+/)
@@ -992,6 +1055,9 @@ function Tracker({ onExit, pwa }) {
     }
   });
   const [alertSettingsOpen, setAlertSettingsOpen] = useState(false);
+  const [calendarExportOpen, setCalendarExportOpen] = useState(false);
+  const [includePausedCalendar, setIncludePausedCalendar] = useState(false);
+  const [calendarExportError, setCalendarExportError] = useState("");
   const [calendarCursor, setCalendarCursor] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -1047,12 +1113,30 @@ function Tracker({ onExit, pwa }) {
   }, [ledgerOpen]);
 
   useEffect(() => {
+    if (!calendarExportOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setCalendarExportOpen(false);
+        setCalendarExportError("");
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [calendarExportOpen]);
+
+  useEffect(() => {
     setSubscriptions((current) => current.map((item) => normalizeBillingDate(item)));
   }, []);
 
   const activeSubscriptions = useMemo(
     () => subscriptions.filter((subscription) => !subscription.paused),
     [subscriptions],
+  );
+  const calendarExportSubscriptions = useMemo(
+    () => subscriptions
+      .filter((subscription) => !subscription.paused || includePausedCalendar)
+      .sort((a, b) => parseDate(a.nextBillingDate) - parseDate(b.nextBillingDate) || a.name.localeCompare(b.name)),
+    [subscriptions, includePausedCalendar],
   );
 
   const sortedSubscriptions = useMemo(
@@ -1112,6 +1196,8 @@ function Tracker({ onExit, pwa }) {
   const forecastPeak = Math.max(...forecastWeeks.map((week) => week.count), 0);
   const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.count), 0);
   const calendarMonthTotals = totalsByCurrency(calendarEvents);
+  const calendarExportTotals = totalsByCurrency(calendarExportSubscriptions, monthlyEquivalent);
+  const pausedCalendarExportCount = calendarExportSubscriptions.filter((subscription) => subscription.paused).length;
   const nextCharge = timeline[0];
   const alerts = useMemo(
     () => buildAlerts(subscriptions, alertSettings.includePausedSchedules),
@@ -1183,6 +1269,7 @@ function Tracker({ onExit, pwa }) {
 
   function submitSubscription(event) {
     event.preventDefault();
+    const existingSubscription = editingId ? subscriptions.find((subscription) => subscription.id === editingId) : null;
 
     const payload = sanitizeSubscription({
       id: editingId || crypto.randomUUID(),
@@ -1197,6 +1284,8 @@ function Tracker({ onExit, pwa }) {
       trialEndDate: form.trialEndDate,
       reminderLeadDays: form.reminderLeadDays,
       paused: form.paused,
+      revision: existingSubscription ? existingSubscription.revision + 1 : 0,
+      updatedAt: new Date().toISOString(),
     });
 
     if (!payload) return;
@@ -1236,9 +1325,11 @@ function Tracker({ onExit, pwa }) {
   function togglePaused(id) {
     setSubscriptions((current) =>
       current.map((subscription) =>
-        subscription.id === id
-          ? normalizeBillingDate({ ...subscription, paused: !subscription.paused })
-          : subscription,
+        subscription.id === id ? {
+          ...normalizeBillingDate({ ...subscription, paused: !subscription.paused }),
+          revision: subscription.revision + 1,
+          updatedAt: new Date().toISOString(),
+        } : subscription,
       ),
     );
   }
@@ -1255,6 +1346,32 @@ function Tracker({ onExit, pwa }) {
     const today = new Date();
     setCalendarCursor(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(toDateInput(today));
+  }
+
+  function closeCalendarExport() {
+    setCalendarExportOpen(false);
+    setCalendarExportError("");
+  }
+
+  function exportCalendarFile() {
+    if (!calendarExportSubscriptions.length) return;
+    try {
+      const { error, value } = createSubscriptionCalendar(calendarExportSubscriptions, ledgerMeta);
+      if (error || !value) throw error || new Error("Calendar generation failed.");
+      const blob = new Blob([value], { type: "text/calendar;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const ledgerSlug = ledgerMeta.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "personal";
+      link.href = url;
+      link.download = `outflow-${ledgerSlug}-calendar.ics`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      closeCalendarExport();
+    } catch (error) {
+      setCalendarExportError(error instanceof Error ? error.message : "Outflow could not generate this calendar.");
+    }
   }
 
   async function requestDeviceAlerts() {
@@ -1855,7 +1972,19 @@ function Tracker({ onExit, pwa }) {
           <Panel
             title="Billing calendar"
             marker
-            action={<span className="font-mono text-[10px] text-amber-300">{formatCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>}
+            action={(
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-amber-300">{formatCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>
+                <button
+                  type="button"
+                  onClick={() => setCalendarExportOpen(true)}
+                  aria-label="Export calendar"
+                  className="border border-zinc-700 bg-black px-2 py-1 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-amber-400 hover:text-amber-300"
+                >
+                  ICS
+                </button>
+              </div>
+            )}
           >
             <div className="flex flex-col gap-3 border-b border-zinc-800 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -2120,6 +2249,102 @@ function Tracker({ onExit, pwa }) {
           </div>
         </section>
       </div>
+
+      {calendarExportOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-export-title"
+            className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">External calendar</div>
+                <h2 id="calendar-export-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Calendar export</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeCalendarExport}
+                aria-label="Close calendar export"
+                autoFocus
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-auto">
+              <div className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
+                <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
+                  Ledger <span className="ml-1 text-zinc-200">{ledgerMeta.name}</span>
+                </div>
+                <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                  Events <span className="ml-1 text-zinc-200">{calendarExportSubscriptions.length}</span>
+                </div>
+                <div className="border-r border-zinc-800 px-3 py-2">
+                  Paused <span className="ml-1 text-zinc-400">{pausedCalendarExportCount}</span>
+                </div>
+                <div className="px-3 py-2">
+                  Identity <span className="ml-1 text-emerald-300">Stable</span>
+                </div>
+              </div>
+
+              <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-800 px-4 py-3 hover:bg-zinc-950">
+                <span className="min-w-0">
+                  <span className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Paused schedules</span>
+                  <span className="mt-1 block font-mono text-[10px] uppercase text-zinc-600">
+                    Scope / {includePausedCalendar ? "included" : "excluded"}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={includePausedCalendar}
+                  onChange={(event) => setIncludePausedCalendar(event.target.checked)}
+                  className="h-5 w-5 accent-amber-400"
+                />
+              </label>
+
+              <div className="divide-y divide-zinc-900">
+                {calendarExportSubscriptions.map((subscription) => (
+                  <div key={subscription.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 shrink-0" style={{ background: subscription.color }} />
+                        <span className="truncate text-sm font-bold text-zinc-100">{subscription.name}</span>
+                        {subscription.paused && <span className="border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] uppercase text-zinc-500">Paused</span>}
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-600">
+                        {subscription.cycle} / {fullDate(subscription.nextBillingDate)} / rev {subscription.revision}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm font-black text-amber-300">{money(subscription.amount, subscription.currency)}</div>
+                  </div>
+                ))}
+                {!calendarExportSubscriptions.length && (
+                  <div className="px-4 py-8 text-sm text-zinc-600">No subscription schedules are available for export.</div>
+                )}
+              </div>
+            </div>
+
+            {calendarExportError && <div className="border-t border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{calendarExportError}</div>}
+
+            <footer className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="font-mono text-[10px] uppercase text-zinc-600">
+                {formatCurrencyTotals(calendarExportTotals)} monthly / private / transparent
+              </div>
+              <button
+                type="button"
+                disabled={!calendarExportSubscriptions.length}
+                onClick={exportCalendarFile}
+                className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+              >
+                Download .ics
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {ledgerOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
