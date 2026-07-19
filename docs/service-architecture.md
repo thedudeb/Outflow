@@ -10,6 +10,7 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 ### Supabase
 
 - Passwordless email sign-in uses Supabase Auth and PKCE through `signInWithOtp`.
+- A session recovered from browser storage is treated as untrusted until Supabase Auth verifies its access token through `getUser`; the server-verified user replaces the stored user object, and rejected sessions are cleared locally.
 - Personal and shared data lives in Postgres with Row Level Security enabled on every exposed table.
 - Membership authorization is enforced in database policies, not inferred from client UI.
 - Guest migration runs as one authenticated database function and returns an idempotent receipt.
@@ -56,18 +57,19 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 
 1. Dismissible account checkpoints can appear after meaningful local activity, backup, sharing, or installation moments. They store only local cadence state and never upload data or block the triggering action. See [Optional Account Onboarding](optional-account-onboarding.md).
 2. A guest requests a passwordless email link. No ledger data is included in that request.
-3. After authentication, the user sees the number of local ledgers and records that can be uploaded.
-4. Upload is explicit. The client calls `migrate_guest_workspace` with the validated versioned workspace.
-5. The database validates the entire payload, applies it transactionally, and returns an idempotent receipt.
-6. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; the user explicitly opens that cloud ledger before synchronization begins.
-7. A cloud ledger loads its authoritative revision and exposes a visible sync state. Pro editors write through `replace_ledger_snapshot`; stale writes are rejected without changing server data.
-8. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
-9. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
-10. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
-11. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim.
-12. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately.
-13. Signing out closes the cloud ledger and returns to the untouched local workspace.
-14. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, hosted calendar feeds, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
+3. A returned or recovered session is accepted only after Supabase Auth verifies its access token and user.
+4. After authentication, the user sees the number of local ledgers and records that can be uploaded.
+5. Upload is explicit. The client calls `migrate_guest_workspace` with the validated versioned workspace.
+6. The database validates the entire payload, applies it transactionally, and returns an idempotent receipt.
+7. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; the user explicitly opens that cloud ledger before synchronization begins.
+8. A cloud ledger loads its authoritative revision and exposes a visible sync state. Pro editors write through `replace_ledger_snapshot`; stale writes are rejected without changing server data.
+9. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
+10. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
+11. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
+12. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim.
+13. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately.
+14. Signing out closes the cloud ledger and returns to the untouched local workspace.
+15. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, hosted calendar feeds, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
 
 ## Authorization Model
 

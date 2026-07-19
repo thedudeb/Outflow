@@ -54,6 +54,15 @@ export function getCloud() {
   return cloudPromise;
 }
 
+export async function verifyAccountSession(session) {
+  if (!session?.access_token) return null;
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.auth.getUser(session.access_token);
+  if (error || !data?.user) throw error || new Error("The account session could not be verified.");
+  return { ...session, user: data.user };
+}
+
 export async function requestAccountLink(email) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");

@@ -4,6 +4,8 @@
 
 Outflow keeps browser-local and cloud ledgers as separate data sources. Opening a cloud ledger is explicit, and its totals never merge into the active local ledger. The header always identifies the active storage source, member role, revision, and synchronization state.
 
+Signing in does not synchronize or upload the local workspace. A recovered browser session is accepted only after Supabase Auth verifies its access token; the separate **Create cloud copy** action performs the transactional migration, and the local workspace remains unchanged afterward.
+
 ## Write Contract
 
 - Every cloud subscription write sends the complete active ledger snapshot, its expected ledger revision, and a random idempotency key.

@@ -28,6 +28,7 @@ import {
   subscribeToCloudLedger,
   uploadGuestWorkspace,
   updateCloudLedgerMemberRole,
+  verifyAccountSession,
 } from "./cloud";
 import {
   ACCOUNT_NUDGE_DISMISS_DAYS,
@@ -1559,21 +1560,47 @@ function Tracker({ onExit, pwa }) {
     }
     let active = true;
     let authSubscription;
+    let verificationSequence = 0;
     getCloud().then(async (client) => {
       if (!active || !client) return;
       setCloudClient(client);
-      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
-        if (!active) return;
-        setAccountSession(session);
-        setAccountLoading(false);
-        if (session?.user?.email) setAccountEmail(session.user.email);
+      const applyVerifiedSession = async (session) => {
+        const sequence = ++verificationSequence;
+        if (!session) {
+          if (!active) return;
+          setAccountSession(null);
+          setAccountLoading(false);
+          return;
+        }
+        setAccountLoading(true);
+        try {
+          const verifiedSession = await verifyAccountSession(session);
+          if (!active || sequence !== verificationSequence) return;
+          setAccountSession(verifiedSession);
+          if (verifiedSession?.user?.email) setAccountEmail(verifiedSession.user.email);
+        } catch {
+          if (!active || sequence !== verificationSequence) return;
+          setAccountSession(null);
+          setAccountError("Your account session could not be verified. Sign in again; local ledgers were not changed.");
+          window.setTimeout(() => client.auth.signOut({ scope: "local" }).catch(() => {}), 0);
+        } finally {
+          if (active && sequence === verificationSequence) setAccountLoading(false);
+        }
+      };
+      const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
+        if (!active || event === "INITIAL_SESSION") return;
+        void applyVerifiedSession(session);
       });
       authSubscription = authListener.subscription;
       const { data, error } = await client.auth.getSession();
       if (!active) return;
-      setAccountSession(data.session || null);
-      setAccountError(error?.message || "");
-      setAccountLoading(false);
+      if (error) {
+        setAccountSession(null);
+        setAccountError("Your account session could not be read. Sign in again; local ledgers were not changed.");
+        setAccountLoading(false);
+        return;
+      }
+      await applyVerifiedSession(data.session || null);
     }).catch((error) => {
       if (!active) return;
       setAccountError(error instanceof Error ? error.message : "Outflow cloud could not initialize.");
