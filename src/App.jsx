@@ -1029,6 +1029,21 @@ function Field({ label, children }) {
   );
 }
 
+function LiveMessage({ kind = "status", className = "", children, ...props }) {
+  const alert = kind === "alert";
+  return (
+    <div
+      role={alert ? "alert" : "status"}
+      aria-live={alert ? "assertive" : "polite"}
+      aria-atomic="true"
+      className={className}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
 const dialogFocusableSelector = [
   "a[href]",
   "button:not([disabled])",
@@ -1424,6 +1439,7 @@ function Tracker({ onExit, pwa }) {
   const [deleteLedgerId, setDeleteLedgerId] = useState(null);
   const [backupSession, setBackupSession] = useState(null);
   const [backupError, setBackupError] = useState("");
+  const [backupLoading, setBackupLoading] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountPromptContext, setAccountPromptContext] = useState("");
   const [accountEntryContext, setAccountEntryContext] = useState("");
@@ -1498,6 +1514,7 @@ function Tracker({ onExit, pwa }) {
   const [csvSession, setCsvSession] = useState(null);
   const [csvMapping, setCsvMapping] = useState({});
   const [csvError, setCsvError] = useState("");
+  const [csvLoading, setCsvLoading] = useState(false);
   const accountDialogRef = useDialogLifecycle(accountOpen, closeAccountControls, Boolean(accountBusy));
   const calendarDialogRef = useDialogLifecycle(calendarExportOpen, closeCalendarExport, Boolean(calendarFeedBusy));
   const ledgerDialogRef = useDialogLifecycle(ledgerOpen, closeLedgerControls);
@@ -2735,6 +2752,7 @@ function Tracker({ onExit, pwa }) {
     setDeleteLedgerId(null);
     setBackupSession(null);
     setBackupError("");
+    setBackupLoading(false);
     setLedgerMeta((current) => sanitizeLedgerMeta(current));
   }
 
@@ -2825,6 +2843,9 @@ function Tracker({ onExit, pwa }) {
       return;
     }
 
+    setBackupSession(null);
+    setBackupError("");
+    setBackupLoading(true);
     try {
       const parsed = JSON.parse(await file.text());
       const permission = "Notification" in window ? window.Notification.permission : "unsupported";
@@ -2833,6 +2854,8 @@ function Tracker({ onExit, pwa }) {
     } catch (error) {
       setBackupSession(null);
       setBackupError(error instanceof Error ? error.message : "Outflow could not read this backup.");
+    } finally {
+      setBackupLoading(false);
     }
   }
 
@@ -2864,22 +2887,28 @@ function Tracker({ onExit, pwa }) {
     setCsvSession(null);
     setCsvMapping({});
     setCsvError("");
+    setCsvLoading(false);
   }
 
   function selectCsvFile(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+
+    setCsvError("");
+    setCsvSession(null);
+    setCsvMapping({});
     if (file.size > MAX_CSV_BYTES) {
       setCsvError("CSV files must be 2 MB or smaller.");
       return;
     }
 
-    setCsvError("");
+    setCsvLoading(true);
     Papa.parse(file, {
       header: true,
       skipEmptyLines: "greedy",
       complete: (result) => {
+        setCsvLoading(false);
         const headers = (result.meta.fields || []).map((header) => String(header).trim()).filter(Boolean);
         if (!headers.length) {
           setCsvError("No header row was found in this CSV.");
@@ -2899,7 +2928,10 @@ function Tracker({ onExit, pwa }) {
         });
         setCsvMapping(guessCsvMapping(headers));
       },
-      error: () => setCsvError("Outflow could not read this CSV file."),
+      error: () => {
+        setCsvLoading(false);
+        setCsvError("Outflow could not read this CSV file.");
+      },
     });
   }
 
@@ -3303,16 +3335,20 @@ function Tracker({ onExit, pwa }) {
           )}
 
           {usingCloudLedger && (
-            <div className={`grid gap-2 border px-3 py-2 font-mono text-[10px] uppercase sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+            <LiveMessage
+              kind={["offline", "conflict", "stale"].includes(cloudSyncStatus) ? "alert" : "status"}
+              aria-busy={["loading", "syncing", "refreshing"].includes(cloudSyncStatus)}
+              className={`grid gap-2 border px-3 py-2 font-mono text-[10px] uppercase sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
               cloudSyncStatus === "offline"
                 ? "border-red-900 bg-red-950/25 text-red-200"
                 : cloudSyncStatus === "conflict" || cloudSyncStatus === "stale"
                   ? "border-amber-900 bg-amber-950/20 text-amber-200"
                   : "border-cyan-950 bg-cyan-950/10 text-cyan-200"
-            }`}>
+              }`}
+            >
               <span>{cloudSyncMessage || `Cloud revision ${ledgerMeta.revision}`}</span>
-              <span className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
-            </div>
+              <span aria-hidden="true" className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
+            </LiveMessage>
           )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -3740,6 +3776,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-controls-title"
+            aria-busy={Boolean(accountBusy) || accountLoading || accountEntitlementLoading || emailPreferencesLoading || proOfferLoading || cloudLedgersLoading}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
@@ -3788,7 +3825,7 @@ function Tracker({ onExit, pwa }) {
               )}
 
               {cloudConfigError && (
-                <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{cloudConfigError}</div>
+                <LiveMessage kind="alert" className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{cloudConfigError}</LiveMessage>
               )}
 
               {!cloudConfigured && (
@@ -3801,7 +3838,7 @@ function Tracker({ onExit, pwa }) {
               )}
 
               {cloudConfigured && accountLoading && (
-                <div className="border-b border-zinc-800 px-4 py-6 font-mono text-xs uppercase text-zinc-500">Checking account session...</div>
+                <LiveMessage className="border-b border-zinc-800 px-4 py-6 font-mono text-xs uppercase text-zinc-500">Checking account session...</LiveMessage>
               )}
 
               {cloudConfigured && !accountLoading && !accountSession && (
@@ -3886,7 +3923,7 @@ function Tracker({ onExit, pwa }) {
                           {accountEntitlementLoading ? "Checking" : accountEntitlement?.status === "active" ? "Lifetime active" : "One-time unlock"}
                         </span>
                       </div>
-                      <div className="mt-2 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                      <LiveMessage kind={proOfferError ? "alert" : "status"} className="mt-2 font-mono text-[10px] uppercase leading-5 text-zinc-600">
                         {accountEntitlement?.status === "active"
                           ? `Purchased ${accountEntitlement.purchased_at ? shortDate(accountEntitlement.purchased_at.slice(0, 10)) : "previously"} / ${accountEntitlement.provider || "account"} / no renewal`
                           : proOfferLoading
@@ -3894,7 +3931,7 @@ function Tracker({ onExit, pwa }) {
                             : proOffer
                               ? `${proOffer.name} / ${stripeMoney(proOffer.unitAmount, proOffer.currency)} once / no product subscription`
                               : proOfferError || "One-time checkout has not been configured"}
-                      </div>
+                      </LiveMessage>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       {accountEntitlement?.status !== "active" && (
@@ -4206,11 +4243,11 @@ function Tracker({ onExit, pwa }) {
               )}
 
               {(accountMessage || accountError) && (
-                <div className={`border-b px-4 py-3 text-sm ${
+                <LiveMessage kind={accountError ? "alert" : "status"} className={`border-b px-4 py-3 text-sm ${
                   accountError ? "border-red-900 bg-red-950/40 text-red-200" : "border-emerald-900 bg-emerald-950/20 text-emerald-200"
                 }`}>
                   {accountError || accountMessage}
-                </div>
+                </LiveMessage>
               )}
 
               <section>
@@ -4254,6 +4291,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="calendar-export-title"
+            aria-busy={calendarFeedLoading || Boolean(calendarFeedBusy)}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
@@ -4294,7 +4332,7 @@ function Tracker({ onExit, pwa }) {
                 <section className="border-b border-zinc-800">
                   <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
                     <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Hosted subscription / Pro</span>
-                    <span className={`font-mono text-[9px] font-black uppercase ${
+                    <span role="status" aria-live="polite" aria-atomic="true" className={`font-mono text-[9px] font-black uppercase ${
                       calendarFeed && accountEntitlement?.status === "active" ? "text-emerald-300" : "text-zinc-600"
                     }`}>
                       {calendarFeedLoading
@@ -4390,7 +4428,7 @@ function Tracker({ onExit, pwa }) {
                         </div>
                       </div>
                       {calendarFeedMessage && (
-                        <div className="border-t border-emerald-950 bg-emerald-950/10 px-4 py-2 text-xs text-emerald-200">{calendarFeedMessage}</div>
+                        <LiveMessage className="border-t border-emerald-950 bg-emerald-950/10 px-4 py-2 text-xs text-emerald-200">{calendarFeedMessage}</LiveMessage>
                       )}
                     </>
                   )}
@@ -4434,7 +4472,7 @@ function Tracker({ onExit, pwa }) {
               </div>
             </div>
 
-            {calendarExportError && <div className="border-t border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{calendarExportError}</div>}
+            {calendarExportError && <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{calendarExportError}</LiveMessage>}
 
             <footer className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="font-mono text-[10px] uppercase text-zinc-600">
@@ -4460,6 +4498,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="ledger-controls-title"
+            aria-busy={cloudLedgersLoading || Boolean(cloudOpenId) || backupLoading}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] w-full max-w-3xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
           >
@@ -4662,13 +4701,18 @@ function Tracker({ onExit, pwa }) {
                     type="file"
                     accept=".json,application/json"
                     onChange={selectLedgerBackup}
-                    disabled={usingCloudLedger}
+                    disabled={usingCloudLedger || backupLoading}
+                    aria-invalid={Boolean(backupError)}
+                    aria-errormessage={backupError ? "backup-error" : undefined}
+                    aria-describedby={backupError ? "backup-error" : undefined}
                     className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black disabled:border-zinc-900 disabled:text-zinc-700"
                   />
                 </Field>
               </section>
 
-              {backupError && <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{backupError}</div>}
+              {backupLoading && <LiveMessage className="border-b border-zinc-800 px-4 py-3 font-mono text-[10px] uppercase text-zinc-500">Reading backup...</LiveMessage>}
+
+              {backupError && <LiveMessage id="backup-error" kind="alert" className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{backupError}</LiveMessage>}
 
               {backupSession && (
                 <section>
@@ -4816,6 +4860,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="csv-import-title"
+            aria-busy={csvLoading}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-5xl"
           >
@@ -4842,6 +4887,10 @@ function Tracker({ onExit, pwa }) {
                     type="file"
                     accept=".csv,text/csv"
                     onChange={selectCsvFile}
+                    disabled={csvLoading}
+                    aria-invalid={Boolean(csvError)}
+                    aria-errormessage={csvError ? "csv-error" : undefined}
+                    aria-describedby={csvError ? "csv-error" : undefined}
                     className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black"
                   />
                 </Field>
@@ -4852,7 +4901,9 @@ function Tracker({ onExit, pwa }) {
                 )}
               </div>
 
-              {csvError && <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{csvError}</div>}
+              {csvLoading && <LiveMessage className="border-b border-zinc-800 px-4 py-3 font-mono text-[10px] uppercase text-zinc-500">Reading CSV...</LiveMessage>}
+
+              {csvError && <LiveMessage id="csv-error" kind="alert" className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{csvError}</LiveMessage>}
 
               {csvSession && (
                 <>
@@ -4926,10 +4977,10 @@ function Tracker({ onExit, pwa }) {
                   </div>
 
                   {(csvSession.truncated || csvSession.parserWarnings.length > 0) && (
-                    <div className="border-b border-amber-900 bg-amber-950/20 px-4 py-3 font-mono text-[10px] uppercase text-amber-300">
+                    <LiveMessage className="border-b border-amber-900 bg-amber-950/20 px-4 py-3 font-mono text-[10px] uppercase text-amber-300">
                       {csvSession.truncated && <div>Only the first {MAX_CSV_ROWS} rows were loaded.</div>}
                       {csvSession.parserWarnings.map((warning, index) => <div key={`${warning.code}-${index}`}>Row {(warning.row ?? 0) + 2}: {warning.message}</div>)}
-                    </div>
+                    </LiveMessage>
                   )}
                 </>
               )}
