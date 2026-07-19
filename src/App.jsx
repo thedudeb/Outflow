@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Papa from "papaparse";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -21,6 +22,8 @@ const cycles = [
 
 const validCycles = new Set(cycles.map((cycle) => cycle.value));
 const validColors = new Set(colorTags.map((tag) => tag.value));
+const currencies = ["USD", "CAD", "EUR", "GBP", "AUD", "NZD", "JPY", "CHF"];
+const validCurrencies = new Set(currencies);
 const reminderOptions = [
   { label: "Off", value: -1 },
   { label: "Same day", value: 0 },
@@ -30,15 +33,31 @@ const reminderOptions = [
   { label: "14 days before", value: 14 },
 ];
 const validReminderDays = new Set(reminderOptions.map((option) => option.value));
+const csvImportFields = [
+  { key: "name", label: "Name", required: true, aliases: ["name", "subscription", "service"] },
+  { key: "amount", label: "Amount", required: true, aliases: ["amount", "price", "cost"] },
+  { key: "currency", label: "Currency", aliases: ["currency", "currencycode", "iso"] },
+  { key: "cycle", label: "Billing cycle", required: true, aliases: ["cycle", "billingcycle", "frequency"] },
+  { key: "nextBillingDate", label: "Next billing date", required: true, aliases: ["nextbillingdate", "nextdate", "billingdate"] },
+  { key: "category", label: "Category", aliases: ["category", "group"] },
+  { key: "tags", label: "Tags", aliases: ["tags", "labels"] },
+  { key: "trialEndDate", label: "Trial end date", aliases: ["trialenddate", "trialends", "trialdate"] },
+  { key: "reminderDays", label: "Reminder days", aliases: ["reminderdays", "alertdays", "reminder"] },
+  { key: "paused", label: "Paused", aliases: ["paused", "status"] },
+  { key: "color", label: "Color", aliases: ["color", "colour", "tagcolor"] },
+];
 const MAX_SUBSCRIPTIONS = 500;
 const MAX_DATE_ADVANCES = 50000;
 const MAX_TAGS = 10;
+const MAX_CSV_BYTES = 2 * 1024 * 1024;
+const MAX_CSV_ROWS = 1000;
 
 const seedSubscriptions = [
   {
     id: "netflix",
     name: "Netflix",
     amount: 15.49,
+    currency: "USD",
     cycle: "monthly",
     nextBillingDate: "2026-05-24",
     category: "Streaming",
@@ -52,6 +71,7 @@ const seedSubscriptions = [
     id: "spotify",
     name: "Spotify",
     amount: 10.99,
+    currency: "USD",
     cycle: "monthly",
     nextBillingDate: "2026-05-29",
     category: "Music",
@@ -65,6 +85,7 @@ const seedSubscriptions = [
     id: "icloud",
     name: "iCloud+",
     amount: 2.99,
+    currency: "USD",
     cycle: "monthly",
     nextBillingDate: "2026-06-03",
     category: "Storage",
@@ -78,6 +99,7 @@ const seedSubscriptions = [
     id: "github",
     name: "GitHub Copilot",
     amount: 10,
+    currency: "USD",
     cycle: "monthly",
     nextBillingDate: "2026-06-08",
     category: "Dev Tools",
@@ -91,6 +113,7 @@ const seedSubscriptions = [
     id: "notion",
     name: "Notion Plus",
     amount: 96,
+    currency: "USD",
     cycle: "yearly",
     nextBillingDate: "2026-08-17",
     category: "Productivity",
@@ -105,6 +128,7 @@ const seedSubscriptions = [
 const blankForm = {
   name: "",
   amount: "",
+  currency: "USD",
   cycle: "monthly",
   nextBillingDate: toDateInput(new Date()),
   category: "",
@@ -136,6 +160,7 @@ function sanitizeSubscription(value) {
 
   const name = typeof value.name === "string" ? value.name.trim().slice(0, 100) : "";
   const amount = Number(value.amount);
+  const currency = validCurrencies.has(value.currency) ? value.currency : "USD";
   const category = typeof value.category === "string" ? value.category.trim().slice(0, 60) : "Unsorted";
   const rawTags = Array.isArray(value.tags)
     ? value.tags
@@ -170,6 +195,7 @@ function sanitizeSubscription(value) {
     id: typeof value.id === "string" && value.id.length <= 100 ? value.id : crypto.randomUUID(),
     name,
     amount,
+    currency,
     cycle: value.cycle,
     nextBillingDate: value.nextBillingDate,
     category: category || "Unsorted",
@@ -227,12 +253,32 @@ function monthlyEquivalent(subscription) {
   return amount;
 }
 
-function money(value) {
+function money(value, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: validCurrencies.has(currency) ? currency : "USD",
     minimumFractionDigits: 2,
   }).format(Number(value) || 0);
+}
+
+function totalsByCurrency(items, amountFor = (item) => item.amount) {
+  const totals = new Map();
+  items.forEach((item) => {
+    const currency = validCurrencies.has(item.currency) ? item.currency : "USD";
+    totals.set(currency, (totals.get(currency) || 0) + Number(amountFor(item) || 0));
+  });
+  return [...totals.entries()]
+    .map(([currency, total]) => ({ currency, total }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+function scaleCurrencyTotals(totals, factor) {
+  return totals.map((entry) => ({ ...entry, total: entry.total * factor }));
+}
+
+function formatCurrencyTotals(totals, fallbackCurrency = "USD") {
+  if (!totals.length) return money(0, fallbackCurrency);
+  return totals.map((entry) => money(entry.total, entry.currency)).join(" + ");
 }
 
 function shortDate(value) {
@@ -338,7 +384,7 @@ function weeklyForecast(events, days) {
     return {
       id: `${toDateInput(start)}-${toDateInput(end)}`,
       label: `${shortDate(toDateInput(start))}-${shortDate(toDateInput(end))}`,
-      total: bucketEvents.reduce((sum, event) => sum + Number(event.amount), 0),
+      totals: totalsByCurrency(bucketEvents),
       count: bucketEvents.length,
     };
   });
@@ -359,6 +405,7 @@ function buildAlerts(subscriptions, today = toDateInput(new Date())) {
           date: subscription.nextBillingDate,
           daysOut: chargeDays,
           amount: subscription.amount,
+          currency: subscription.currency,
           color: subscription.color,
         });
       }
@@ -373,6 +420,7 @@ function buildAlerts(subscriptions, today = toDateInput(new Date())) {
             date: subscription.trialEndDate,
             daysOut: trialDays,
             amount: subscription.amount,
+            currency: subscription.currency,
             color: subscription.color,
           });
         }
@@ -393,6 +441,7 @@ function subscriptionsToCsv(subscriptions) {
   const columns = [
     "name",
     "amount",
+    "currency",
     "cycle",
     "nextBillingDate",
     "category",
@@ -405,6 +454,7 @@ function subscriptionsToCsv(subscriptions) {
   const rows = subscriptions.map((subscription) => [
     subscription.name,
     subscription.amount,
+    subscription.currency,
     subscription.cycle,
     subscription.nextBillingDate,
     subscription.category,
@@ -416,6 +466,98 @@ function subscriptionsToCsv(subscriptions) {
   ]);
 
   return [columns, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
+function normalizedHeader(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function guessCsvMapping(headers) {
+  return Object.fromEntries(csvImportFields.map((field) => {
+    const match = headers.find((header) => field.aliases.includes(normalizedHeader(header)));
+    return [field.key, match || ""];
+  }));
+}
+
+function normalizeCsvDate(value) {
+  const text = String(value || "").trim();
+  if (isValidDate(text)) return text;
+
+  const match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!match) return "";
+  const [, month, day, year] = match;
+  const normalized = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  return isValidDate(normalized) ? normalized : "";
+}
+
+function normalizeCsvCycle(value) {
+  const text = normalizedHeader(value);
+  if (["weekly", "week", "wk"].includes(text)) return "weekly";
+  if (["monthly", "month", "mo"].includes(text)) return "monthly";
+  if (["yearly", "annual", "annually", "year", "yr"].includes(text)) return "yearly";
+  return "";
+}
+
+function normalizeCsvBoolean(value) {
+  return ["true", "yes", "1", "paused"].includes(String(value || "").trim().toLowerCase());
+}
+
+function importDuplicateKey(subscription) {
+  return `${subscription.name.toLowerCase()}|${Number(subscription.amount).toFixed(4)}|${subscription.currency}|${subscription.cycle}`;
+}
+
+function buildCsvCandidates(rows, mapping, existingSubscriptions) {
+  const existingKeys = new Set(existingSubscriptions.map(importDuplicateKey));
+  const fileKeys = new Set();
+
+  return rows.slice(0, MAX_CSV_ROWS).map((row, index) => {
+    const value = (key) => mapping[key] ? row[mapping[key]] : "";
+    const amountText = String(value("amount") || "").replace(/[^0-9.-]/g, "");
+    const amount = Number(amountText);
+    const currencyText = String(value("currency") || "USD").trim().toUpperCase();
+    const currency = validCurrencies.has(currencyText) ? currencyText : "";
+    const cycle = normalizeCsvCycle(value("cycle"));
+    const nextBillingDate = normalizeCsvDate(value("nextBillingDate"));
+    const trialText = String(value("trialEndDate") || "").trim();
+    const trialEndDate = trialText ? normalizeCsvDate(trialText) : "";
+    const reminderText = String(value("reminderDays") || "").trim();
+    const reminderDays = reminderText === "" ? 7 : Number(reminderText);
+    const errors = [];
+
+    if (!String(value("name") || "").trim()) errors.push("Missing name");
+    if (!Number.isFinite(amount) || amount <= 0) errors.push("Invalid amount");
+    if (!currency) errors.push("Unsupported currency");
+    if (!cycle) errors.push("Invalid billing cycle");
+    if (!nextBillingDate) errors.push("Invalid next billing date");
+    if (trialText && !trialEndDate) errors.push("Invalid trial end date");
+    if (!validReminderDays.has(reminderDays)) errors.push("Invalid reminder days");
+
+    const subscription = errors.length ? null : sanitizeSubscription({
+      id: crypto.randomUUID(),
+      name: value("name"),
+      amount,
+      currency,
+      cycle,
+      nextBillingDate,
+      category: value("category") || "Unsorted",
+      tags: String(value("tags") || "").split(/[|;,]/),
+      color: value("color"),
+      trialEndDate,
+      reminderDays,
+      paused: normalizeCsvBoolean(value("paused")),
+    });
+
+    const key = subscription ? importDuplicateKey(subscription) : "";
+    const duplicate = Boolean(key && (existingKeys.has(key) || fileKeys.has(key)));
+    if (key) fileKeys.add(key);
+
+    return {
+      rowNumber: index + 2,
+      subscription,
+      errors: subscription ? errors : errors.length ? errors : ["Invalid row"],
+      duplicate,
+    };
+  });
 }
 
 function dayLabel(daysOut) {
@@ -458,7 +600,7 @@ function StatCell({ label, value, sublabel, tone = "neutral", code }) {
         <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</div>
         {code && <div className="font-mono text-[10px] text-zinc-600">{code}</div>}
       </div>
-      <div className={`mt-3 font-mono text-3xl font-black leading-none ${toneClass}`}>{value}</div>
+      <div className={`mt-3 break-words font-mono text-xl font-black leading-tight sm:text-2xl xl:text-3xl ${toneClass}`}>{value}</div>
       <div className="mt-2 border-t border-zinc-900 pt-2 text-xs text-zinc-500">{sublabel}</div>
     </section>
   );
@@ -498,7 +640,7 @@ function LandingPage({ onOpen }) {
           {previewSubscriptions.map((subscription) => (
             <div key={subscription.id} className="grid min-h-28 gap-3 sm:grid-cols-[220px_minmax(0,1fr)_280px]">
               <div className="border border-violet-400 bg-violet-950 p-4">
-                <div className="font-mono text-2xl font-black text-violet-100">{money(subscription.amount)}</div>
+                <div className="font-mono text-2xl font-black text-violet-100">{money(subscription.amount, subscription.currency)}</div>
                 <div className="mt-6 text-xs uppercase text-violet-300">{initials(subscription.name)} / {subscription.cycle}</div>
               </div>
               <div className="hidden border border-red-400 bg-red-950 p-4 sm:block">
@@ -506,7 +648,7 @@ function LandingPage({ onOpen }) {
                 <div className="mt-8 text-xs uppercase text-red-300">{subscription.category}</div>
               </div>
               <div className="hidden border border-emerald-400 bg-emerald-950 p-4 sm:block">
-                <div className="font-mono text-2xl font-black text-emerald-100">{money(subscription.amount)}</div>
+                <div className="font-mono text-2xl font-black text-emerald-100">{money(subscription.amount, subscription.currency)}</div>
                 <div className="mt-6 text-xs uppercase text-emerald-300">{shortDate(subscription.nextBillingDate)}</div>
               </div>
             </div>
@@ -564,7 +706,7 @@ function LandingPage({ onOpen }) {
                   <div className="border border-violet-500/60 bg-violet-950/50 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <span className="grid h-10 w-10 place-items-center border border-violet-300 bg-black font-mono font-black text-violet-100">{initials(subscription.name)}</span>
-                      <span className="font-mono text-xl font-black text-violet-100">{money(subscription.amount)}</span>
+                      <span className="font-mono text-xl font-black text-violet-100">{money(subscription.amount, subscription.currency)}</span>
                     </div>
                   </div>
                   <div className="border border-red-500/60 bg-red-950/50 p-4">
@@ -572,7 +714,7 @@ function LandingPage({ onOpen }) {
                     <div className="mt-2 text-xs uppercase text-red-300/70">{subscription.category} / {subscription.cycle}</div>
                   </div>
                   <div className="border border-emerald-500/60 bg-emerald-950/50 p-4">
-                    <div className="font-mono text-xl font-black text-emerald-100">{money(subscription.amount)}</div>
+                    <div className="font-mono text-xl font-black text-emerald-100">{money(subscription.amount, subscription.currency)}</div>
                     <div className="mt-2 text-xs uppercase text-emerald-300/70">Pulls {shortDate(subscription.nextBillingDate)}</div>
                   </div>
                 </div>
@@ -647,6 +789,10 @@ function Tracker({ onExit }) {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(() => toDateInput(new Date()));
+  const [importOpen, setImportOpen] = useState(false);
+  const [csvSession, setCsvSession] = useState(null);
+  const [csvMapping, setCsvMapping] = useState({});
+  const [csvError, setCsvError] = useState("");
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
@@ -680,14 +826,16 @@ function Tracker({ onExit }) {
     [forecastTimeline, forecastHorizon],
   );
   const forecastCategories = useMemo(() => {
-    const totals = new Map();
+    const categories = new Map();
     forecastTimeline.forEach((event) => {
-      const current = totals.get(event.category) || { name: event.category, total: 0, count: 0 };
-      current.total += Number(event.amount);
+      const current = categories.get(event.category) || { name: event.category, events: [], count: 0 };
+      current.events.push(event);
       current.count += 1;
-      totals.set(event.category, current);
+      categories.set(event.category, current);
     });
-    return [...totals.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    return [...categories.values()]
+      .map((category) => ({ ...category, totals: totalsByCurrency(category.events) }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [forecastTimeline]);
 
   const calendarBounds = useMemo(() => monthBounds(calendarCursor), [calendarCursor]);
@@ -707,16 +855,26 @@ function Tracker({ onExit }) {
   }, [calendarEvents]);
   const selectedDayEvents = calendarEventsByDate.get(selectedDate) || [];
   const upcomingWeek = timeline.filter((event) => event.daysOut <= 7);
-  const monthlyTotal = activeSubscriptions.reduce((sum, item) => sum + monthlyEquivalent(item), 0);
-  const yearlyRunRate = monthlyTotal * 12;
+  const monthlyTotals = totalsByCurrency(activeSubscriptions, monthlyEquivalent);
+  const yearlyRunRateTotals = scaleCurrencyTotals(monthlyTotals, 12);
   const pausedCount = subscriptions.length - activeSubscriptions.length;
-  const thirtyDayTotal = timeline.reduce((sum, event) => sum + Number(event.amount), 0);
-  const forecastTotal = forecastTimeline.reduce((sum, event) => sum + Number(event.amount), 0);
-  const forecastPeak = Math.max(...forecastWeeks.map((week) => week.total), 0);
-  const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.total), 0);
-  const calendarMonthTotal = calendarEvents.reduce((sum, event) => sum + Number(event.amount), 0);
+  const thirtyDayTotals = totalsByCurrency(timeline);
+  const forecastTotals = totalsByCurrency(forecastTimeline);
+  const forecastWeeklyAverageTotals = scaleCurrencyTotals(forecastTotals, 1 / Math.max(forecastWeeks.length, 1));
+  const forecastPeak = Math.max(...forecastWeeks.map((week) => week.count), 0);
+  const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.count), 0);
+  const calendarMonthTotals = totalsByCurrency(calendarEvents);
   const nextCharge = timeline[0];
   const alerts = useMemo(() => buildAlerts(subscriptions), [subscriptions]);
+  const csvCandidates = useMemo(
+    () => csvSession ? buildCsvCandidates(csvSession.rows, csvMapping, subscriptions) : [],
+    [csvSession, csvMapping, subscriptions],
+  );
+  const importableCandidates = csvCandidates.filter((candidate) => candidate.subscription && !candidate.duplicate);
+  const invalidImportCount = csvCandidates.filter((candidate) => candidate.errors.length > 0).length;
+  const duplicateImportCount = csvCandidates.filter((candidate) => candidate.duplicate).length;
+  const availableImportSlots = Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
+  const importConfirmCount = Math.min(importableCandidates.length, availableImportSlots);
 
   useEffect(() => {
     if (notificationPermission !== "granted" || alerts.length === 0) return;
@@ -729,8 +887,8 @@ function Tracker({ onExit }) {
       pending.forEach((alert) => {
         const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
         const body = alert.type === "trial"
-          ? `${money(alert.amount)} expected after the trial ends on ${fullDate(alert.date)}.`
-          : `${money(alert.amount)} will leave on ${fullDate(alert.date)}.`;
+          ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)}.`
+          : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)}.`;
         new window.Notification(`Outflow / ${title}`, { body, tag: alert.id });
         notified.add(alert.id);
       });
@@ -757,6 +915,7 @@ function Tracker({ onExit }) {
       id: editingId || crypto.randomUUID(),
       name: form.name.trim(),
       amount: Number(form.amount),
+      currency: form.currency,
       cycle: form.cycle,
       nextBillingDate: form.nextBillingDate,
       category: form.category.trim() || "Unsorted",
@@ -784,6 +943,7 @@ function Tracker({ onExit }) {
     setForm({
       name: subscription.name,
       amount: String(subscription.amount),
+      currency: subscription.currency,
       cycle: subscription.cycle,
       nextBillingDate: subscription.nextBillingDate,
       category: subscription.category,
@@ -842,6 +1002,59 @@ function Tracker({ onExit }) {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function closeCsvImport() {
+    setImportOpen(false);
+    setCsvSession(null);
+    setCsvMapping({});
+    setCsvError("");
+  }
+
+  function selectCsvFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_CSV_BYTES) {
+      setCsvError("CSV files must be 2 MB or smaller.");
+      return;
+    }
+
+    setCsvError("");
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: "greedy",
+      complete: (result) => {
+        const headers = (result.meta.fields || []).map((header) => String(header).trim()).filter(Boolean);
+        if (!headers.length) {
+          setCsvError("No header row was found in this CSV.");
+          return;
+        }
+        if (!result.data.length) {
+          setCsvError("No subscription rows were found in this CSV.");
+          return;
+        }
+
+        setCsvSession({
+          fileName: file.name.slice(0, 120),
+          headers,
+          rows: result.data.slice(0, MAX_CSV_ROWS),
+          truncated: result.data.length > MAX_CSV_ROWS,
+          parserWarnings: result.errors.filter((error) => error.type !== "Delimiter").slice(0, 5),
+        });
+        setCsvMapping(guessCsvMapping(headers));
+      },
+      error: () => setCsvError("Outflow could not read this CSV file."),
+    });
+  }
+
+  function confirmCsvImport() {
+    const imported = importableCandidates
+      .slice(0, availableImportSlots)
+      .map((candidate) => normalizeBillingDate(candidate.subscription));
+    if (!imported.length) return;
+    setSubscriptions((current) => [...current, ...imported].slice(0, MAX_SUBSCRIPTIONS));
+    closeCsvImport();
+  }
+
   return (
     <main className="min-h-screen text-zinc-200">
       <div className="mx-auto grid w-full max-w-[1560px] grid-cols-[minmax(0,1fr)] gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[360px_minmax(0,1fr)]">
@@ -852,7 +1065,7 @@ function Tracker({ onExit }) {
                 <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-300">cashflow console</div>
                 <h1 className="mt-1 text-3xl font-black uppercase leading-none tracking-[0.14em] text-zinc-50">Outflow</h1>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <button
                   type="button"
                   onClick={onExit}
@@ -908,7 +1121,7 @@ function Tracker({ onExit }) {
               />
             </Field>
 
-            <div className="grid gap-3 sm:grid-cols-[1fr_1.25fr] lg:grid-cols-1 xl:grid-cols-[1fr_1.25fr]">
+            <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-3">
               <Field label="Amount">
                 <input
                   type="number"
@@ -923,27 +1136,37 @@ function Tracker({ onExit }) {
                 />
               </Field>
 
-              <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
-                Cycle
-                <div className="grid h-10 grid-cols-3 border border-zinc-700 bg-zinc-950">
-                  {cycles.map((cycle) => (
-                    <button
-                      key={cycle.value}
-                      type="button"
-                      aria-label={cycle.label}
-                      aria-pressed={form.cycle === cycle.value}
-                      title={cycle.label}
-                      onClick={() => updateField("cycle", cycle.value)}
-                      className={`border-r border-zinc-800 px-2 text-[11px] uppercase tracking-[0.08em] last:border-r-0 ${
-                        form.cycle === cycle.value
-                          ? "bg-amber-400 font-black text-black"
-                          : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-                      }`}
-                    >
-                      {cycle.value === "weekly" ? "Wk" : cycle.value === "monthly" ? "Mo" : "Yr"}
-                    </button>
-                  ))}
-                </div>
+              <Field label="Currency">
+                <select
+                  value={form.currency}
+                  onChange={(event) => updateField("currency", event.target.value)}
+                  className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                >
+                  {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+              Cycle
+              <div className="grid h-10 grid-cols-3 border border-zinc-700 bg-zinc-950">
+                {cycles.map((cycle) => (
+                  <button
+                    key={cycle.value}
+                    type="button"
+                    aria-label={cycle.label}
+                    aria-pressed={form.cycle === cycle.value}
+                    title={cycle.label}
+                    onClick={() => updateField("cycle", cycle.value)}
+                    className={`border-r border-zinc-800 px-2 text-[11px] uppercase tracking-[0.08em] last:border-r-0 ${
+                      form.cycle === cycle.value
+                        ? "bg-amber-400 font-black text-black"
+                        : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                    }`}
+                  >
+                    {cycle.value === "weekly" ? "Wk" : cycle.value === "monthly" ? "Mo" : "Yr"}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1063,7 +1286,7 @@ function Tracker({ onExit }) {
                 </div>
                 <div className="px-3 py-2">
                   <span className="text-zinc-600">30D </span>
-                  <span className="text-zinc-100">{money(thirtyDayTotal)}</span>
+                  <span className="text-zinc-100">{formatCurrencyTotals(thirtyDayTotals)}</span>
                 </div>
               </div>
             </div>
@@ -1095,6 +1318,13 @@ function Tracker({ onExit }) {
                 )}
                 <button
                   type="button"
+                  onClick={() => setImportOpen(true)}
+                  className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white"
+                >
+                  Import CSV
+                </button>
+                <button
+                  type="button"
                   onClick={exportCsv}
                   className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white"
                 >
@@ -1105,10 +1335,10 @@ function Tracker({ onExit }) {
           </header>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCell label="Monthly outflow" value={money(monthlyTotal)} sublabel={`${activeSubscriptions.length} active subscriptions`} tone="hot" code="MRC" />
-            <StatCell label="Next charge" value={nextCharge ? money(nextCharge.amount) : "$0.00"} sublabel={nextCharge ? `${nextCharge.name} / ${fullDate(nextCharge.date)}` : "No active charges"} code="DUE" />
-            <StatCell label="30 day pull" value={money(thirtyDayTotal)} sublabel={`${timeline.length} scheduled debit events`} code="T+30" />
-            <StatCell label="Annualized" value={money(yearlyRunRate)} sublabel="Projected active run rate" code="ARR" />
+            <StatCell label="Monthly outflow" value={formatCurrencyTotals(monthlyTotals)} sublabel={`${activeSubscriptions.length} active subscriptions / no FX conversion`} tone="hot" code="MRC" />
+            <StatCell label="Next charge" value={nextCharge ? money(nextCharge.amount, nextCharge.currency) : "$0.00"} sublabel={nextCharge ? `${nextCharge.name} / ${fullDate(nextCharge.date)}` : "No active charges"} code="DUE" />
+            <StatCell label="30 day pull" value={formatCurrencyTotals(thirtyDayTotals)} sublabel={`${timeline.length} scheduled debit events / no FX conversion`} code="T+30" />
+            <StatCell label="Annualized" value={formatCurrencyTotals(yearlyRunRateTotals)} sublabel="Projected run rate / no FX conversion" code="ARR" />
           </div>
 
           <Panel title="Alerts" marker action={<span className="font-mono text-xs text-amber-300">{alerts.length}</span>}>
@@ -1130,7 +1360,7 @@ function Tracker({ onExit }) {
                         {alert.type === "trial" ? "Trial ends" : "Bills"} {fullDate(alert.date)} / {dayLabel(alert.daysOut)}
                       </div>
                     </div>
-                    <div className="font-mono text-sm font-black text-amber-300">{money(alert.amount)}</div>
+                    <div className="font-mono text-sm font-black text-amber-300">{money(alert.amount, alert.currency)}</div>
                   </div>
                 ))
               ) : (
@@ -1165,7 +1395,7 @@ function Tracker({ onExit }) {
                 <div className="grid grid-cols-3 border-b border-zinc-800 font-mono">
                   <div className="border-r border-zinc-800 px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Scheduled</div>
-                    <div className="mt-1 truncate text-sm font-black text-amber-300 sm:text-lg">{money(forecastTotal)}</div>
+                    <div className="mt-1 truncate text-sm font-black text-amber-300 sm:text-lg">{formatCurrencyTotals(forecastTotals)}</div>
                   </div>
                   <div className="border-r border-zinc-800 px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Debits</div>
@@ -1174,7 +1404,7 @@ function Tracker({ onExit }) {
                   <div className="px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Avg / week</div>
                     <div className="mt-1 truncate text-sm font-black text-zinc-100 sm:text-lg">
-                      {money(forecastTotal / Math.max(forecastWeeks.length, 1))}
+                      {formatCurrencyTotals(forecastWeeklyAverageTotals)}
                     </div>
                   </div>
                 </div>
@@ -1182,11 +1412,11 @@ function Tracker({ onExit }) {
                 <div className="grid gap-2 p-3">
                   <div className="grid grid-cols-[74px_minmax(0,1fr)_72px] gap-2 font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-700 sm:grid-cols-[112px_minmax(0,1fr)_88px] sm:text-[10px]">
                     <span>Window</span>
-                    <span>Pressure</span>
+                    <span>Events</span>
                     <span className="text-right">Pull</span>
                   </div>
                   {forecastWeeks.map((week) => {
-                    const width = forecastPeak ? (week.total / forecastPeak) * 100 : 0;
+                    const width = forecastPeak ? (week.count / forecastPeak) * 100 : 0;
                     return (
                       <div key={week.id} className="grid min-h-7 grid-cols-[74px_minmax(0,1fr)_72px] items-center gap-2 sm:grid-cols-[112px_minmax(0,1fr)_88px]">
                         <div className="truncate font-mono text-[9px] text-zinc-500 sm:text-[10px]">{week.label}</div>
@@ -1194,7 +1424,7 @@ function Tracker({ onExit }) {
                           <div className="h-full bg-amber-400" style={{ width: `${width}%` }} />
                         </div>
                         <div className="text-right font-mono text-[10px] font-bold text-zinc-300 sm:text-xs">
-                          {money(week.total)}
+                          {formatCurrencyTotals(week.totals)}
                           <span className="ml-1 text-[9px] text-zinc-700">/{week.count}</span>
                         </div>
                       </div>
@@ -1210,12 +1440,12 @@ function Tracker({ onExit }) {
                 <div className="grid gap-3 p-3">
                   {forecastCategories.length ? (
                     forecastCategories.map((category) => {
-                      const width = forecastCategoryPeak ? (category.total / forecastCategoryPeak) * 100 : 0;
+                      const width = forecastCategoryPeak ? (category.count / forecastCategoryPeak) * 100 : 0;
                       return (
                         <div key={category.name}>
                           <div className="flex items-center justify-between gap-3 text-xs">
                             <span className="truncate font-bold uppercase text-zinc-400">{category.name}</span>
-                            <span className="shrink-0 font-mono text-zinc-200">{money(category.total)}</span>
+                            <span className="shrink-0 font-mono text-zinc-200">{formatCurrencyTotals(category.totals)}</span>
                           </div>
                           <div className="mt-1.5 flex h-1.5 bg-zinc-900">
                             <div className="bg-red-500" style={{ width: `${width}%` }} />
@@ -1235,7 +1465,7 @@ function Tracker({ onExit }) {
           <Panel
             title="Billing calendar"
             marker
-            action={<span className="font-mono text-[10px] text-amber-300">{money(calendarMonthTotal)} / {calendarEvents.length}</span>}
+            action={<span className="font-mono text-[10px] text-amber-300">{formatCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>}
           >
             <div className="flex flex-col gap-3 border-b border-zinc-800 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1263,7 +1493,7 @@ function Tracker({ onExit }) {
                   {calendarGrid.map((date) => {
                     const value = toDateInput(date);
                     const events = calendarEventsByDate.get(value) || [];
-                    const total = events.reduce((sum, event) => sum + Number(event.amount), 0);
+                    const dayTotals = totalsByCurrency(events);
                     const currentMonth = date.getMonth() === calendarCursor.getMonth();
                     const selected = selectedDate === value;
                     const today = value === toDateInput(new Date());
@@ -1272,7 +1502,7 @@ function Tracker({ onExit }) {
                       <button
                         key={value}
                         type="button"
-                        aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${money(total)}` : ", no charges"}`}
+                        aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${formatCurrencyTotals(dayTotals)}` : ", no charges"}`}
                         aria-pressed={selected}
                         onClick={() => {
                           setSelectedDate(value);
@@ -1295,7 +1525,7 @@ function Tracker({ onExit }) {
                                 <span key={event.eventId} className="h-1 w-2 sm:h-1.5 sm:w-3" style={{ background: event.color }} />
                               ))}
                             </div>
-                            <div className="mt-1 truncate font-mono text-[8px] font-black text-amber-300 sm:text-[10px]">{money(total)}</div>
+                            <div className="mt-1 truncate font-mono text-[8px] font-black text-amber-300 sm:text-[10px]">{formatCurrencyTotals(dayTotals)}</div>
                             <div className="mt-1 hidden truncate text-[9px] uppercase text-zinc-600 sm:block">{events[0].name}</div>
                           </div>
                         )}
@@ -1310,7 +1540,7 @@ function Tracker({ onExit }) {
                   <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Selected day</div>
                   <div className="mt-1 font-mono text-sm font-black text-zinc-200">{fullDate(selectedDate)}</div>
                   <div className="mt-1 font-mono text-xs text-amber-300">
-                    {money(selectedDayEvents.reduce((sum, event) => sum + Number(event.amount), 0))} / {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "debit" : "debits"}
+                    {formatCurrencyTotals(totalsByCurrency(selectedDayEvents))} / {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "debit" : "debits"}
                   </div>
                 </div>
                 <div className="divide-y divide-zinc-900">
@@ -1324,7 +1554,7 @@ function Tracker({ onExit }) {
                           </div>
                           <div className="mt-1 text-xs text-zinc-600">{event.category} / {event.cycle}</div>
                         </div>
-                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount)}</div>
+                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount, event.currency)}</div>
                       </div>
                     ))
                   ) : (
@@ -1369,7 +1599,7 @@ function Tracker({ onExit }) {
                               {initials(subscription.name)}
                             </div>
                             <div className="text-right">
-                              <div className="font-mono text-xl font-black leading-none text-violet-100">{money(subscription.amount)}</div>
+                              <div className="font-mono text-xl font-black leading-none text-violet-100">{money(subscription.amount, subscription.currency)}</div>
                               <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-violet-300/70">
                                 {subscription.cycle}
                               </div>
@@ -1377,7 +1607,7 @@ function Tracker({ onExit }) {
                           </div>
                           <div className="mt-3 grid grid-cols-2 border border-violet-400/20 font-mono text-[10px] uppercase">
                             <div className="border-r border-violet-400/20 px-2 py-1 text-violet-300/70">monthly eq.</div>
-                            <div className="px-2 py-1 text-right text-violet-100">{money(monthlyEquivalent(subscription))}</div>
+                            <div className="px-2 py-1 text-right text-violet-100">{money(monthlyEquivalent(subscription), subscription.currency)}</div>
                           </div>
                           <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-violet-300/60">
                             Alert {subscription.reminderDays < 0 ? "off" : `${subscription.reminderDays}d before`}
@@ -1391,7 +1621,7 @@ function Tracker({ onExit }) {
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-red-200/70">
                                 <span>{subscription.category}</span>
                                 <span className="text-red-400/50">/</span>
-                                <span className="font-mono uppercase">{subscription.cycle} billing</span>
+                                <span className="font-mono uppercase">{subscription.cycle} billing / {subscription.currency}</span>
                               </div>
                               {subscription.tags.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1">
@@ -1441,7 +1671,7 @@ function Tracker({ onExit }) {
 
                         <div className="border border-emerald-500/60 bg-emerald-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/70">will pull</div>
-                          <div className="mt-2 font-mono text-2xl font-black leading-none text-emerald-100">{money(subscription.amount)}</div>
+                          <div className="mt-2 font-mono text-2xl font-black leading-none text-emerald-100">{money(subscription.amount, subscription.currency)}</div>
                           <div className={`mt-3 border-t border-emerald-400/20 pt-3 font-mono ${urgent ? "text-amber-200" : "text-emerald-100"}`}>
                             <div className="text-lg font-black">{fullDate(subscription.nextBillingDate)}</div>
                             <div className="mt-1 text-xs uppercase tracking-[0.14em] text-emerald-300/70">
@@ -1467,7 +1697,7 @@ function Tracker({ onExit }) {
                           </div>
                           <div className="mt-1 font-mono text-xs text-zinc-500">{fullDate(event.date)} / {dayLabel(event.daysOut)}</div>
                         </div>
-                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount)}</div>
+                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount, event.currency)}</div>
                       </div>
                     ))
                   ) : (
@@ -1492,7 +1722,7 @@ function Tracker({ onExit }) {
                       </div>
                       <div className="mt-0.5 text-xs text-zinc-600">{event.category}</div>
                     </div>
-                    <div className="font-mono text-sm font-bold text-zinc-100">{money(event.amount)}</div>
+                    <div className="font-mono text-sm font-bold text-zinc-100">{money(event.amount, event.currency)}</div>
                   </div>
                 ))}
               </div>
@@ -1500,6 +1730,146 @@ function Tracker({ onExit }) {
           </div>
         </section>
       </div>
+
+      {importOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="csv-import-title"
+            className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-5xl"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-3 sm:px-4">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Data intake</div>
+                <h2 id="csv-import-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Import subscriptions</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeCsvImport}
+                aria-label="Close import"
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-auto">
+              <div className="grid gap-3 border-b border-zinc-800 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:p-4">
+                <Field label="CSV file">
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={selectCsvFile}
+                    className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black"
+                  />
+                </Field>
+                {csvSession && (
+                  <div className="font-mono text-[10px] uppercase text-zinc-500 sm:pb-2">
+                    {csvSession.fileName} / {csvSession.rows.length} rows
+                  </div>
+                )}
+              </div>
+
+              {csvError && <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{csvError}</div>}
+
+              {csvSession && (
+                <>
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] border-b border-zinc-800 lg:grid-cols-[320px_minmax(0,1fr)]">
+                    <section className="min-w-0 border-b border-zinc-800 lg:border-b-0 lg:border-r">
+                      <header className="border-b border-zinc-800 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                        Field mapping
+                      </header>
+                      <div className="grid gap-2 p-3">
+                        {csvImportFields.map((field) => (
+                          <label key={field.key} className="grid min-w-0 grid-cols-[100px_minmax(0,1fr)] items-center gap-2 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-500 sm:grid-cols-[116px_minmax(0,1fr)]">
+                            <span className="truncate">{field.label}{field.required ? " *" : ""}</span>
+                            <select
+                              value={csvMapping[field.key] || ""}
+                              onChange={(event) => setCsvMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                              className="h-8 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-[10px] text-zinc-300 outline-none focus:border-amber-400"
+                            >
+                              <option value="">Not mapped</option>
+                              {csvSession.headers.map((header) => <option key={header} value={header}>{header}</option>)}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="min-w-0">
+                      <header className="grid grid-cols-3 border-b border-zinc-800 font-mono text-[10px] uppercase text-zinc-600">
+                        <div className="border-r border-zinc-800 px-3 py-2">
+                          Ready <span className="text-emerald-300">{importableCandidates.length}</span>
+                        </div>
+                        <div className="border-r border-zinc-800 px-3 py-2">
+                          Duplicate <span className="text-amber-300">{duplicateImportCount}</span>
+                        </div>
+                        <div className="px-3 py-2">
+                          Invalid <span className="text-red-300">{invalidImportCount}</span>
+                        </div>
+                      </header>
+
+                      <div className="max-h-[420px] overflow-auto">
+                        <div className="sticky top-0 grid grid-cols-[42px_minmax(120px,1fr)_110px_90px] border-b border-zinc-800 bg-zinc-950 font-mono text-[9px] uppercase text-zinc-600">
+                          <div className="border-r border-zinc-800 px-2 py-2">Row</div>
+                          <div className="border-r border-zinc-800 px-2 py-2">Subscription</div>
+                          <div className="border-r border-zinc-800 px-2 py-2 text-right">Amount</div>
+                          <div className="px-2 py-2">Status</div>
+                        </div>
+                        {csvCandidates.slice(0, 100).map((candidate) => (
+                          <div key={candidate.rowNumber} className="grid grid-cols-[42px_minmax(120px,1fr)_110px_90px] border-b border-zinc-900 text-xs">
+                            <div className="border-r border-zinc-900 px-2 py-2 font-mono text-zinc-700">{candidate.rowNumber}</div>
+                            <div className="min-w-0 border-r border-zinc-900 px-2 py-2">
+                              <div className="truncate font-bold text-zinc-300">{candidate.subscription?.name || "Unreadable row"}</div>
+                              <div className="mt-0.5 truncate font-mono text-[9px] uppercase text-zinc-600">
+                                {candidate.subscription ? `${candidate.subscription.cycle} / ${candidate.subscription.nextBillingDate}` : candidate.errors.join(", ")}
+                              </div>
+                            </div>
+                            <div className="border-r border-zinc-900 px-2 py-2 text-right font-mono text-zinc-300">
+                              {candidate.subscription ? money(candidate.subscription.amount, candidate.subscription.currency) : "-"}
+                            </div>
+                            <div className={`px-2 py-2 font-mono text-[9px] font-black uppercase ${
+                              candidate.errors.length
+                                ? "text-red-300"
+                                : candidate.duplicate
+                                  ? "text-amber-300"
+                                  : "text-emerald-300"
+                            }`}>
+                              {candidate.errors.length ? "Invalid" : candidate.duplicate ? "Duplicate" : "Ready"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+
+                  {(csvSession.truncated || csvSession.parserWarnings.length > 0) && (
+                    <div className="border-b border-amber-900 bg-amber-950/20 px-4 py-3 font-mono text-[10px] uppercase text-amber-300">
+                      {csvSession.truncated && <div>Only the first {MAX_CSV_ROWS} rows were loaded.</div>}
+                      {csvSession.parserWarnings.map((warning, index) => <div key={`${warning.code}-${index}`}>Row {(warning.row ?? 0) + 2}: {warning.message}</div>)}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <footer className="flex flex-col gap-2 border-t border-zinc-800 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+              <div className="font-mono text-[10px] uppercase text-zinc-600">
+                Duplicates and invalid rows are skipped
+              </div>
+              <button
+                type="button"
+                disabled={!importConfirmCount}
+                onClick={confirmCsvImport}
+                className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+              >
+                Import {importConfirmCount} {importConfirmCount === 1 ? "subscription" : "subscriptions"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
