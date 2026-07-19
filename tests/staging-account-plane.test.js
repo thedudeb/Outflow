@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildAccountPlaneReport,
+  openRealtimeProbe,
   resolveAccountAcceptanceConfig,
 } from "../scripts/check-staging-account-plane.mjs";
 
@@ -55,6 +56,7 @@ test("account-plane report records bounded evidence without synthetic identities
     "private invitation acceptance",
     "viewer write denial",
     "editor revision write",
+    "two-client Realtime delivery",
     "idempotent write replay",
     "stale revision conflict",
     "member access revocation",
@@ -76,10 +78,11 @@ test("account-plane report records bounded evidence without synthetic identities
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /PASS\*\* \(14 authenticated checks\)/);
+  assert.match(report, /PASS\*\* \(15 authenticated checks\)/);
   assert.match(report, /PASS \/ cross-user ledger isolation/);
+  assert.match(report, /PASS \/ two-client Realtime delivery/);
   assert.match(report, /Migration Inventory \(2\)/);
-  assert.match(report, /Provider email, Realtime transport/);
+  assert.match(report, /Provider email, Realtime reconnect behavior/);
   assert.doesNotMatch(report, /publishable|sb_secret|@outflow\.invalid|password|token/i);
   assert.doesNotMatch(report, /not-a-migration/);
   assert.throws(
@@ -91,6 +94,62 @@ test("account-plane report records bounded evidence without synthetic identities
     }),
     /complete ordered acceptance inventory/,
   );
+});
+
+test("Realtime probe waits for the exact authenticated insert and removes its channel", async () => {
+  let changeHandler;
+  let statusHandler;
+  let removedChannel;
+  const channel = {
+    on(type, filter, handler) {
+      assert.equal(type, "postgres_changes");
+      assert.deepEqual(filter, {
+        event: "INSERT",
+        schema: "public",
+        table: "subscriptions",
+        filter: "ledger_id=eq.accept-ledger",
+      });
+      changeHandler = handler;
+      return this;
+    },
+    subscribe(handler) {
+      statusHandler = handler;
+      return this;
+    },
+  };
+  const client = {
+    channel(name) {
+      assert.match(name, /^outflow-acceptance-[0-9a-f-]{36}$/);
+      return channel;
+    },
+    async removeChannel(target) {
+      removedChannel = target;
+      return "ok";
+    },
+  };
+
+  const probe = openRealtimeProbe(client, "accept-ledger", "accept-subscription", 1_000);
+  statusHandler("SUBSCRIBED");
+  assert.equal(await probe.subscribed, "SUBSCRIBED");
+  changeHandler({
+    eventType: "INSERT",
+    schema: "public",
+    table: "subscriptions",
+    new: { ledger_id: "another-ledger", id: "accept-subscription" },
+  });
+  changeHandler({
+    eventType: "INSERT",
+    schema: "public",
+    table: "subscriptions",
+    new: { ledger_id: "accept-ledger", id: "accept-subscription", amount: "private-row-data" },
+  });
+  assert.deepEqual(await probe.delivered, {
+    eventType: "INSERT",
+    schema: "public",
+    table: "subscriptions",
+  });
+  assert.equal(await probe.close(), "ok");
+  assert.equal(removedChannel, channel);
 });
 
 test("the account-plane workflow is manual, protected, and provider-secret free", async () => {
@@ -119,9 +178,13 @@ test("the live harness uses authenticated sessions, fixed assertions, and finall
   assert.match(source, /migrate_guest_workspace/);
   assert.match(source, /accept_ledger_invitation/);
   assert.match(source, /replace_ledger_snapshot/);
+  assert.match(source, /postgres_changes/);
+  assert.match(source, /event: "INSERT"/);
+  assert.match(source, /await realtime\.delivered/);
+  assert.match(source, /removeChannel\(channel\)/);
   assert.match(source, /functions\/v1\/delete-account/);
   assert.match(source, /finally \{/);
-  assert.match(source, /deleteSyntheticUsers\(admin, createdUserIds\)/);
+  assert.match(source, /cleanupAcceptance\(admin, createdUserIds, closeRealtime\)/);
   assert.ok(source.indexOf("createdUserIds.push(ownerUser.id)") < source.indexOf("member account setup"));
   assert.doesNotMatch(source, /console\.log\([^\n]*(email|password|token|secret)/i);
 });

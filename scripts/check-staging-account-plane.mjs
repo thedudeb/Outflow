@@ -15,6 +15,7 @@ const expectedCheckNames = Object.freeze([
   "private invitation acceptance",
   "viewer write denial",
   "editor revision write",
+  "two-client Realtime delivery",
   "idempotent write replay",
   "stale revision conflict",
   "member access revocation",
@@ -178,6 +179,93 @@ async function deleteSyntheticUsers(admin, userIds) {
   if (failed) throw new Error("synthetic cleanup: one or more identities could not be removed.");
 }
 
+function deferredTimeout(label, timeoutMs) {
+  let settled = false;
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolvePromiseValue, rejectPromiseValue) => {
+    resolvePromise = resolvePromiseValue;
+    rejectPromise = rejectPromiseValue;
+  });
+  promise.catch(() => {});
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    rejectPromise(new Error(`${label}: timed out.`));
+  }, timeoutMs);
+
+  return {
+    promise,
+    resolve(value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(value);
+    },
+    reject() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectPromise(new Error(`${label}: channel failed.`));
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(null);
+    },
+  };
+}
+
+export function openRealtimeProbe(client, ledgerId, expectedSubscriptionId, timeoutMs = 15_000) {
+  const subscribed = deferredTimeout("Realtime subscription", timeoutMs);
+  const delivered = deferredTimeout("Realtime delivery", timeoutMs);
+  const channel = client
+    .channel(`outflow-acceptance-${randomUUID()}`)
+    .on("postgres_changes", {
+      event: "INSERT",
+      schema: "public",
+      table: "subscriptions",
+      filter: `ledger_id=eq.${ledgerId}`,
+    }, (payload) => {
+      if (payload?.new?.ledger_id === ledgerId && payload?.new?.id === expectedSubscriptionId) {
+        delivered.resolve({ eventType: payload.eventType, schema: payload.schema, table: payload.table });
+      }
+    })
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") subscribed.resolve(status);
+      if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+        subscribed.reject();
+        delivered.reject();
+      }
+    });
+
+  return {
+    subscribed: subscribed.promise,
+    delivered: delivered.promise,
+    async close() {
+      subscribed.cancel();
+      delivered.cancel();
+      return client.removeChannel(channel);
+    },
+  };
+}
+
+async function cleanupAcceptance(admin, userIds, closeRealtime) {
+  let failed = false;
+  try {
+    await closeRealtime();
+  } catch {
+    failed = true;
+  }
+  try {
+    await deleteSyntheticUsers(admin, userIds);
+  } catch {
+    failed = true;
+  }
+  if (failed) throw new Error("synthetic cleanup: one or more resources could not be removed.");
+}
+
 export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch } = {}) {
   const completed = [];
   const admin = clientFor(config.projectUrl, config.secretKey);
@@ -186,6 +274,7 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
   const ownerEmail = `outflow-owner-${suffix}@example.com`;
   const memberEmail = `outflow-member-${suffix}@example.com`;
   const createdUserIds = [];
+  let closeRealtime = async () => {};
 
   try {
     const ownerUser = remoteResult(await admin.auth.admin.createUser({
@@ -295,7 +384,11 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     assert(promoted?.length === 1 && promoted[0].role === "editor", "editor revision write");
 
     const operationId = randomUUID();
-    const editorSnapshot = [subscription(`accept-editor-${suffix}`, "Editor Acceptance", 33)];
+    const editorSubscriptionId = `accept-editor-${suffix}`;
+    const editorSnapshot = [subscription(editorSubscriptionId, "Editor Acceptance", 33)];
+    const realtime = openRealtimeProbe(owner.client, fixture.teamId, editorSubscriptionId);
+    closeRealtime = realtime.close;
+    assert(await realtime.subscribed === "SUBSCRIBED", "two-client Realtime delivery");
     const applied = remoteResult(await member.client.rpc("replace_ledger_snapshot", {
       target_ledger_id: fixture.teamId,
       expected_revision: 0,
@@ -304,6 +397,17 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     }), "editor revision write");
     assert(applied?.status === "applied" && applied?.currentRevision === 1 && applied?.subscriptionCount === 1, "editor revision write");
     completed.push("editor revision write");
+
+    const realtimeEvent = await realtime.delivered;
+    assert(
+      realtimeEvent?.eventType === "INSERT"
+        && realtimeEvent?.schema === "public"
+        && realtimeEvent?.table === "subscriptions",
+      "two-client Realtime delivery",
+    );
+    assert(await realtime.close() === "ok", "two-client Realtime delivery");
+    closeRealtime = async () => {};
+    completed.push("two-client Realtime delivery");
 
     const replay = remoteResult(await member.client.rpc("replace_ledger_snapshot", {
       target_ledger_id: fixture.teamId,
@@ -361,7 +465,7 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     assert(JSON.stringify(completed) === JSON.stringify(expectedCheckNames), "acceptance check inventory");
     return completed;
   } finally {
-    await deleteSyntheticUsers(admin, createdUserIds);
+    await cleanupAcceptance(admin, createdUserIds, closeRealtime);
   }
 }
 
@@ -415,7 +519,7 @@ export function buildAccountPlaneReport({
     "",
     ...validMigrations.map((name) => `- \`${name}\``),
     "",
-    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, revocation, and account deletion. Provider email, Realtime transport, hosted calendar clients, reminders, and Stripe still require their separate staging matrices.",
+    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, two-client Realtime delivery, revocation, and account deletion. Provider email, Realtime reconnect behavior, hosted calendar clients, reminders, and Stripe still require their separate staging matrices.",
     "",
   ].join("\n");
 }
