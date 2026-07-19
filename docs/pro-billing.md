@@ -28,6 +28,18 @@ The Account / Pro dialog always shows a service-independent comparison before an
 
 An unconfigured build says **Paid once** instead of inventing a price and does not render sign-in, checkout, or restore actions. A verified one-time Stripe Price is shown only after sign-in, and only then can the user open hosted Checkout. Cancelled returns preserve the Free entitlement and explicitly state that no product subscription or recurring charge was created.
 
+## Automated Browser Contract
+
+`npm run test:account-service` runs the signed-in billing flow against a stateful configured-service fixture at desktop and narrow mobile widths. It verifies that:
+
+- A server-verified fixed offer displays its exact currency and one-time amount before the user chooses checkout.
+- Checkout receives a fresh version-4 operation UUID and hands off to an HTTPS Stripe-hosted URL without writing or activating an entitlement in the browser.
+- A `pro=success` return with no server entitlement remains Free through all confirmation attempts, clears the transient URL parameter, and explains that fulfillment is pending.
+- **Restore access** adopts an active durable account entitlement without creating a checkout request and recovers it again after reload.
+- The signed-in offer and checkout state passes the automated WCAG A/AA ruleset in both viewport profiles.
+
+The PostgreSQL contract independently verifies checkout reservation idempotency and limits, service-only fulfillment, duplicate and out-of-order webhook handling, refund revocation, repurchase, and de-identified post-deletion reconciliation.
+
 ## Required Secrets
 
 Configure these only as Supabase Edge Function secrets:
@@ -53,6 +65,6 @@ The shared function configuration also requires the Supabase server values, `OUT
 
 The schema, functions, browser flow, and isolated database tests are implemented. No Stripe or Supabase project is provisioned in the repository, so the default build cannot sell or restore Pro yet.
 
-The service-independent comparison, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`.
+The service-independent comparison, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`. The configured offer, checkout, pending-success, and restore states are enforced by `npm run test:account-service`.
 
 References: [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment), [Stripe webhook signatures](https://docs.stripe.com/webhooks/signature), [Stripe refund events](https://docs.stripe.com/refunds), and [Supabase signed webhook functions](https://supabase.com/docs/guides/functions/examples/stripe-webhooks).

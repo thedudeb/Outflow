@@ -49,6 +49,8 @@ function createCloudState({
   accessGranted = true,
   canSync = true,
   inviteToken = invitationToken,
+  proOffer = null,
+  checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_outflow",
 } = {}) {
   return {
     replaceMode,
@@ -56,6 +58,12 @@ function createCloudState({
     accessGranted,
     canSync,
     inviteToken,
+    proOffer,
+    checkoutUrl,
+    entitlementReads: 0,
+    checkoutRequests: [],
+    deleteRequests: 0,
+    deleted: false,
     writes: [],
     sentInvitations: [],
     roleChanges: [],
@@ -193,6 +201,7 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
       });
     }
     if (url.pathname.endsWith("/rest/v1/entitlements")) {
+      if (cloudState) cloudState.entitlementReads += 1;
       return cloudState?.entitlementStatus
         ? reply({ status: cloudState.entitlementStatus, provider: "stripe", purchased_at: "2026-07-19T12:00:00.000Z" })
         : reply([], 200, { "Content-Range": "0-0/0" });
@@ -359,7 +368,26 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
       });
     }
     if (url.pathname.endsWith("/functions/v1/create-pro-checkout")) {
+      if (cloudState?.proOffer && entry.method === "GET") return reply(cloudState.proOffer);
+      if (cloudState?.proOffer && entry.method === "POST") {
+        cloudState.checkoutRequests.push(entry.body);
+        return reply({ url: cloudState.checkoutUrl }, 201);
+      }
       return reply({ message: "Checkout unavailable in account fixture" }, 503);
+    }
+    if (url.pathname.endsWith("/functions/v1/delete-account") && cloudState) {
+      cloudState.deleteRequests += 1;
+      cloudState.deleted = true;
+      cloudState.entitlementStatus = null;
+      cloudState.accessGranted = false;
+      cloudState.canSync = false;
+      cloudState.members = [];
+      cloudState.invitations = [];
+      cloudState.subscriptions = [];
+      cloudState.notificationPreferences = null;
+      cloudState.calendarFeed = null;
+      cloudState.calendarFeedToken = "";
+      return reply({ deleted: true });
     }
     if (url.pathname.endsWith("/functions/v1/send-ledger-invite") && cloudState) {
       const id = `fixture-invite-${cloudState.sentInvitations.length + 1}`;
@@ -796,5 +824,132 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
     body: { target_ledger_id: "studio-cloud" },
     token: secondToken,
   });
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("verified one-time offer hands off to hosted checkout without granting Pro", async ({ page }) => {
+  const cloudState = createCloudState({
+    entitlementStatus: null,
+    canSync: false,
+    proOffer: { currency: "USD", name: "Outflow Pro Lifetime", unitAmount: 4900 },
+  });
+  const fixture = await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await page.route("https://checkout.stripe.com/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><title>Hosted checkout fixture</title><h1>Hosted checkout</h1>",
+  }));
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Outflow Pro Lifetime / $49.00 once / no product subscription");
+  await expect(dialog).toContainText("Entitlement Free");
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+  const checkoutRequest = page.waitForRequest(cloudState.checkoutUrl);
+  await dialog.getByRole("button", { name: "Review checkout", exact: true }).click();
+  await checkoutRequest;
+  await expect(page).toHaveURL(cloudState.checkoutUrl);
+  await expect(page.getByRole("heading", { name: "Hosted checkout" })).toBeVisible();
+
+  expect(cloudState.checkoutRequests).toHaveLength(1);
+  expect(cloudState.checkoutRequests[0]?.operationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(cloudState.entitlementStatus).toBeNull();
+  expect(fixture.traffic.filter((request) => request.path.endsWith("/rest/v1/entitlements") && request.method !== "GET")).toHaveLength(0);
+
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Account / Pro" })).toContainText("Entitlement Free");
+});
+
+test("successful checkout return remains Free while server fulfillment is pending", async ({ page }) => {
+  const cloudState = createCloudState({ entitlementStatus: null, canSync: false });
+  const fixture = await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await page.goto("/#app?pro=success");
+
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(
+    "Payment confirmation is still pending. Use Restore access in a moment; the checkout redirect is not treated as proof of payment.",
+    { exact: true },
+  )).toBeVisible({ timeout: 12000 });
+  await expect(dialog).toContainText("Entitlement Free");
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#app");
+  expect(cloudState.entitlementStatus).toBeNull();
+  expect(cloudState.entitlementReads).toBeGreaterThanOrEqual(6);
+  expect(fixture.traffic.filter((request) => request.path.endsWith("/rest/v1/entitlements") && request.method !== "GET")).toHaveLength(0);
+  expect(cloudState.checkoutRequests).toHaveLength(0);
+});
+
+test("Restore access adopts the durable account entitlement and survives reload", async ({ page }) => {
+  const cloudState = createCloudState({
+    entitlementStatus: null,
+    canSync: false,
+    proOffer: { currency: "USD", name: "Outflow Pro Lifetime", unitAmount: 4900 },
+  });
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Entitlement Free");
+  cloudState.entitlementStatus = "active";
+  cloudState.canSync = true;
+  await dialog.getByRole("button", { name: "Restore access", exact: true }).click();
+  await expect(dialog.getByText("Outflow Pro access restored from this account.", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Entitlement Pro");
+  await expect(dialog).toContainText("Lifetime active");
+  expect(cloudState.checkoutRequests).toHaveLength(0);
+
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Entitlement Pro");
+  await expect(dialog).toContainText("Purchased Jul 19 / stripe / no renewal");
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("confirmed cloud-account deletion clears remote access and restores the exact local workspace", async ({ page }) => {
+  const cloudState = createCloudState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+  await openStudioCloud(page);
+  await expect(monthlyOutflow(page)).toContainText("$25.00");
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await dialog.getByRole("button", { name: "Delete account data", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Confirm cloud delete", exact: true })).toBeVisible();
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+  await dialog.getByRole("button", { name: "Confirm cloud delete", exact: true }).click();
+  await expect(dialog.getByText("Cloud account deleted. Local ledgers were not removed.", { exact: true })).toBeVisible();
+
+  expect(cloudState.deleteRequests).toBe(1);
+  expect(cloudState.deleted).toBe(true);
+  expect(cloudState.accessGranted).toBe(false);
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), authStorageKey)).toBeNull();
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
+  await expect(monthlyOutflow(page)).toContainText("$39.47");
+  await expect(page.getByText("Figma Cloud", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
 });
