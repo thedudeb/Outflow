@@ -59,3 +59,13 @@ A future account migration should consume this envelope through a transactional 
 6. Retain the local copy for offline use; never clear guest data merely because account creation began.
 
 Account deletion must remove account-held copies without deleting an independent local ledger unless the user separately confirms that local action.
+
+## Automated Backup Contract
+
+Run `npm run test:e2e` to verify backup and restore behavior in desktop and mobile Chromium profiles. The browser suite proves:
+
+- Downloads contain the complete versioned active-ledger envelope, normalized records, alert settings, and unique stable identifiers without browser permission or notification-history data.
+- Merge skips both identifier duplicates and normalized content duplicates, adds only new records, preserves the active ledger and alert settings, and survives a reload.
+- Replace restores subscriptions, ledger name, and application-level alert settings while retaining the current local slot's identifier, kind, and storage mode.
+- A requested device-alert state is not restored when the browser has not granted notification permission.
+- Duplicate identifiers and unsupported schema versions produce connected accessible errors and leave the active ledger unchanged.
