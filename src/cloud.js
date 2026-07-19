@@ -373,7 +373,7 @@ export async function renameCloudLedger(ledgerId, expectedRevision, name, operat
   return data;
 }
 
-export async function subscribeToCloudLedger(ledgerId, onChange) {
+export async function subscribeToCloudLedger(ledgerId, onChange, onStatus = () => {}) {
   const cloud = await getCloud();
   if (!cloud) return () => {};
   const channel = cloud
@@ -381,7 +381,7 @@ export async function subscribeToCloudLedger(ledgerId, onChange) {
     .on("postgres_changes", { event: "*", schema: "public", table: "ledgers", filter: `id=eq.${ledgerId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "subscriptions", filter: `ledger_id=eq.${ledgerId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "ledger_members", filter: `ledger_id=eq.${ledgerId}` }, onChange)
-    .subscribe();
+    .subscribe(onStatus);
   return () => {
     cloud.removeChannel(channel);
   };

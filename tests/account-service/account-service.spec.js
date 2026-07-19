@@ -159,15 +159,116 @@ function cloudRowFromPayload(subscription, existingRow = null) {
   };
 }
 
+function createRealtimeState() {
+  const connections = new Map();
+
+  return {
+    connections,
+    joinedCount() {
+      return [...connections.values()].filter((connection) => connection.topic).length;
+    },
+    clientJoinedCount(clientId) {
+      return [...connections.values()].filter((connection) => connection.clientId === clientId && connection.topic).length;
+    },
+    emitChange({ table = "subscriptions", event = "UPDATE" } = {}) {
+      connections.forEach((connection, socket) => {
+        const ids = connection.bindings
+          .filter((binding) => binding.table === table)
+          .map((binding) => binding.id);
+        if (!connection.topic || !ids.length) return;
+        socket.send(JSON.stringify({
+          topic: connection.topic,
+          event: "postgres_changes",
+          payload: {
+            ids,
+            data: {
+              schema: "public",
+              table,
+              commit_timestamp: new Date().toISOString(),
+              type: event,
+              columns: [],
+              record: {},
+              old_record: {},
+              errors: null,
+            },
+          },
+          ref: null,
+        }));
+      });
+    },
+    async disconnect(clientId) {
+      const sockets = [...connections.entries()]
+        .filter(([, connection]) => connection.clientId === clientId)
+        .map(([socket]) => socket);
+      await Promise.all(sockets.map((socket) => socket.close({ code: 1012, reason: "Fixture connection restart" })));
+      return sockets.length;
+    },
+  };
+}
+
+async function installRealtimeFixture(page, realtimeState, clientId) {
+  let bindingSequence = 0;
+  await page.routeWebSocket(/\/supabase\/realtime\/v1\/websocket/, (socket) => {
+    const connection = { clientId, topic: "", bindings: [] };
+    realtimeState.connections.set(socket, connection);
+
+    const reply = (message, response = {}) => {
+      socket.send(JSON.stringify({
+        topic: message.topic,
+        event: "phx_reply",
+        payload: { status: "ok", response },
+        ref: message.ref,
+        join_ref: message.join_ref,
+      }));
+    };
+
+    socket.onMessage((rawMessage) => {
+      let message;
+      try {
+        message = JSON.parse(typeof rawMessage === "string" ? rawMessage : rawMessage.toString());
+      } catch {
+        return;
+      }
+
+      if (message.event === "phx_join") {
+        connection.topic = message.topic;
+        connection.bindings = (message.payload?.config?.postgres_changes || []).map((binding) => ({
+          ...binding,
+          id: `fixture-binding-${clientId}-${++bindingSequence}`,
+        }));
+        reply(message, { postgres_changes: connection.bindings });
+        return;
+      }
+
+      if (message.event === "phx_leave") {
+        reply(message);
+        connection.topic = "";
+        connection.bindings = [];
+        return;
+      }
+
+      if (message.ref) reply(message);
+    });
+    socket.onClose(() => realtimeState.connections.delete(socket));
+  });
+}
+
 async function seedStoredSession(page, session = storedSession()) {
   await page.addInitScript(({ key, value }) => {
     localStorage.setItem(key, JSON.stringify(value));
   }, { key: authStorageKey, value: session });
 }
 
-async function installCloudFixture(page, { verifiedUser = null, cloudState = null } = {}) {
+async function installCloudFixture(page, {
+  verifiedUser = null,
+  cloudState = null,
+  realtimeState = createRealtimeState(),
+  realtimeClientId = "fixture-client",
+} = {}) {
   const traffic = [];
   const migrations = [];
+
+  await installRealtimeFixture(page, realtimeState, realtimeClientId);
 
   await page.route("**/supabase/**", async (route) => {
     const request = route.request();
@@ -415,7 +516,7 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
     return reply({ message: `Unhandled account fixture endpoint: ${request.method()} ${url.pathname}` }, 501);
   });
 
-  return { traffic, migrations };
+  return { traffic, migrations, realtime: realtimeState };
 }
 
 function monthlyOutflow(page) {
@@ -549,6 +650,92 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
   await expect(monthlyOutflow(page)).toContainText("$39.47");
   await expect(page.getByText("Figma Cloud", { exact: true })).toHaveCount(0);
+});
+
+test("isolated browser clients refresh through Realtime and protect an active stale edit", async ({ browser, page }, testInfo) => {
+  const cloudState = createCloudState();
+  const realtimeState = createRealtimeState();
+  const projectUse = testInfo.project.use;
+  const peerOptions = { baseURL: "http://127.0.0.1:4181" };
+  ["viewport", "userAgent", "deviceScaleFactor", "isMobile", "hasTouch"].forEach((key) => {
+    if (projectUse[key] !== undefined) peerOptions[key] = projectUse[key];
+  });
+
+  await installCloudFixture(page, {
+    verifiedUser: fixtureUser,
+    cloudState,
+    realtimeState,
+    realtimeClientId: "primary",
+  });
+  await seedStoredSession(page);
+
+  const peerContext = await browser.newContext(peerOptions);
+  const peerPage = await peerContext.newPage();
+  await installCloudFixture(peerPage, {
+    verifiedUser: fixtureUser,
+    cloudState,
+    realtimeState,
+    realtimeClientId: "peer",
+  });
+  await seedStoredSession(peerPage);
+
+  try {
+    await openTracker(page);
+    await openStudioCloud(page);
+    await openTracker(peerPage);
+    await openStudioCloud(peerPage);
+    await expect.poll(() => realtimeState.joinedCount()).toBe(2);
+
+    let primaryCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
+    await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("30");
+    await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Synchronized revision 3.");
+
+    realtimeState.emitChange();
+    const peerCard = peerPage.getByRole("article").filter({ hasText: "Figma Cloud" });
+    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.");
+    await expect(peerCard).toContainText("$30.00");
+    await expect(monthlyOutflow(peerPage)).toContainText("$30.00");
+
+    await peerCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await peerPage.getByRole("spinbutton", { name: "Amount", exact: true }).fill("32");
+    await expect.poll(() => realtimeState.clientJoinedCount("peer")).toBe(1);
+
+    primaryCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
+    await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("35");
+    await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Synchronized revision 4.");
+
+    realtimeState.emitChange();
+    await expect(peerPage.getByRole("alert")).toContainText("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+    await expect(peerPage.getByRole("spinbutton", { name: "Amount", exact: true })).toHaveValue("32");
+    await expect(peerPage.getByRole("button", { name: "Commit changes", exact: true })).toBeDisabled();
+    await expect(peerCard).toContainText("$30.00");
+
+    await peerPage.getByRole("button", { name: "Clear", exact: true }).click();
+    await peerPage.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(peerPage.getByRole("status")).toContainText("Cloud ledger refreshed.");
+    await expect(peerCard).toContainText("$35.00");
+
+    expect(await realtimeState.disconnect("peer")).toBe(1);
+    await expect(peerPage.getByRole("alert")).toContainText("Realtime connection interrupted. Outflow will refresh after it reconnects.");
+    cloudState.ledger.revision = 5;
+    cloudState.subscriptions = [{
+      ...cloudState.subscriptions[0],
+      amount: 41,
+      revision: 4,
+      client_updated_at: "2026-07-19T14:00:00.000Z",
+      updated_at: "2026-07-19T14:00:00.000Z",
+    }];
+
+    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.", { timeout: 10_000 });
+    await expect(peerCard).toContainText("$41.00");
+    await expect(monthlyOutflow(peerPage)).toContainText("$41.00");
+  } finally {
+    await peerContext.close();
+  }
 });
 
 test("stale cloud write is rejected and replaced by the authoritative server revision", async ({ page }) => {

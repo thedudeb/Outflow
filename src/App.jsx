@@ -1827,6 +1827,7 @@ function Tracker({ onExit, pwa }) {
     let active = true;
     let unsubscribe = () => {};
     let refreshTimer;
+    let realtimeDisconnected = false;
 
     const receiveRemoteChange = () => {
       if (!active) return;
@@ -1857,7 +1858,25 @@ function Tracker({ onExit, pwa }) {
       }, 150);
     };
 
-    subscribeToCloudLedger(ledgerId, receiveRemoteChange)
+    const receiveRealtimeStatus = (status, error) => {
+      if (!active) return;
+
+      if (status === "SUBSCRIBED") {
+        if (!realtimeDisconnected) return;
+        realtimeDisconnected = false;
+        setCloudSyncMessage("Realtime connection restored. Checking the authoritative cloud revision...");
+        receiveRemoteChange();
+        return;
+      }
+
+      if (!["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) return;
+      realtimeDisconnected = true;
+      if (cloudSyncingRef.current) return;
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error?.message || "Realtime connection interrupted. Outflow will refresh after it reconnects.");
+    };
+
+    subscribeToCloudLedger(ledgerId, receiveRemoteChange, receiveRealtimeStatus)
       .then((cleanup) => {
         if (active) unsubscribe = cleanup;
         else cleanup();

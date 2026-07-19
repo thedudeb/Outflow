@@ -88,6 +88,8 @@ The probe never sends a secret/service-role key, valid session, valid webhook, v
 
 ## 7. Staging Acceptance
 
+The local account-service suite performs the same Realtime refresh, stale-edit, and reconnect flow through two isolated browser contexts and a Phoenix-protocol fixture. Repeat it against the provisioned project because the fixture cannot prove publication configuration, network behavior, or hosted authorization.
+
 Complete these tests with synthetic accounts and Stripe test mode:
 
 - Cross-user RLS isolation, guest migration replay, sign-out restoration, and account deletion.

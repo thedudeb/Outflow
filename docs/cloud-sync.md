@@ -27,6 +27,8 @@ Signing in does not synchronize or upload the local workspace. A recovered brows
 
 Supabase Realtime watches the active ledger, subscriptions, and membership rows. Remote events refresh automatically when no local edit is active. If an edit or write is in progress, Outflow marks the ledger `stale` and requires an explicit refresh so an unfinished form is never silently discarded.
 
+Channel errors, timeouts, and unexpected closures visibly mark the cloud connection `offline`. When the channel resubscribes, Outflow performs an authoritative snapshot refresh; a reconnect during an active edit follows the same `stale` path instead of replacing the form.
+
 The visible runtime states are:
 
 | State | Meaning |
@@ -38,19 +40,22 @@ The visible runtime states are:
 | `refreshing` | A newer server revision is being loaded |
 | `stale` | A remote change arrived during a local edit |
 | `conflict` | A stale write was rejected; refresh is required before retrying |
-| `offline` | A pre-commit cloud request failed; local ledgers remain available |
+| `offline` | A cloud request or Realtime channel failed; local ledgers remain available |
 
 ## Automated Browser Contract
 
-`npm run test:account-service` runs a stateful PostgREST-compatible fixture at desktop and narrow mobile widths. It verifies that:
+`npm run test:account-service` runs stateful PostgREST- and Phoenix-compatible fixtures at desktop and narrow mobile widths. It verifies that:
 
 - Opening a cloud team ledger replaces, rather than combines with, the active local totals while leaving the serialized local workspace unchanged.
 - Shared records display distinct server-resolved creator and updater identities.
 - A write sends the full snapshot, expected revision, and a fresh operation UUID, then adopts the confirmed authoritative revision.
 - A conflict rejects the optimistic value, loads the server winner, announces the conflict, and blocks another write until refresh.
+- Two isolated browser contexts receive protocol-level Realtime changes, refresh to the same server revision, and keep local workspaces separate.
+- A remote change during an unfinished edit preserves the form, marks the peer stale, blocks commit, and requires an explicit refresh.
+- A dropped Realtime socket becomes visibly offline and an automatic resubscription refreshes changes that occurred during the disconnect.
 - Signing out closes the cloud session and restores the untouched local ledger and totals.
 
-The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration.
+The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration. These fixtures are a deterministic preflight; the two-browser matrix must still pass against provisioned Supabase Realtime before public synchronization is enabled.
 
 ## Offline Boundary
 
