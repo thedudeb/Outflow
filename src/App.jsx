@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 
 const STORAGE_KEY = "outflow:subscriptions";
@@ -615,7 +615,83 @@ function Field({ label, children }) {
   );
 }
 
-function LandingPage({ onOpen }) {
+function useInstallableApp() {
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [waitingWorker, setWaitingWorker] = useState(null);
+  const [standalone, setStandalone] = useState(() => window.matchMedia("(display-mode: standalone)").matches);
+  const [offlineReady, setOfflineReady] = useState(() => Boolean(navigator.serviceWorker?.controller));
+  const reloadForUpdate = useRef(false);
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    const handleInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const handleInstalled = () => {
+      setInstallPrompt(null);
+      setStandalone(true);
+    };
+    const handleControllerChange = () => {
+      setOfflineReady(Boolean(navigator.serviceWorker.controller));
+      if (reloadForUpdate.current) window.location.reload();
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+      navigator.serviceWorker.register("/sw.js").then((registration) => {
+        if (registration.waiting) setWaitingWorker(registration.waiting);
+        navigator.serviceWorker.ready.then(() => setOfflineReady(Boolean(navigator.serviceWorker.controller)));
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          worker?.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) setWaitingWorker(worker);
+          });
+        });
+      }).catch(() => {});
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+      navigator.serviceWorker?.removeEventListener("controllerchange", handleControllerChange);
+    };
+  }, []);
+
+  async function install() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setInstallPrompt(null);
+  }
+
+  function applyUpdate() {
+    if (!waitingWorker) return;
+    reloadForUpdate.current = true;
+    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  }
+
+  return {
+    online,
+    standalone,
+    offlineReady,
+    canInstall: Boolean(installPrompt) && !standalone,
+    updateAvailable: Boolean(waitingWorker),
+    install,
+    applyUpdate,
+  };
+}
+
+function LandingPage({ onOpen, pwa }) {
   const previewSubscriptions = seedSubscriptions.filter((subscription) => !subscription.paused).slice(0, 4);
 
   return (
@@ -628,6 +704,11 @@ function LandingPage({ onOpen }) {
           <div className="flex items-center gap-5 text-xs font-bold uppercase text-zinc-500">
             <a href="#system" className="hidden hover:text-zinc-100 sm:block">System</a>
             <a href="#principles" className="hidden hover:text-zinc-100 sm:block">Principles</a>
+            {pwa.canInstall && (
+              <button type="button" onClick={pwa.install} className="hidden border border-zinc-700 px-3 py-2 text-zinc-300 hover:border-zinc-400 hover:text-white sm:block">
+                Install
+              </button>
+            )}
             <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-3 py-2 text-black hover:bg-amber-300">
               Open tracker
             </button>
@@ -768,7 +849,7 @@ function LandingPage({ onOpen }) {
   );
 }
 
-function Tracker({ onExit }) {
+function Tracker({ onExit, pwa }) {
   const [subscriptions, setSubscriptions] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -1292,12 +1373,35 @@ function Tracker({ onExit }) {
             </div>
             <div className="flex flex-col gap-2 border-t border-zinc-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
-                <span className="h-2 w-2 bg-emerald-400" />
+                <span className={`h-2 w-2 ${pwa.online ? "bg-emerald-400" : "bg-red-400"}`} />
                 <span className="text-zinc-300">Local ledger</span>
                 <span className="text-zinc-700">/</span>
-                <span className="text-zinc-600">This browser</span>
+                <span className={pwa.online ? "text-zinc-600" : "text-red-300"}>{pwa.online ? "Online" : "Offline"}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                {pwa.offlineReady && (
+                  <span className="border border-emerald-900 px-2 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-400">
+                    Offline ready
+                  </span>
+                )}
+                {pwa.canInstall && (
+                  <button
+                    type="button"
+                    onClick={pwa.install}
+                    className="border border-amber-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-amber-300 hover:border-amber-400"
+                  >
+                    Install
+                  </button>
+                )}
+                {pwa.updateAvailable && (
+                  <button
+                    type="button"
+                    onClick={pwa.applyUpdate}
+                    className="border border-cyan-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-cyan-300 hover:border-cyan-400"
+                  >
+                    Update ready
+                  </button>
+                )}
                 {notificationPermission === "default" && (
                   <button
                     type="button"
@@ -1876,6 +1980,7 @@ function Tracker({ onExit }) {
 
 function App() {
   const [trackerOpen, setTrackerOpen] = useState(() => window.location.hash === "#app");
+  const pwa = useInstallableApp();
 
   useEffect(() => {
     const syncView = () => setTrackerOpen(window.location.hash === "#app");
@@ -1899,7 +2004,7 @@ function App() {
     window.scrollTo(0, 0);
   }
 
-  return trackerOpen ? <Tracker onExit={navigateHome} /> : <LandingPage onOpen={navigateToTracker} />;
+  return trackerOpen ? <Tracker onExit={navigateHome} pwa={pwa} /> : <LandingPage onOpen={navigateToTracker} pwa={pwa} />;
 }
 
 export default App;

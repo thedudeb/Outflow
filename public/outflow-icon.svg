@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Outflow</title>
+  <rect width="512" height="512" fill="#08090a"/>
+  <path
+    fill="#fbbf24"
+    fill-rule="evenodd"
+    d="M256 64a192 192 0 1 0 119.2 342.5l42.6 42.6H448v-72.4l-42.8-42.8A192 192 0 0 0 256 64Zm0 72a120 120 0 1 1-84.9 35.1A119.6 119.6 0 0 1 256 136Z"
+    clip-rule="evenodd"
+  />
+</svg>
