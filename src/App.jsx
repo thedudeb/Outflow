@@ -1,0 +1,733 @@
+import { useEffect, useMemo, useState } from "react";
+
+const STORAGE_KEY = "outflow:subscriptions";
+const LEGACY_STORAGE_KEY = "drain:subscriptions";
+
+const colorTags = [
+  { label: "Amber", value: "#f59e0b" },
+  { label: "Red", value: "#ef4444" },
+  { label: "Cyan", value: "#22d3ee" },
+  { label: "Lime", value: "#84cc16" },
+  { label: "Violet", value: "#8b5cf6" },
+  { label: "Steel", value: "#94a3b8" },
+];
+
+const cycles = [
+  { label: "Weekly", value: "weekly" },
+  { label: "Monthly", value: "monthly" },
+  { label: "Yearly", value: "yearly" },
+];
+
+const validCycles = new Set(cycles.map((cycle) => cycle.value));
+const validColors = new Set(colorTags.map((tag) => tag.value));
+const MAX_SUBSCRIPTIONS = 500;
+const MAX_DATE_ADVANCES = 50000;
+
+const seedSubscriptions = [
+  {
+    id: "netflix",
+    name: "Netflix",
+    amount: 15.49,
+    cycle: "monthly",
+    nextBillingDate: "2026-05-24",
+    category: "Streaming",
+    color: "#ef4444",
+    paused: false,
+  },
+  {
+    id: "spotify",
+    name: "Spotify",
+    amount: 10.99,
+    cycle: "monthly",
+    nextBillingDate: "2026-05-29",
+    category: "Music",
+    color: "#84cc16",
+    paused: false,
+  },
+  {
+    id: "icloud",
+    name: "iCloud+",
+    amount: 2.99,
+    cycle: "monthly",
+    nextBillingDate: "2026-06-03",
+    category: "Storage",
+    color: "#22d3ee",
+    paused: false,
+  },
+  {
+    id: "github",
+    name: "GitHub Copilot",
+    amount: 10,
+    cycle: "monthly",
+    nextBillingDate: "2026-06-08",
+    category: "Dev Tools",
+    color: "#94a3b8",
+    paused: false,
+  },
+  {
+    id: "notion",
+    name: "Notion Plus",
+    amount: 96,
+    cycle: "yearly",
+    nextBillingDate: "2026-08-17",
+    category: "Productivity",
+    color: "#f59e0b",
+    paused: true,
+  },
+];
+
+const blankForm = {
+  name: "",
+  amount: "",
+  cycle: "monthly",
+  nextBillingDate: toDateInput(new Date()),
+  category: "",
+  color: colorTags[0].value,
+  paused: false,
+};
+
+function toDateInput(date) {
+  const shifted = new Date(date);
+  shifted.setMinutes(shifted.getMinutes() - shifted.getTimezoneOffset());
+  return shifted.toISOString().slice(0, 10);
+}
+
+function parseDate(value) {
+  return new Date(`${value}T00:00:00`);
+}
+
+function isValidDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = parseDate(value);
+  return Number.isFinite(parsed.getTime()) && toDateInput(parsed) === value;
+}
+
+function sanitizeSubscription(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const name = typeof value.name === "string" ? value.name.trim().slice(0, 100) : "";
+  const amount = Number(value.amount);
+  const category = typeof value.category === "string" ? value.category.trim().slice(0, 60) : "Unsorted";
+
+  if (
+    !name ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > 1000000000 ||
+    !validCycles.has(value.cycle) ||
+    !isValidDate(value.nextBillingDate)
+  ) {
+    return null;
+  }
+
+  return {
+    id: typeof value.id === "string" && value.id.length <= 100 ? value.id : crypto.randomUUID(),
+    name,
+    amount,
+    cycle: value.cycle,
+    nextBillingDate: value.nextBillingDate,
+    category: category || "Unsorted",
+    color: validColors.has(value.color) ? value.color : colorTags[0].value,
+    paused: value.paused === true,
+  };
+}
+
+function sanitizeSubscriptions(value) {
+  if (!Array.isArray(value)) throw new TypeError("Stored subscriptions must be an array");
+  return value.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription).filter(Boolean);
+}
+
+function addCycle(date, cycle) {
+  const next = new Date(date);
+  if (cycle === "weekly") next.setDate(next.getDate() + 7);
+  if (cycle === "monthly") next.setMonth(next.getMonth() + 1);
+  if (cycle === "yearly") next.setFullYear(next.getFullYear() + 1);
+  return next;
+}
+
+function normalizeBillingDate(subscription, today = new Date()) {
+  if (subscription.paused) return subscription;
+  if (!validCycles.has(subscription.cycle) || !isValidDate(subscription.nextBillingDate)) return subscription;
+
+  const startOfToday = parseDate(toDateInput(today));
+  let nextDate = parseDate(subscription.nextBillingDate);
+  let advances = 0;
+
+  while (nextDate < startOfToday && advances < MAX_DATE_ADVANCES) {
+    nextDate = addCycle(nextDate, subscription.cycle);
+    advances += 1;
+  }
+
+  if (nextDate < startOfToday) return subscription;
+
+  const normalizedDate = toDateInput(nextDate);
+  return normalizedDate === subscription.nextBillingDate
+    ? subscription
+    : { ...subscription, nextBillingDate: normalizedDate };
+}
+
+function daysBetween(start, end) {
+  const msPerDay = 1000 * 60 * 60 * 24;
+  return Math.round((parseDate(end) - parseDate(start)) / msPerDay);
+}
+
+function monthlyEquivalent(subscription) {
+  const amount = Number(subscription.amount) || 0;
+  if (subscription.cycle === "weekly") return (amount * 52) / 12;
+  if (subscription.cycle === "yearly") return amount / 12;
+  return amount;
+}
+
+function money(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  }).format(Number(value) || 0);
+}
+
+function shortDate(value) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+  }).format(parseDate(value));
+}
+
+function fullDate(value) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+  }).format(parseDate(value));
+}
+
+function buildTimeline(subscriptions, days = 30) {
+  const today = toDateInput(new Date());
+  const endDate = parseDate(today);
+  endDate.setDate(endDate.getDate() + days);
+
+  return subscriptions
+    .filter((subscription) => !subscription.paused)
+    .flatMap((subscription) => {
+      if (!validCycles.has(subscription.cycle) || !isValidDate(subscription.nextBillingDate)) return [];
+
+      const events = [];
+      let eventDate = parseDate(subscription.nextBillingDate);
+      let eventCount = 0;
+
+      while (eventDate <= endDate && eventCount < 64) {
+        events.push({
+          ...subscription,
+          eventId: `${subscription.id}-${toDateInput(eventDate)}`,
+          date: toDateInput(eventDate),
+          daysOut: daysBetween(today, toDateInput(eventDate)),
+        });
+        eventDate = addCycle(eventDate, subscription.cycle);
+        eventCount += 1;
+      }
+
+      return events;
+    })
+    .sort((a, b) => parseDate(a.date) - parseDate(b.date) || a.name.localeCompare(b.name));
+}
+
+function dayLabel(daysOut) {
+  if (daysOut === 0) return "today";
+  if (daysOut === 1) return "tomorrow";
+  return `${daysOut} days`;
+}
+
+function initials(name) {
+  return name
+    .split(/\s|\+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function Panel({ title, marker, action, children, className = "" }) {
+  return (
+    <section className={`border border-zinc-800 bg-black/85 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${className}`}>
+      <header className="flex min-h-10 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/70 px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          {marker && <span className="h-3 w-1 shrink-0 bg-amber-400" />}
+          <h2 className="truncate text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">{title}</h2>
+        </div>
+        {action}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function StatCell({ label, value, sublabel, tone = "neutral", code }) {
+  const toneClass = tone === "hot" ? "text-amber-300" : "text-zinc-50";
+
+  return (
+    <section className="relative border border-zinc-800 bg-black/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</div>
+        {code && <div className="font-mono text-[10px] text-zinc-600">{code}</div>}
+      </div>
+      <div className={`mt-3 font-mono text-3xl font-black leading-none ${toneClass}`}>{value}</div>
+      <div className="mt-2 border-t border-zinc-900 pt-2 text-xs text-zinc-500">{sublabel}</div>
+    </section>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+      {label}
+      {children}
+    </label>
+  );
+}
+
+function App() {
+  const [subscriptions, setSubscriptions] = useState(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+      const parsed = stored ? JSON.parse(stored) : seedSubscriptions;
+      return sanitizeSubscriptions(parsed).map((item) => normalizeBillingDate(item));
+    } catch {
+      return sanitizeSubscriptions(seedSubscriptions).map((item) => normalizeBillingDate(item));
+    }
+  });
+  const [form, setForm] = useState(blankForm);
+  const [editingId, setEditingId] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
+  }, [subscriptions]);
+
+  useEffect(() => {
+    setSubscriptions((current) => current.map((item) => normalizeBillingDate(item)));
+  }, []);
+
+  const activeSubscriptions = useMemo(
+    () => subscriptions.filter((subscription) => !subscription.paused),
+    [subscriptions],
+  );
+
+  const sortedSubscriptions = useMemo(
+    () =>
+      [...subscriptions].sort((a, b) => {
+        if (a.paused !== b.paused) return Number(a.paused) - Number(b.paused);
+        return parseDate(a.nextBillingDate) - parseDate(b.nextBillingDate) || a.name.localeCompare(b.name);
+      }),
+    [subscriptions],
+  );
+
+  const timeline = useMemo(() => buildTimeline(subscriptions, 30), [subscriptions]);
+  const upcomingWeek = timeline.filter((event) => event.daysOut <= 7);
+  const monthlyTotal = activeSubscriptions.reduce((sum, item) => sum + monthlyEquivalent(item), 0);
+  const yearlyRunRate = monthlyTotal * 12;
+  const pausedCount = subscriptions.length - activeSubscriptions.length;
+  const thirtyDayTotal = timeline.reduce((sum, event) => sum + Number(event.amount), 0);
+  const nextCharge = timeline[0];
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function resetForm() {
+    setForm(blankForm);
+    setEditingId(null);
+  }
+
+  function submitSubscription(event) {
+    event.preventDefault();
+
+    const payload = sanitizeSubscription({
+      id: editingId || crypto.randomUUID(),
+      name: form.name.trim(),
+      amount: Number(form.amount),
+      cycle: form.cycle,
+      nextBillingDate: form.nextBillingDate,
+      category: form.category.trim() || "Unsorted",
+      color: form.color,
+      paused: form.paused,
+    });
+
+    if (!payload) return;
+
+    const normalizedPayload = normalizeBillingDate(payload);
+
+    setSubscriptions((current) =>
+      editingId
+        ? current.map((item) => (item.id === editingId ? normalizedPayload : item))
+        : [...current, normalizedPayload].slice(0, MAX_SUBSCRIPTIONS),
+    );
+    resetForm();
+  }
+
+  function editSubscription(subscription) {
+    setEditingId(subscription.id);
+    setForm({
+      name: subscription.name,
+      amount: String(subscription.amount),
+      cycle: subscription.cycle,
+      nextBillingDate: subscription.nextBillingDate,
+      category: subscription.category,
+      color: subscription.color,
+      paused: subscription.paused,
+    });
+  }
+
+  function deleteSubscription(id) {
+    setSubscriptions((current) => current.filter((subscription) => subscription.id !== id));
+    if (editingId === id) resetForm();
+  }
+
+  function togglePaused(id) {
+    setSubscriptions((current) =>
+      current.map((subscription) =>
+        subscription.id === id
+          ? normalizeBillingDate({ ...subscription, paused: !subscription.paused })
+          : subscription,
+      ),
+    );
+  }
+
+  return (
+    <main className="min-h-screen text-zinc-200">
+      <div className="mx-auto grid w-full max-w-[1560px] gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="border border-zinc-800 bg-black/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:sticky lg:top-3 lg:h-fit">
+          <header className="border-b border-zinc-800 bg-zinc-950/70 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-300">cashflow console</div>
+                <h1 className="mt-1 text-3xl font-black uppercase leading-none tracking-[0.14em] text-zinc-50">Outflow</h1>
+              </div>
+              <div className="border border-amber-500 bg-amber-400 px-2 py-1 font-mono text-[10px] font-black text-black">
+                LIVE
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 border border-zinc-800 font-mono text-[11px]">
+              <div className="border-r border-zinc-800 px-2 py-2">
+                <div className="text-zinc-600">ACTIVE</div>
+                <div className="text-zinc-100">{activeSubscriptions.length}</div>
+              </div>
+              <div className="border-r border-zinc-800 px-2 py-2">
+                <div className="text-zinc-600">PAUSED</div>
+                <div className="text-zinc-100">{pausedCount}</div>
+              </div>
+              <div className="px-2 py-2">
+                <div className="text-zinc-600">LINES</div>
+                <div className="text-zinc-100">{subscriptions.length}</div>
+              </div>
+            </div>
+          </header>
+
+          <form onSubmit={submitSubscription} className="grid gap-3 p-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+              <h2 className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">
+                {editingId ? "Edit subscription" : "Add subscription"}
+              </h2>
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="border border-zinc-700 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-zinc-400 hover:border-zinc-500 hover:text-zinc-100"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <Field label="Name">
+              <input
+                value={form.name}
+                onChange={(event) => updateField("name", event.target.value)}
+                placeholder="Figma, Slack, AWS..."
+                className="h-10 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
+              />
+            </Field>
+
+            <div className="grid gap-3 sm:grid-cols-[1fr_1.25fr] lg:grid-cols-1 xl:grid-cols-[1fr_1.25fr]">
+              <Field label="Amount">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.amount}
+                  onChange={(event) => updateField("amount", event.target.value)}
+                  placeholder="0.00"
+                  className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
+                />
+              </Field>
+
+              <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                Cycle
+                <div className="grid h-10 grid-cols-3 border border-zinc-700 bg-zinc-950">
+                  {cycles.map((cycle) => (
+                    <button
+                      key={cycle.value}
+                      type="button"
+                      aria-label={cycle.label}
+                      aria-pressed={form.cycle === cycle.value}
+                      title={cycle.label}
+                      onClick={() => updateField("cycle", cycle.value)}
+                      className={`border-r border-zinc-800 px-2 text-[11px] uppercase tracking-[0.08em] last:border-r-0 ${
+                        form.cycle === cycle.value
+                          ? "bg-amber-400 font-black text-black"
+                          : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                      }`}
+                    >
+                      {cycle.value === "weekly" ? "Wk" : cycle.value === "monthly" ? "Mo" : "Yr"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <Field label="Next billing date">
+              <input
+                type="date"
+                value={form.nextBillingDate}
+                onChange={(event) => updateField("nextBillingDate", event.target.value)}
+                className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
+              />
+            </Field>
+
+            <Field label="Category">
+              <input
+                value={form.category}
+                onChange={(event) => updateField("category", event.target.value)}
+                placeholder="Streaming"
+                className="h-10 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
+              />
+            </Field>
+
+            <Field label="Color tag">
+              <div className="grid grid-cols-6 border border-zinc-800 bg-zinc-950" role="group" aria-label="Color tag">
+                {colorTags.map((tag) => (
+                  <button
+                    key={tag.value}
+                    type="button"
+                    aria-label={tag.label}
+                    aria-pressed={form.color === tag.value}
+                    title={tag.label}
+                    onClick={(event) => {
+                      updateField("color", tag.value);
+                      event.currentTarget.blur();
+                    }}
+                    className={`relative h-9 border-r border-zinc-800 outline-none last:border-r-0 ${
+                      form.color === tag.value ? "bg-zinc-800" : "bg-black hover:bg-zinc-950"
+                    }`}
+                  >
+                    <span className="mx-auto block h-3 w-5" style={{ background: tag.value }} />
+                    {form.color === tag.value && (
+                      <span className="absolute inset-x-2 bottom-1 h-0.5 bg-amber-300" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
+            <label className="flex h-10 items-center justify-between border border-zinc-800 bg-zinc-950 px-3 text-xs uppercase tracking-[0.14em] text-zinc-400">
+              Paused
+              <input
+                type="checkbox"
+                checked={form.paused}
+                onChange={(event) => updateField("paused", event.target.checked)}
+                className="h-4 w-4 accent-amber-400"
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="h-11 border border-amber-400 bg-amber-400 px-3 text-xs font-black uppercase tracking-[0.18em] text-black hover:bg-amber-300"
+            >
+              {editingId ? "Commit changes" : "Add subscription"}
+            </button>
+          </form>
+        </aside>
+
+        <section className="grid min-w-0 gap-3">
+          <header className="border border-zinc-800 bg-black/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <div className="grid gap-3 p-3 md:grid-cols-[1fr_auto] md:items-center">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-zinc-500">recurring debit monitor</div>
+                <div className="mt-1 text-xl font-black uppercase tracking-[0.12em] text-zinc-50">Command Deck</div>
+              </div>
+              <div className="grid border border-zinc-800 font-mono text-xs sm:grid-cols-[auto_auto_auto]">
+                <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                  <span className="text-zinc-600">TODAY </span>
+                  <span className="text-zinc-300">{shortDate(toDateInput(new Date()))}</span>
+                </div>
+                <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                  <span className="text-zinc-600">NEXT </span>
+                  <span className="text-amber-300">{nextCharge ? `${nextCharge.name} ${dayLabel(nextCharge.daysOut)}` : "clear"}</span>
+                </div>
+                <div className="px-3 py-2">
+                  <span className="text-zinc-600">30D </span>
+                  <span className="text-zinc-100">{money(thirtyDayTotal)}</span>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCell label="Monthly outflow" value={money(monthlyTotal)} sublabel={`${activeSubscriptions.length} active subscriptions`} tone="hot" code="MRC" />
+            <StatCell label="Next charge" value={nextCharge ? money(nextCharge.amount) : "$0.00"} sublabel={nextCharge ? `${nextCharge.name} / ${fullDate(nextCharge.date)}` : "No active charges"} code="DUE" />
+            <StatCell label="30 day pull" value={money(thirtyDayTotal)} sublabel={`${timeline.length} scheduled debit events`} code="T+30" />
+            <StatCell label="Annualized" value={money(yearlyRunRate)} sublabel="Projected active run rate" code="ARR" />
+          </div>
+
+          <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,1fr)_380px]">
+            <section className="grid min-w-0 gap-3">
+              <Panel
+                title="Active subscriptions"
+                marker
+                action={<span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">identity / subscription / withdrawal</span>}
+              >
+                <div className="grid gap-3 p-3">
+                  <div className="hidden grid-cols-[220px_minmax(0,1fr)_280px] gap-3 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-600 lg:grid">
+                    <div>Logo / Plan</div>
+                    <div>Subscription</div>
+                    <div>Withdrawal</div>
+                  </div>
+
+                  {sortedSubscriptions.map((subscription) => {
+                    const daysOut = daysBetween(toDateInput(new Date()), subscription.nextBillingDate);
+                    const urgent = !subscription.paused && daysOut <= 7;
+
+                    return (
+                      <article
+                        key={subscription.id}
+                        className={`grid gap-2 border border-zinc-800 bg-zinc-950/70 p-2 transition hover:border-zinc-700 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3 ${
+                          subscription.paused ? "opacity-50" : ""
+                        }`}
+                      >
+                        <div className="border border-violet-500/60 bg-violet-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                          <div className="flex items-center justify-between gap-3">
+                            <div
+                              className="grid h-12 w-12 shrink-0 place-items-center border border-violet-300/70 bg-black font-mono text-sm font-black text-violet-200"
+                              style={{ boxShadow: `inset 4px 0 0 ${subscription.color}` }}
+                            >
+                              {initials(subscription.name)}
+                            </div>
+                            <div className="text-right">
+                              <div className="font-mono text-xl font-black leading-none text-violet-100">{money(subscription.amount)}</div>
+                              <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-violet-300/70">
+                                {subscription.cycle}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 border border-violet-400/20 font-mono text-[10px] uppercase">
+                            <div className="border-r border-violet-400/20 px-2 py-1 text-violet-300/70">monthly eq.</div>
+                            <div className="px-2 py-1 text-right text-violet-100">{money(monthlyEquivalent(subscription))}</div>
+                          </div>
+                        </div>
+
+                        <div className="border border-red-500/60 bg-red-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                          <div className="flex min-w-0 items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-lg font-black uppercase tracking-[0.08em] text-red-50">{subscription.name}</div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-red-200/70">
+                                <span>{subscription.category}</span>
+                                <span className="text-red-400/50">/</span>
+                                <span className="font-mono uppercase">{subscription.cycle} billing</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => togglePaused(subscription.id)}
+                              className={`shrink-0 border px-2 py-1 font-mono text-[11px] uppercase ${
+                                subscription.paused
+                                  ? "border-zinc-600 bg-black/40 text-zinc-400 hover:text-zinc-100"
+                                  : "border-red-300/50 bg-black/30 text-red-100 hover:border-red-100"
+                              }`}
+                            >
+                              {subscription.paused ? "Paused" : "Active"}
+                            </button>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => editSubscription(subscription)}
+                              className="border border-red-200/30 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteSubscription(subscription.id)}
+                              className="border border-red-300/50 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100"
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="border border-emerald-500/60 bg-emerald-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-emerald-300/70">will pull</div>
+                          <div className="mt-2 font-mono text-2xl font-black leading-none text-emerald-100">{money(subscription.amount)}</div>
+                          <div className={`mt-3 border-t border-emerald-400/20 pt-3 font-mono ${urgent ? "text-amber-200" : "text-emerald-100"}`}>
+                            <div className="text-lg font-black">{fullDate(subscription.nextBillingDate)}</div>
+                            <div className="mt-1 text-xs uppercase tracking-[0.14em] text-emerald-300/70">
+                              {subscription.paused ? "paused schedule" : dayLabel(daysOut)}
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </Panel>
+
+              <Panel title="Next 7 days" marker action={<span className="font-mono text-xs text-amber-300">{upcomingWeek.length}</span>}>
+                <div className="grid divide-y divide-zinc-900 md:grid-cols-2 md:divide-x md:divide-y-0 md:divide-zinc-900">
+                  {upcomingWeek.length ? (
+                    upcomingWeek.map((event) => (
+                      <div key={event.eventId} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="h-3 w-3 shrink-0" style={{ background: event.color }} />
+                            <span className="truncate text-sm font-bold text-zinc-100">{event.name}</span>
+                          </div>
+                          <div className="mt-1 font-mono text-xs text-zinc-500">{fullDate(event.date)} / {dayLabel(event.daysOut)}</div>
+                        </div>
+                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount)}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-6 text-sm text-zinc-500 md:col-span-2">No active charges inside the next week.</div>
+                  )}
+                </div>
+              </Panel>
+            </section>
+
+            <Panel title="Upcoming 30" marker action={<span className="font-mono text-xs text-amber-300">{timeline.length}</span>} className="min-w-0">
+              <div className="max-h-[640px] overflow-auto">
+                {timeline.map((event) => (
+                  <div key={event.eventId} className="grid grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-zinc-900 px-3 py-3">
+                    <div className="font-mono text-xs text-zinc-500">
+                      <div>{shortDate(event.date)}</div>
+                      <div className="text-[10px] uppercase text-zinc-700">{dayLabel(event.daysOut)}</div>
+                    </div>
+                    <div className="min-w-0 border-l border-zinc-800 pl-3">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 shrink-0" style={{ background: event.color }} />
+                        <div className="truncate text-sm font-bold text-zinc-100">{event.name}</div>
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-600">{event.category}</div>
+                    </div>
+                    <div className="font-mono text-sm font-bold text-zinc-100">{money(event.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+export default App;
