@@ -29,4 +29,6 @@ Prompt actions never create an account, transmit an email, or upload a workspace
 
 ## Verification
 
-Pure cadence and sanitization behavior is covered by `npm run test:account-prompts`. Browser QA must verify the third-change trigger, context handoff, cooldown behavior, shared-ledger trigger, and responsive geometry at desktop and narrow mobile widths.
+Pure cadence and sanitization behavior is covered by `npm run test:account-prompts`. The browser suite verifies at desktop and narrow mobile widths that an unconfigured build remains guest-only, displays the Free and lifetime-Pro comparison, exposes no unavailable account or checkout actions, and still permits local creation and reload persistence after the dialog is closed. It also verifies that a cancelled checkout return remains Free, never implies a recurring product charge, and removes the transient return parameter.
+
+Third-change cadence, context handoff, cooldown behavior, and shared-ledger triggers remain covered by the prompt unit contract until a configured browser-service fixture is available.

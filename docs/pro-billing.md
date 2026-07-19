@@ -22,6 +22,12 @@ Outflow Pro is a lifetime account entitlement purchased once through Stripe-host
 5. A later valid purchase activates Pro again. Signing in and choosing **Restore access** reads the durable entitlement; it does not create a charge.
 6. Account deletion removes entitlement, checkout reservations, and every purchase-to-user link. Minimal Stripe session, PaymentIntent, and event identifiers remain de-identified for webhook reconciliation and idempotency; raw payment data is never stored.
 
+## Upgrade Surface
+
+The Account / Pro dialog always shows a service-independent comparison before any purchase action. Free core covers local tracking, forecasts, the billing calendar, device and trial alerts, portable downloads, and mixed-currency records without conversion. Lifetime Pro covers cross-device synchronization, household and team invitations, member roles, durable email reminders, and hosted calendar subscriptions.
+
+An unconfigured build says **Paid once** instead of inventing a price and does not render sign-in, checkout, or restore actions. A verified one-time Stripe Price is shown only after sign-in, and only then can the user open hosted Checkout. Cancelled returns preserve the Free entitlement and explicitly state that no product subscription or recurring charge was created.
+
 ## Required Secrets
 
 Configure these only as Supabase Edge Function secrets:
@@ -46,5 +52,7 @@ The shared function configuration also requires the Supabase server values, `OUT
 ## Current Boundary
 
 The schema, functions, browser flow, and isolated database tests are implemented. No Stripe or Supabase project is provisioned in the repository, so the default build cannot sell or restore Pro yet.
+
+The service-independent comparison, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`.
 
 References: [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment), [Stripe webhook signatures](https://docs.stripe.com/webhooks/signature), [Stripe refund events](https://docs.stripe.com/refunds), and [Supabase signed webhook functions](https://supabase.com/docs/guides/functions/examples/stripe-webhooks).

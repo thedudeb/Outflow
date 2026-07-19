@@ -3838,7 +3838,7 @@ function Tracker({ onExit, pwa }) {
               </button>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-auto">
+            <div tabIndex={0} aria-label="Account and Pro details" className="min-h-0 flex-1 overflow-auto">
               <div className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
                 <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
                   Identity <span className={`ml-1 ${accountSession ? "text-cyan-300" : "text-zinc-400"}`}>{accountSession ? "Signed in" : "Guest"}</span>
@@ -3864,6 +3864,47 @@ function Tracker({ onExit, pwa }) {
                   <div className="mt-2 font-mono text-[9px] uppercase text-zinc-700">No upload occurs until Create cloud copy is selected after sign-in.</div>
                 </section>
               )}
+
+              <section aria-labelledby="access-model-title" className="border-b border-zinc-800">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2">
+                  <span id="access-model-title" className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Access model</span>
+                  <span className="font-mono text-[9px] font-black uppercase text-amber-300">One payment / no renewal</span>
+                </header>
+                <div className="grid sm:grid-cols-2">
+                  <div className="border-b border-zinc-800 p-4 sm:border-b-0 sm:border-r">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Free core</h3>
+                      <span className="font-mono text-xs font-black text-emerald-300">$0</span>
+                    </div>
+                    <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
+                      <li className="py-1.5">Local subscription tracking</li>
+                      <li className="py-1.5">Forecasts and billing calendar</li>
+                      <li className="py-1.5">Device alerts and trial reminders</li>
+                      <li className="py-1.5">CSV, backup, and calendar downloads</li>
+                      <li className="py-1.5">Multiple currencies / no conversion</li>
+                    </ul>
+                  </div>
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Lifetime Pro</h3>
+                      <span className="font-mono text-xs font-black text-amber-300">
+                        {accountEntitlement?.status === "active"
+                          ? "Active"
+                          : proOffer
+                            ? `${stripeMoney(proOffer.unitAmount, proOffer.currency)} once`
+                            : "Paid once"}
+                      </span>
+                    </div>
+                    <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
+                      <li className="py-1.5">Cross-device cloud sync</li>
+                      <li className="py-1.5">Household and team invitations</li>
+                      <li className="py-1.5">Owner, editor, and viewer access</li>
+                      <li className="py-1.5">Durable email reminders</li>
+                      <li className="py-1.5">Hosted calendar subscription</li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
 
               {cloudConfigError && (
                 <LiveMessage kind="alert" className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{cloudConfigError}</LiveMessage>
@@ -4291,35 +4332,6 @@ function Tracker({ onExit, pwa }) {
                 </LiveMessage>
               )}
 
-              <section>
-                <header className="border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Access model</header>
-                <div className="grid sm:grid-cols-2">
-                  <div className="border-b border-zinc-800 p-4 sm:border-b-0 sm:border-r">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Free</span>
-                      <span className="font-mono text-xs text-emerald-300">$0</span>
-                    </div>
-                    <div className="mt-3 font-mono text-[10px] uppercase leading-5 text-zinc-600">
-                      Local tracking / forecasts / device alerts / portable exports
-                    </div>
-                  </div>
-                  <div className="p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Pro</span>
-                      <span className="font-mono text-xs text-amber-300">
-                        {accountEntitlement?.status === "active"
-                          ? "Lifetime active"
-                          : proOffer
-                            ? `${stripeMoney(proOffer.unitAmount, proOffer.currency)} once`
-                            : "Paid once"}
-                      </span>
-                    </div>
-                    <div className="mt-3 font-mono text-[10px] uppercase leading-5 text-zinc-600">
-                      Cross-device sync / member invitations / email automation / connected calendars
-                    </div>
-                  </div>
-                </div>
-              </section>
             </div>
           </section>
         </div>
