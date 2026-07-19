@@ -3943,7 +3943,7 @@ function Tracker({ onExit, pwa }) {
       </div>
 
       {accountOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
           <section
             ref={accountDialogRef}
             role="dialog"
@@ -3951,7 +3951,7 @@ function Tracker({ onExit, pwa }) {
             aria-labelledby="account-controls-title"
             aria-busy={Boolean(accountBusy) || accountLoading || accountEntitlementLoading || emailPreferencesLoading || proOfferLoading || cloudLedgersLoading}
             tabIndex={-1}
-            className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+            className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-2xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
@@ -4483,7 +4483,7 @@ function Tracker({ onExit, pwa }) {
       )}
 
       {calendarExportOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
           <section
             ref={calendarDialogRef}
             role="dialog"
@@ -4491,7 +4491,7 @@ function Tracker({ onExit, pwa }) {
             aria-labelledby="calendar-export-title"
             aria-busy={calendarFeedLoading || Boolean(calendarFeedBusy)}
             tabIndex={-1}
-            className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+            className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-2xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
@@ -4690,7 +4690,7 @@ function Tracker({ onExit, pwa }) {
       )}
 
       {ledgerOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
           <section
             ref={ledgerDialogRef}
             role="dialog"
@@ -4698,7 +4698,7 @@ function Tracker({ onExit, pwa }) {
             aria-labelledby="ledger-controls-title"
             aria-busy={cloudLedgersLoading || Boolean(cloudOpenId) || backupLoading}
             tabIndex={-1}
-            className="flex max-h-[calc(100vh-24px)] w-full max-w-3xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+            className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-3xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
@@ -4981,14 +4981,14 @@ function Tracker({ onExit, pwa }) {
       )}
 
       {alertSettingsOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
           <section
             ref={alertDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="alert-settings-title"
             tabIndex={-1}
-            className="w-full max-w-xl border border-zinc-700 bg-[#090a0b] shadow-2xl"
+            className="min-w-0 w-full max-w-full border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-w-xl"
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
@@ -5065,7 +5065,7 @@ function Tracker({ onExit, pwa }) {
       )}
 
       {importOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
           <section
             ref={csvDialogRef}
             role="dialog"

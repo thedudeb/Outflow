@@ -70,9 +70,11 @@ async function expectDocumentToReflow(page) {
 async function expectDialogInsideViewport(page, dialog) {
   const geometry = await dialog.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
+    const labelledBy = element.getAttribute("aria-labelledby");
     return {
       bottom: bounds.bottom,
       left: bounds.left,
+      name: labelledBy ? document.getElementById(labelledBy)?.textContent?.trim() : element.getAttribute("aria-label"),
       right: bounds.right,
       top: bounds.top,
       viewportHeight: window.innerHeight,
@@ -80,10 +82,11 @@ async function expectDialogInsideViewport(page, dialog) {
     };
   });
 
-  expect(geometry.left).toBeGreaterThanOrEqual(0);
-  expect(geometry.top).toBeGreaterThanOrEqual(0);
-  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
-  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  const details = JSON.stringify(geometry, null, 2);
+  expect(geometry.left, details).toBeGreaterThanOrEqual(0);
+  expect(geometry.top, details).toBeGreaterThanOrEqual(0);
+  expect(geometry.right, details).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.bottom, details).toBeLessThanOrEqual(geometry.viewportHeight + 1);
 }
 
 test("landing page meets the automated WCAG A and AA gate", async ({ page }) => {
