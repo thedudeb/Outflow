@@ -1,6 +1,6 @@
 # Cloud Ledger Synchronization
 
-**Status:** Implemented runtime and protected hosted-client acceptance; external staging deployment pending
+**Status:** Implemented runtime plus protected hosted service/browser acceptance harnesses; external staging deployment pending
 
 Outflow keeps browser-local and cloud ledgers as separate data sources. Opening a cloud ledger is explicit, and its totals never merge into the active local ledger. The header always identifies the active storage source, member role, revision, and synchronization state.
 
@@ -61,7 +61,9 @@ The database half of the same contract runs through `npm run test:account-founda
 
 `npm run test:staging-account-plane` validates the hosted acceptance harness without network access. Once the protected Supabase staging project is provisioned, **Staging Account Plane** uses separate authenticated owner and editor clients against the deployed database and Realtime service. After the initial insert reaches the owner, the harness explicitly removes that channel, commits revision 2 through the editor, rejects the owner's revision-1 write without changing server data, and reloads the authoritative revision-2 amount and updater. It then subscribes a fresh filtered channel, commits revision 3, requires the exact `UPDATE` event, reloads the matching revision-3 snapshot, and closes the channel before account teardown.
 
-The fixed workflow report records only named checks and deployment metadata. It does not record account IDs, row payloads, operation IDs, session credentials, or Realtime messages. This proves the hosted authorization, revision, catch-up, and transport sequence through two service clients. It does not prove the browser's visible `offline`, `conflict`, `stale`, and `synced` transitions against the deployed project; that two-browser UI pass remains required before public synchronization claims.
+The fixed workflow report records only named checks and deployment metadata. It does not record account IDs, row payloads, operation IDs, session credentials, or Realtime messages. This proves the hosted authorization, revision, catch-up, and transport sequence through two service clients.
+
+`npm run test:staging-browser-sync` validates the protected browser harness without network access. After the account plane passes, manually dispatch **Staging Browser Sync** from `main`. It creates a fresh owner/editor pair and shared ledger, recovers each real session inside an isolated browser context, and runs the deployed UI at desktop and mobile widths. The sequence proves hosted refresh, unfinished-form preservation with visible `stale`, explicit recovery, server-rejected `conflict`, visible `offline` after closing the browser Realtime transport, missed-write catch-up after automatic resubscription, and a final `synced` state. The harness disables browser artifacts and writes only a fixed, identity-free summary. No passing external staging run is recorded in the repository yet.
 
 ## Offline Boundary
 

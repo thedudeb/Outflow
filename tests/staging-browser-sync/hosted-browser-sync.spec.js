@@ -1,0 +1,230 @@
+import { appendFile } from "node:fs/promises";
+import { expect, test } from "@playwright/test";
+import {
+  browserAuthStorageKey,
+  browserSyncCheckNames,
+  buildBrowserSyncReport,
+  provisionBrowserSyncFixture,
+  resolveBrowserSyncAcceptanceConfig,
+} from "../../scripts/staging-browser-sync.mjs";
+
+function installBrowserAcceptanceControl({ storageKey, session }) {
+  localStorage.setItem(storageKey, JSON.stringify(session));
+
+  const NativeWebSocket = window.WebSocket;
+  const nativeOnMessage = Object.getOwnPropertyDescriptor(NativeWebSocket.prototype, "onmessage");
+  const realtimeSockets = new Set();
+  const state = { dropChanges: false, holdConnections: false };
+
+  class AcceptanceWebSocket extends NativeWebSocket {
+    constructor(url, protocols) {
+      super(url, protocols);
+      const realtime = String(url).includes("/realtime/v1/websocket");
+      if (!realtime) return;
+
+      realtimeSockets.add(this);
+      this.addEventListener("open", () => {
+        if (state.holdConnections && this.readyState === NativeWebSocket.OPEN) {
+          this.close(4001, "Staging acceptance disconnect");
+        }
+      });
+      this.addEventListener("close", () => realtimeSockets.delete(this));
+
+      if (!nativeOnMessage?.set) return;
+      let assignedHandler = null;
+      Object.defineProperty(this, "onmessage", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return assignedHandler;
+        },
+        set(handler) {
+          assignedHandler = handler;
+          const controlledHandler = typeof handler === "function"
+            ? (event) => {
+                if (state.dropChanges && typeof event.data === "string") {
+                  try {
+                    if (JSON.parse(event.data)?.event === "postgres_changes") return;
+                  } catch {
+                    // Non-JSON transport messages remain visible to the client.
+                  }
+                }
+                handler.call(this, event);
+              }
+            : handler;
+          nativeOnMessage.set.call(this, controlledHandler);
+        },
+      });
+    }
+  }
+
+  window.WebSocket = AcceptanceWebSocket;
+  Object.defineProperty(window, "__OUTFLOW_STAGING_SYNC__", {
+    configurable: false,
+    enumerable: false,
+    value: Object.freeze({
+      dropChanges(value) {
+        state.dropChanges = value === true;
+      },
+      disconnect() {
+        state.holdConnections = true;
+        realtimeSockets.forEach((socket) => {
+          if (socket.readyState < NativeWebSocket.CLOSING) socket.close(4001, "Staging acceptance disconnect");
+        });
+      },
+      reconnect() {
+        state.holdConnections = false;
+      },
+    }),
+  });
+}
+
+function browserContextOptions(projectUse) {
+  const options = { acceptDownloads: false, serviceWorkers: "block" };
+  for (const key of ["viewport", "userAgent", "deviceScaleFactor", "isMobile", "hasTouch"]) {
+    if (projectUse[key] !== undefined) options[key] = projectUse[key];
+  }
+  return options;
+}
+
+async function createAuthenticatedContext(browser, projectUse, storageKey, session) {
+  const context = await browser.newContext(browserContextOptions(projectUse));
+  await context.addInitScript(installBrowserAcceptanceControl, { storageKey, session });
+  return context;
+}
+
+async function openHostedLedger(page, appOrigin, ledgerName) {
+  await page.goto(`${appOrigin}/#app`, { waitUntil: "domcontentloaded" });
+  const accountButton = page.getByRole("button", { name: /^Open account controls for / });
+  await expect(accountButton).toBeVisible({ timeout: 30_000 });
+  await accountButton.click();
+
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  const ledgerTitle = dialog.getByText(ledgerName, { exact: true });
+  await expect(ledgerTitle).toBeVisible({ timeout: 20_000 });
+  const ledgerRow = ledgerTitle.locator("..").locator("..");
+  await ledgerRow.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: `Open ${ledgerName} ledger controls`, exact: true })).toBeVisible();
+  await expect(page.getByText("synced", { exact: true })).toBeVisible();
+}
+
+function subscriptionCard(page, subscriptionName) {
+  return page.getByRole("article").filter({ has: page.getByText(subscriptionName, { exact: true }) });
+}
+
+async function beginAmountEdit(page, subscriptionName, amount) {
+  const card = subscriptionCard(page, subscriptionName);
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill(String(amount));
+}
+
+async function commitAmount(page, subscriptionName, amount, revision) {
+  await beginAmountEdit(page, subscriptionName, amount);
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: `Synchronized revision ${revision}.` })).toBeVisible();
+}
+
+async function expectCardAmount(page, subscriptionName, amount) {
+  await expect(subscriptionCard(page, subscriptionName)).toContainText(`$${Number(amount).toFixed(2)}`);
+}
+
+test("deployed UI protects stale work, rejects conflicts, and catches up after Realtime reconnect", async ({ browser }, testInfo) => {
+  const config = resolveBrowserSyncAcceptanceConfig(process.env);
+  if (config.errors.length) throw new Error(`Staging browser-sync configuration failed:\n${config.errors.map((error) => `- ${error}`).join("\n")}`);
+
+  const fixture = await provisionBrowserSyncFixture(config);
+  const storageKey = browserAuthStorageKey(config.projectUrl);
+  const completed = [];
+  let ownerContext;
+  let editorContext;
+
+  try {
+    ownerContext = await createAuthenticatedContext(browser, testInfo.project.use, storageKey, fixture.ownerSession);
+    editorContext = await createAuthenticatedContext(browser, testInfo.project.use, storageKey, fixture.editorSession);
+    const ownerPage = await ownerContext.newPage();
+    const editorPage = await editorContext.newPage();
+
+    await openHostedLedger(ownerPage, config.appOrigin, fixture.teamName);
+    await openHostedLedger(editorPage, config.appOrigin, fixture.teamName);
+    completed.push("verified browser sessions", "isolated shared ledger open");
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 33);
+    await expectCardAmount(editorPage, fixture.subscriptionName, 33);
+
+    await commitAmount(editorPage, fixture.subscriptionName, 34, 1);
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Remote changes applied." })).toBeVisible({ timeout: 20_000 });
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 34);
+    completed.push("hosted Realtime refresh");
+
+    await beginAmountEdit(ownerPage, fixture.subscriptionName, 36);
+    await ownerPage.waitForTimeout(500);
+    await commitAmount(editorPage, fixture.subscriptionName, 35, 2);
+    const staleAlert = ownerPage.getByRole("alert").filter({
+      hasText: "Another cloud revision is available. Finish or cancel the current edit, then refresh.",
+    });
+    await expect(staleAlert).toBeVisible({ timeout: 20_000 });
+    await expect(ownerPage.getByRole("spinbutton", { name: "Amount", exact: true })).toHaveValue("36");
+    await expect(ownerPage.getByRole("button", { name: "Commit changes", exact: true })).toBeDisabled();
+    completed.push("stale edit preservation");
+
+    await ownerPage.getByRole("button", { name: "Clear", exact: true }).click();
+    await ownerPage.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Cloud ledger refreshed." })).toBeVisible();
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 35);
+    completed.push("stale refresh recovery");
+
+    await ownerPage.evaluate(() => window.__OUTFLOW_STAGING_SYNC__.dropChanges(true));
+    await commitAmount(editorPage, fixture.subscriptionName, 37, 3);
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 35);
+    await beginAmountEdit(ownerPage, fixture.subscriptionName, 39);
+    await ownerPage.getByRole("button", { name: "Commit changes", exact: true }).click();
+    const conflictAlert = ownerPage.getByRole("alert").filter({
+      hasText: "Cloud changed at revision 3. Your stale write was rejected",
+    });
+    await expect(conflictAlert).toBeVisible({ timeout: 20_000 });
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 37);
+    await expect(ownerPage.getByText("$39.00", { exact: true })).toHaveCount(0);
+    completed.push("browser conflict rejection");
+
+    await ownerPage.evaluate(() => window.__OUTFLOW_STAGING_SYNC__.dropChanges(false));
+    await ownerPage.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Cloud ledger refreshed." })).toBeVisible();
+    await expect(ownerPage.getByText("synced", { exact: true })).toBeVisible();
+    completed.push("conflict refresh recovery");
+
+    await ownerPage.evaluate(() => window.__OUTFLOW_STAGING_SYNC__.disconnect());
+    const offlineAlert = ownerPage.getByRole("alert").filter({
+      hasText: "Realtime connection interrupted. Outflow will refresh after it reconnects.",
+    });
+    await expect(offlineAlert).toBeVisible({ timeout: 20_000 });
+    completed.push("Realtime disconnect visibility");
+
+    await commitAmount(editorPage, fixture.subscriptionName, 41, 4);
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 37);
+    await ownerPage.evaluate(() => window.__OUTFLOW_STAGING_SYNC__.reconnect());
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Remote changes applied." })).toBeVisible({ timeout: 30_000 });
+    await expectCardAmount(ownerPage, fixture.subscriptionName, 41);
+    completed.push("authoritative reconnect catch-up");
+    await expect(ownerPage.getByText("synced", { exact: true })).toBeVisible();
+    completed.push("synchronized final state");
+
+    expect(completed).toEqual(browserSyncCheckNames);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+        ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+        : "";
+      await appendFile(process.env.GITHUB_STEP_SUMMARY, buildBrowserSyncReport({
+        projectUrl: config.projectUrl,
+        appOrigin: config.appOrigin,
+        completed,
+        viewport: testInfo.project.name,
+        commit: process.env.GITHUB_SHA,
+        actor: process.env.GITHUB_ACTOR,
+        runUrl,
+      }), "utf8");
+    }
+  } finally {
+    await Promise.allSettled([ownerContext?.close(), editorContext?.close()].filter(Boolean));
+    await fixture.cleanup();
+  }
+});

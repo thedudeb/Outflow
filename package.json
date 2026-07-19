@@ -13,6 +13,8 @@
     "check:staging-boundaries": "node scripts/check-staging-boundaries.mjs",
     "test:staging-account-plane": "node --test tests/staging-account-plane.test.js",
     "check:staging-account-plane": "node scripts/check-staging-account-plane.mjs",
+    "test:staging-browser-sync": "node --test tests/staging-browser-sync.test.js",
+    "check:staging-browser-sync": "playwright test --config=playwright.staging-sync.config.js",
     "test:staging-billing-plane": "node --test tests/staging-billing-plane.test.js",
     "check:staging-billing-plane": "node scripts/check-staging-billing-plane.mjs",
     "test:staging-messaging-plane": "node --test tests/staging-messaging-plane.test.js",
