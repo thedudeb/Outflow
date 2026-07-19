@@ -2,6 +2,8 @@
 
 Outflow's full-ledger backup is the portable boundary between today's active local ledger and future account synchronization. It preserves that ledger's subscription records, identity metadata, and application-level alert settings without including other local ledgers, browser permissions, or notification history.
 
+Signed-in users can separately download their complete user-visible cloud footprint through the [Account Data Export Contract](account-data-export.md). Account export is an archive and data-control surface; this ledger format remains the reviewed restore boundary.
+
 ## Envelope
 
 ```json

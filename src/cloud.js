@@ -78,6 +78,69 @@ export async function requestAccountLink(email) {
   if (error) throw error;
 }
 
+const accountExportForbiddenKeys = new Set([
+  "accessToken",
+  "access_token",
+  "checkoutSessionId",
+  "checkout_session_id",
+  "claimToken",
+  "claim_token",
+  "lastErrorCode",
+  "last_error_code",
+  "operationId",
+  "operation_id",
+  "paymentIntentId",
+  "payment_intent_id",
+  "providerMessageId",
+  "provider_message_id",
+  "providerReference",
+  "provider_reference",
+  "refreshToken",
+  "refresh_token",
+  "token",
+  "tokenHash",
+  "token_hash",
+  "workspaceHash",
+  "workspace_hash",
+]);
+
+function assertPortableAccountData(value) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach(assertPortableAccountData);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (accountExportForbiddenKeys.has(key)) {
+      throw new Error("Outflow blocked an account export containing private service data.");
+    }
+    if (child && typeof child === "object") assertPortableAccountData(child);
+  }
+}
+
+export async function readAccountDataExport() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("export_account_data");
+  if (error) throw error;
+  assertPortableAccountData(data);
+  if (
+    !data
+    || typeof data !== "object"
+    || Array.isArray(data)
+    || data.product !== "Outflow"
+    || data.schemaVersion !== 1
+    || !data.account
+    || typeof data.account.email !== "string"
+    || !Array.isArray(data.ledgers)
+    || !Array.isArray(data.hostedCalendarFeeds)
+    || !Array.isArray(data.emailReminderDeliveries)
+  ) {
+    throw new Error("Outflow returned an unsupported account data export.");
+  }
+  return data;
+}
+
 export async function uploadGuestWorkspace(workspace) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");

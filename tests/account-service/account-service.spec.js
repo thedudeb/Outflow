@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -64,6 +65,8 @@ function createCloudState({
     checkoutUrl,
     entitlementReads: 0,
     checkoutRequests: [],
+    accountExportRequests: 0,
+    accountExportOverride: undefined,
     deleteRequests: 0,
     deleted: false,
     writes: [],
@@ -130,6 +133,83 @@ function createCloudState({
       created_at: "2026-07-19T12:00:00.000Z",
       updated_at: "2026-07-19T12:00:00.000Z",
     }],
+  };
+}
+
+function accountExportFromCloudState(cloudState) {
+  const profileById = new Map(cloudState.profiles.map((profile) => [profile.id, profile]));
+  return {
+    product: "Outflow",
+    schemaVersion: 1,
+    exportedAt: "2026-07-19T14:00:00.000Z",
+    account: {
+      id: fixtureUser.id,
+      email: fixtureUser.email,
+      displayName: profileById.get(fixtureUser.id)?.display_name || null,
+      createdAt: "2026-07-19T12:00:00.000Z",
+      updatedAt: "2026-07-19T14:00:00.000Z",
+    },
+    entitlement: cloudState.entitlementStatus ? {
+      product: "outflow_pro_lifetime",
+      status: cloudState.entitlementStatus,
+      provider: "stripe",
+      purchasedAt: "2026-07-19T12:00:00.000Z",
+      revokedAt: null,
+    } : null,
+    notificationPreferences: cloudState.notificationPreferences ? {
+      emailEnabled: cloudState.notificationPreferences.email_enabled,
+      pausedScheduleEnabled: cloudState.notificationPreferences.paused_schedule_enabled,
+      timezone: cloudState.notificationPreferences.timezone,
+      createdAt: "2026-07-19T12:00:00.000Z",
+      updatedAt: cloudState.notificationPreferences.updated_at,
+    } : null,
+    ledgers: cloudState.accessGranted ? [{
+      id: cloudState.ledger.id,
+      name: cloudState.ledger.name,
+      kind: cloudState.ledger.kind,
+      ownerId: cloudState.ledger.owner_id,
+      currentRole: cloudState.members.find((member) => member.user_id === fixtureUser.id)?.role || "viewer",
+      revision: cloudState.ledger.revision,
+      createdAt: cloudState.ledger.created_at,
+      updatedAt: cloudState.ledger.updated_at,
+      members: cloudState.members.map((member) => ({
+        userId: member.user_id,
+        displayName: profileById.get(member.user_id)?.display_name || null,
+        role: member.role,
+        joinedAt: member.joined_at,
+      })),
+      pendingInvitations: cloudState.invitations.map((invitation) => ({
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        expiresAt: invitation.expires_at,
+        createdAt: invitation.created_at,
+      })),
+      subscriptions: cloudState.subscriptions.map((subscription) => ({
+        id: subscription.id,
+        name: subscription.name,
+        amount: subscription.amount,
+        currency: subscription.currency,
+        cycle: subscription.cycle,
+        nextBillingDate: subscription.next_billing_date,
+        category: subscription.category,
+        tags: subscription.tags,
+        color: subscription.color,
+        trialEndDate: subscription.trial_end_date,
+        reminderLeadDays: subscription.reminder_lead_days,
+        paused: subscription.paused,
+        revision: subscription.revision,
+        createdBy: subscription.created_by,
+        updatedBy: subscription.updated_by,
+        sourceCreatedBy: subscription.source_created_by,
+        sourceUpdatedBy: subscription.source_updated_by,
+        clientUpdatedAt: subscription.client_updated_at,
+        createdAt: subscription.created_at,
+        updatedAt: subscription.updated_at,
+      })),
+    }] : [],
+    hostedCalendarFeeds: cloudState.calendarFeed ? [{ ...cloudState.calendarFeed }] : [],
+    emailReminderDeliveries: [],
   };
 }
 
@@ -345,6 +425,12 @@ async function installCloudFixture(page, {
     }
     if (url.pathname.endsWith("/rest/v1/subscriptions")) {
       return reply(cloudState?.accessGranted ? cloudState.subscriptions : []);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/export_account_data") && cloudState) {
+      cloudState.accountExportRequests += 1;
+      return reply(cloudState.accountExportOverride === undefined
+        ? accountExportFromCloudState(cloudState)
+        : cloudState.accountExportOverride);
     }
     if (url.pathname.endsWith("/rest/v1/rpc/can_sync_ledger")) {
       return reply(Boolean(cloudState?.accessGranted && cloudState.canSync));
@@ -833,6 +919,7 @@ test("refunded owner keeps data-control removal while Pro collaboration actions 
   await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Entitlement Free");
+  await expect(dialog.getByRole("button", { name: "Download account data", exact: true })).toBeEnabled();
   await dialog.getByRole("button", { name: "Members", exact: true }).click();
   await expect(dialog).toContainText("Pro is required for new invitations and role changes.");
   await expect(dialog.getByRole("textbox", { name: "Invite by email", exact: true })).toHaveCount(0);
@@ -1215,6 +1302,101 @@ test("Restore access adopts the durable account entitlement and survives reload"
   await expect(dialog).toContainText("Entitlement Pro");
   await expect(dialog).toContainText("Purchased Jul 19 / stripe / no renewal");
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("signed-in account export downloads complete portable cloud data without service secrets", async ({ page }) => {
+  const cloudState = createCloudState();
+  cloudState.notificationPreferences = {
+    email_enabled: true,
+    paused_schedule_enabled: false,
+    timezone: "America/Halifax",
+    updated_at: "2026-07-19T13:00:00.000Z",
+  };
+  cloudState.calendarFeed = {
+    id: "44444444-4444-4444-8444-444444444444",
+    ledgerId: cloudState.ledger.id,
+    ledgerName: cloudState.ledger.name,
+    includePaused: false,
+    createdAt: "2026-07-19T12:00:00.000Z",
+    updatedAt: "2026-07-19T13:00:00.000Z",
+    rotatedAt: "2026-07-19T13:00:00.000Z",
+    lastAccessAt: null,
+  };
+  cloudState.calendarFeedToken = calendarTokens[0];
+  cloudState.invitations.push({
+    id: "55555555-5555-4555-8555-555555555555",
+    ledger_id: cloudState.ledger.id,
+    email: "new-member@example.com",
+    role: "viewer",
+    invited_by: fixtureUser.id,
+    expires_at: "2026-07-26T12:00:00.000Z",
+    accepted_at: null,
+    created_at: "2026-07-19T12:00:00.000Z",
+  });
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  const downloadPromise = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Download account data", exact: true }).click();
+  const download = await downloadPromise;
+  const downloadedPath = await download.path();
+  const exported = JSON.parse(await readFile(downloadedPath, "utf8"));
+
+  expect(download.suggestedFilename()).toMatch(/^outflow-account-data-\d{4}-\d{2}-\d{2}\.json$/);
+  expect(exported).toMatchObject({
+    product: "Outflow",
+    schemaVersion: 1,
+    account: { email: "owner@example.com", displayName: "Avery Owner" },
+    entitlement: { status: "active", provider: "stripe" },
+    notificationPreferences: { emailEnabled: true, timezone: "America/Halifax" },
+    ledgers: [{
+      id: "studio-cloud",
+      currentRole: "owner",
+      pendingInvitations: [{ email: "new-member@example.com", role: "viewer" }],
+      subscriptions: [{ name: "Figma Cloud", amount: 25 }],
+    }],
+    hostedCalendarFeeds: [{ ledgerId: "studio-cloud", includePaused: false }],
+    emailReminderDeliveries: [],
+  });
+  const serialized = JSON.stringify(exported);
+  expect(serialized).not.toContain(calendarTokens[0]);
+  expect(serialized).not.toContain("providerReference");
+  expect(serialized).not.toContain("providerMessageId");
+  expect(serialized).not.toContain("operationId");
+  expect(cloudState.accountExportRequests).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+  await expect(dialog.getByText(
+    "Account data exported / 1 cloud ledger. Local browser ledgers were not included.",
+    { exact: true },
+  )).toBeVisible();
+});
+
+test("browser refuses an account export containing private service fields", async ({ page }) => {
+  const cloudState = createCloudState();
+  cloudState.accountExportOverride = {
+    ...accountExportFromCloudState(cloudState),
+    privateServiceData: { token_hash: "private-calendar-token-hash" },
+  };
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  let downloadCount = 0;
+  page.on("download", () => { downloadCount += 1; });
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await dialog.getByRole("button", { name: "Download account data", exact: true }).click();
+
+  await expect(dialog.getByText(
+    "Outflow blocked an account export containing private service data.",
+    { exact: true },
+  )).toBeVisible();
+  expect(downloadCount).toBe(0);
+  expect(cloudState.accountExportRequests).toBe(1);
 });
 
 test("confirmed cloud-account deletion clears remote access and restores the exact local workspace", async ({ page }) => {

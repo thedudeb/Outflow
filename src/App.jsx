@@ -10,6 +10,7 @@ import {
   getCloud,
   hostedCalendarFeedUrl,
   publishHostedCalendarFeed,
+  readAccountDataExport,
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
   readHostedCalendarFeed,
@@ -2889,6 +2890,30 @@ function Tracker({ onExit, pwa }) {
     }
   }
 
+  async function exportCloudAccountData() {
+    if (!accountSession || accountBusy) return;
+    setAccountBusy("export-account");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const accountData = await readAccountDataExport();
+      const blob = new Blob([JSON.stringify(accountData, null, 2)], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `outflow-account-data-${toDateInput(new Date())}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setAccountMessage(`Account data exported / ${accountData.ledgers.length} cloud ${accountData.ledgers.length === 1 ? "ledger" : "ledgers"}. Local browser ledgers were not included.`);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not export this account's data.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
   async function removeCloudAccount() {
     if (!accountSession || accountBusy || cloudSyncingRef.current) return;
     if (!deleteAccountArmed) {
@@ -4671,6 +4696,23 @@ function Tracker({ onExit, pwa }) {
                         </div>
                       );
                     })}
+                  </section>
+
+                  <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-[0.12em] text-zinc-200">Export account data</div>
+                      <div className="mt-1 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                        Cloud ledgers, collaboration, preferences, and reminder history / JSON / Free
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={exportCloudAccountData}
+                      disabled={Boolean(accountBusy)}
+                      className="h-10 border border-cyan-800 bg-black px-4 text-xs font-black uppercase tracking-[0.1em] text-cyan-300 hover:border-cyan-400 disabled:opacity-40"
+                    >
+                      {accountBusy === "export-account" ? "Exporting..." : "Download account data"}
+                    </button>
                   </section>
 
                   <section className="grid gap-3 border-b border-red-950 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">

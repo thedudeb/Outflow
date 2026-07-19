@@ -1098,6 +1098,83 @@ where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222
 delete from public.entitlements
 where user_id = '22222222-2222-4222-8222-222222222222' and provider_reference = 'test-calendar-member';
 
+set role anon;
+do $$
+begin
+  perform public.export_account_data();
+  raise exception 'anonymous account export unexpectedly succeeded';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+create temporary table stranger_account_export as
+select public.export_account_data() as payload;
+
+do $$
+declare
+  payload jsonb := (select payload from stranger_account_export);
+begin
+  if payload -> 'account' ->> 'email' <> 'stranger@example.com' then
+    raise exception 'account export returned another identity';
+  end if;
+  if jsonb_array_length(payload -> 'ledgers') <> 0 then
+    raise exception 'account export exposed a ledger after membership removal';
+  end if;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+create temporary table owner_account_export as
+select public.export_account_data() as payload;
+
+do $$
+declare
+  payload jsonb := (select payload from owner_account_export);
+  serialized text := payload::text;
+begin
+  if payload ->> 'product' <> 'Outflow' or (payload ->> 'schemaVersion')::integer <> 1 then
+    raise exception 'account export envelope is invalid';
+  end if;
+  if payload -> 'account' ->> 'email' <> 'owner@example.com' then
+    raise exception 'account export identity is invalid';
+  end if;
+  if jsonb_array_length(payload -> 'ledgers') <> 2 then
+    raise exception 'account export did not include every accessible ledger';
+  end if;
+  if not exists (
+    select 1
+    from jsonb_array_elements(payload -> 'ledgers') as ledger
+    where ledger ->> 'id' = 'personal-ledger'
+      and jsonb_array_length(ledger -> 'subscriptions') > 0
+  ) then
+    raise exception 'account export omitted portable subscription data';
+  end if;
+  if payload -> 'notificationPreferences' is null then
+    raise exception 'account export omitted notification preferences';
+  end if;
+  if jsonb_array_length(payload -> 'hostedCalendarFeeds') <> 1 then
+    raise exception 'account export omitted hosted calendar metadata';
+  end if;
+  if serialized like '%tokenHash%'
+    or serialized like '%providerReference%'
+    or serialized like '%providerMessageId%'
+    or serialized like '%paymentIntentId%'
+    or serialized like '%checkoutSessionId%'
+    or serialized like '%operationId%'
+    or serialized like '%workspaceHash%'
+  then
+    raise exception 'account export exposed private service data';
+  end if;
+end;
+$$;
+
+reset role;
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;
