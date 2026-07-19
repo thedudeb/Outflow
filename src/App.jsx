@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
+const NOTIFIED_ALERTS_KEY = "outflow:notified-alerts";
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -20,8 +21,18 @@ const cycles = [
 
 const validCycles = new Set(cycles.map((cycle) => cycle.value));
 const validColors = new Set(colorTags.map((tag) => tag.value));
+const reminderOptions = [
+  { label: "Off", value: -1 },
+  { label: "Same day", value: 0 },
+  { label: "1 day before", value: 1 },
+  { label: "3 days before", value: 3 },
+  { label: "7 days before", value: 7 },
+  { label: "14 days before", value: 14 },
+];
+const validReminderDays = new Set(reminderOptions.map((option) => option.value));
 const MAX_SUBSCRIPTIONS = 500;
 const MAX_DATE_ADVANCES = 50000;
+const MAX_TAGS = 10;
 
 const seedSubscriptions = [
   {
@@ -31,7 +42,10 @@ const seedSubscriptions = [
     cycle: "monthly",
     nextBillingDate: "2026-05-24",
     category: "Streaming",
+    tags: ["personal", "video"],
     color: "#ef4444",
+    trialEndDate: "",
+    reminderDays: 7,
     paused: false,
   },
   {
@@ -41,7 +55,10 @@ const seedSubscriptions = [
     cycle: "monthly",
     nextBillingDate: "2026-05-29",
     category: "Music",
+    tags: ["personal", "audio"],
     color: "#84cc16",
+    trialEndDate: "2026-07-26",
+    reminderDays: 7,
     paused: false,
   },
   {
@@ -51,7 +68,10 @@ const seedSubscriptions = [
     cycle: "monthly",
     nextBillingDate: "2026-06-03",
     category: "Storage",
+    tags: ["cloud"],
     color: "#22d3ee",
+    trialEndDate: "",
+    reminderDays: 7,
     paused: false,
   },
   {
@@ -61,7 +81,10 @@ const seedSubscriptions = [
     cycle: "monthly",
     nextBillingDate: "2026-06-08",
     category: "Dev Tools",
+    tags: ["work", "development"],
     color: "#94a3b8",
+    trialEndDate: "",
+    reminderDays: 7,
     paused: false,
   },
   {
@@ -71,7 +94,10 @@ const seedSubscriptions = [
     cycle: "yearly",
     nextBillingDate: "2026-08-17",
     category: "Productivity",
+    tags: ["work"],
     color: "#f59e0b",
+    trialEndDate: "",
+    reminderDays: 7,
     paused: true,
   },
 ];
@@ -82,7 +108,10 @@ const blankForm = {
   cycle: "monthly",
   nextBillingDate: toDateInput(new Date()),
   category: "",
+  tags: "",
   color: colorTags[0].value,
+  trialEndDate: "",
+  reminderDays: 7,
   paused: false,
 };
 
@@ -108,6 +137,23 @@ function sanitizeSubscription(value) {
   const name = typeof value.name === "string" ? value.name.trim().slice(0, 100) : "";
   const amount = Number(value.amount);
   const category = typeof value.category === "string" ? value.category.trim().slice(0, 60) : "Unsorted";
+  const rawTags = Array.isArray(value.tags)
+    ? value.tags
+    : typeof value.tags === "string"
+      ? value.tags.split(",")
+      : [];
+  const tags = [...new Set(
+    rawTags
+      .filter((tag) => typeof tag === "string")
+      .map((tag) => tag.trim().toLowerCase().slice(0, 24))
+      .filter(Boolean),
+  )].slice(0, MAX_TAGS);
+  const trialEndDate = value.trialEndDate === "" || value.trialEndDate == null
+    ? ""
+    : isValidDate(value.trialEndDate)
+      ? value.trialEndDate
+      : "";
+  const reminderDays = validReminderDays.has(Number(value.reminderDays)) ? Number(value.reminderDays) : 7;
 
   if (
     !name ||
@@ -127,7 +173,10 @@ function sanitizeSubscription(value) {
     cycle: value.cycle,
     nextBillingDate: value.nextBillingDate,
     category: category || "Unsorted",
+    tags,
     color: validColors.has(value.color) ? value.color : colorTags[0].value,
+    trialEndDate,
+    reminderDays,
     paused: value.paused === true,
   };
 }
@@ -293,6 +342,80 @@ function weeklyForecast(events, days) {
       count: bucketEvents.length,
     };
   });
+}
+
+function buildAlerts(subscriptions, today = toDateInput(new Date())) {
+  return subscriptions
+    .filter((subscription) => !subscription.paused && subscription.reminderDays >= 0)
+    .flatMap((subscription) => {
+      const alerts = [];
+      const chargeDays = daysBetween(today, subscription.nextBillingDate);
+
+      if (chargeDays >= 0 && chargeDays <= subscription.reminderDays) {
+        alerts.push({
+          id: `charge-${subscription.id}-${subscription.nextBillingDate}`,
+          type: "charge",
+          name: subscription.name,
+          date: subscription.nextBillingDate,
+          daysOut: chargeDays,
+          amount: subscription.amount,
+          color: subscription.color,
+        });
+      }
+
+      if (subscription.trialEndDate) {
+        const trialDays = daysBetween(today, subscription.trialEndDate);
+        if (trialDays >= 0 && trialDays <= subscription.reminderDays) {
+          alerts.push({
+            id: `trial-${subscription.id}-${subscription.trialEndDate}`,
+            type: "trial",
+            name: subscription.name,
+            date: subscription.trialEndDate,
+            daysOut: trialDays,
+            amount: subscription.amount,
+            color: subscription.color,
+          });
+        }
+      }
+
+      return alerts;
+    })
+    .sort((a, b) => a.daysOut - b.daysOut || a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+}
+
+function csvCell(value) {
+  let text = String(value ?? "");
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function subscriptionsToCsv(subscriptions) {
+  const columns = [
+    "name",
+    "amount",
+    "cycle",
+    "nextBillingDate",
+    "category",
+    "tags",
+    "color",
+    "trialEndDate",
+    "reminderDays",
+    "paused",
+  ];
+  const rows = subscriptions.map((subscription) => [
+    subscription.name,
+    subscription.amount,
+    subscription.cycle,
+    subscription.nextBillingDate,
+    subscription.category,
+    subscription.tags.join("|"),
+    subscription.color,
+    subscription.trialEndDate,
+    subscription.reminderDays,
+    subscription.paused,
+  ]);
+
+  return [columns, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
 function dayLabel(daysOut) {
@@ -516,6 +639,9 @@ function Tracker({ onExit }) {
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported",
+  );
   const [calendarCursor, setCalendarCursor] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -590,6 +716,30 @@ function Tracker({ onExit }) {
   const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.total), 0);
   const calendarMonthTotal = calendarEvents.reduce((sum, event) => sum + Number(event.amount), 0);
   const nextCharge = timeline[0];
+  const alerts = useMemo(() => buildAlerts(subscriptions), [subscriptions]);
+
+  useEffect(() => {
+    if (notificationPermission !== "granted" || alerts.length === 0) return;
+
+    try {
+      const stored = JSON.parse(localStorage.getItem(NOTIFIED_ALERTS_KEY) || "[]");
+      const notified = new Set(Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : []);
+      const pending = alerts.filter((alert) => !notified.has(alert.id));
+
+      pending.forEach((alert) => {
+        const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
+        const body = alert.type === "trial"
+          ? `${money(alert.amount)} expected after the trial ends on ${fullDate(alert.date)}.`
+          : `${money(alert.amount)} will leave on ${fullDate(alert.date)}.`;
+        new window.Notification(`Outflow / ${title}`, { body, tag: alert.id });
+        notified.add(alert.id);
+      });
+
+      localStorage.setItem(NOTIFIED_ALERTS_KEY, JSON.stringify([...notified].slice(-200)));
+    } catch {
+      // Device notifications are best-effort; the in-app alert remains available.
+    }
+  }, [alerts, notificationPermission]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -610,7 +760,10 @@ function Tracker({ onExit }) {
       cycle: form.cycle,
       nextBillingDate: form.nextBillingDate,
       category: form.category.trim() || "Unsorted",
+      tags: form.tags,
       color: form.color,
+      trialEndDate: form.trialEndDate,
+      reminderDays: Number(form.reminderDays),
       paused: form.paused,
     });
 
@@ -634,7 +787,10 @@ function Tracker({ onExit }) {
       cycle: subscription.cycle,
       nextBillingDate: subscription.nextBillingDate,
       category: subscription.category,
+      tags: subscription.tags.join(", "),
       color: subscription.color,
+      trialEndDate: subscription.trialEndDate,
+      reminderDays: subscription.reminderDays,
       paused: subscription.paused,
     });
   }
@@ -666,6 +822,24 @@ function Tracker({ onExit }) {
     const today = new Date();
     setCalendarCursor(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(toDateInput(today));
+  }
+
+  async function requestDeviceAlerts() {
+    if (!("Notification" in window)) return;
+    const permission = await window.Notification.requestPermission();
+    setNotificationPermission(permission);
+  }
+
+  function exportCsv() {
+    const blob = new Blob([subscriptionsToCsv(subscriptions)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `outflow-subscriptions-${toDateInput(new Date())}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   return (
@@ -727,6 +901,8 @@ function Tracker({ onExit }) {
               <input
                 value={form.name}
                 onChange={(event) => updateField("name", event.target.value)}
+                maxLength={100}
+                required
                 placeholder="Figma, Slack, AWS..."
                 className="h-10 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
               />
@@ -736,10 +912,12 @@ function Tracker({ onExit }) {
               <Field label="Amount">
                 <input
                   type="number"
-                  min="0"
+                  min="0.01"
+                  max="1000000000"
                   step="0.01"
                   value={form.amount}
                   onChange={(event) => updateField("amount", event.target.value)}
+                  required
                   placeholder="0.00"
                   className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
                 />
@@ -773,7 +951,8 @@ function Tracker({ onExit }) {
               <input
                 type="date"
                 value={form.nextBillingDate}
-                onChange={(event) => updateField("nextBillingDate", event.target.value)}
+                onInput={(event) => updateField("nextBillingDate", event.currentTarget.value)}
+                required
                 className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
               />
             </Field>
@@ -782,10 +961,44 @@ function Tracker({ onExit }) {
               <input
                 value={form.category}
                 onChange={(event) => updateField("category", event.target.value)}
+                maxLength={60}
                 placeholder="Streaming"
                 className="h-10 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
               />
             </Field>
+
+            <Field label="Tags">
+              <input
+                value={form.tags}
+                onChange={(event) => updateField("tags", event.target.value)}
+                maxLength={249}
+                placeholder="personal, work, shared"
+                className="h-10 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-amber-400"
+              />
+            </Field>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              <Field label="Trial ends">
+                <input
+                  type="date"
+                  value={form.trialEndDate}
+                  onInput={(event) => updateField("trialEndDate", event.currentTarget.value)}
+                  className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                />
+              </Field>
+
+              <Field label="Alert timing">
+                <select
+                  value={form.reminderDays}
+                  onChange={(event) => updateField("reminderDays", Number(event.target.value))}
+                  className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                >
+                  {reminderOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
 
             <Field label="Color tag">
               <div className="grid grid-cols-6 border border-zinc-800 bg-zinc-950" role="group" aria-label="Color tag">
@@ -854,6 +1067,41 @@ function Tracker({ onExit }) {
                 </div>
               </div>
             </div>
+            <div className="flex flex-col gap-2 border-t border-zinc-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
+                <span className="h-2 w-2 bg-emerald-400" />
+                <span className="text-zinc-300">Local ledger</span>
+                <span className="text-zinc-700">/</span>
+                <span className="text-zinc-600">This browser</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {notificationPermission === "default" && (
+                  <button
+                    type="button"
+                    onClick={requestDeviceAlerts}
+                    className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-amber-400 hover:text-amber-300"
+                  >
+                    Enable device alerts
+                  </button>
+                )}
+                {notificationPermission !== "default" && (
+                  <span className={`border px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
+                    notificationPermission === "granted"
+                      ? "border-emerald-700 text-emerald-300"
+                      : "border-zinc-800 text-zinc-600"
+                  }`}>
+                    Alerts {notificationPermission === "granted" ? "on" : notificationPermission}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white"
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
           </header>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -862,6 +1110,34 @@ function Tracker({ onExit }) {
             <StatCell label="30 day pull" value={money(thirtyDayTotal)} sublabel={`${timeline.length} scheduled debit events`} code="T+30" />
             <StatCell label="Annualized" value={money(yearlyRunRate)} sublabel="Projected active run rate" code="ARR" />
           </div>
+
+          <Panel title="Alerts" marker action={<span className="font-mono text-xs text-amber-300">{alerts.length}</span>}>
+            <div className="grid divide-y divide-zinc-900 md:grid-cols-2 md:divide-x md:divide-y-0 md:divide-zinc-900">
+              {alerts.length ? (
+                alerts.map((alert) => (
+                  <div key={alert.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 shrink-0" style={{ background: alert.color }} />
+                        <span className="truncate text-sm font-bold text-zinc-100">{alert.name}</span>
+                        <span className={`shrink-0 border px-1.5 py-0.5 font-mono text-[9px] uppercase ${
+                          alert.type === "trial" ? "border-cyan-800 text-cyan-300" : "border-amber-800 text-amber-300"
+                        }`}>
+                          {alert.type}
+                        </span>
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-zinc-500">
+                        {alert.type === "trial" ? "Trial ends" : "Bills"} {fullDate(alert.date)} / {dayLabel(alert.daysOut)}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm font-black text-amber-300">{money(alert.amount)}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-6 text-sm text-zinc-500 md:col-span-2">No charges or trials inside the configured reminder windows.</div>
+              )}
+            </div>
+          </Panel>
 
           <Panel
             title="Cash-out forecast"
@@ -1103,6 +1379,9 @@ function Tracker({ onExit }) {
                             <div className="border-r border-violet-400/20 px-2 py-1 text-violet-300/70">monthly eq.</div>
                             <div className="px-2 py-1 text-right text-violet-100">{money(monthlyEquivalent(subscription))}</div>
                           </div>
+                          <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-violet-300/60">
+                            Alert {subscription.reminderDays < 0 ? "off" : `${subscription.reminderDays}d before`}
+                          </div>
                         </div>
 
                         <div className="border border-red-500/60 bg-red-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
@@ -1114,6 +1393,20 @@ function Tracker({ onExit }) {
                                 <span className="text-red-400/50">/</span>
                                 <span className="font-mono uppercase">{subscription.cycle} billing</span>
                               </div>
+                              {subscription.tags.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {subscription.tags.map((tag) => (
+                                    <span key={tag} className="border border-red-300/20 px-1.5 py-0.5 font-mono text-[9px] uppercase text-red-200/60">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {subscription.trialEndDate && (
+                                <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-cyan-300/80">
+                                  Trial ends {fullDate(subscription.trialEndDate)}
+                                </div>
+                              )}
                             </div>
                             <button
                               type="button"

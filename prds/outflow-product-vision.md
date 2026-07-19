@@ -1,6 +1,6 @@
 # Outflow Product Requirements Document
 
-**Status:** Draft  
+**Status:** Active
 **Product:** Outflow  
 **Last updated:** July 19, 2026
 
@@ -154,4 +154,3 @@ The product will remain deliberately narrower than a general personal-finance pl
 - How should one-time Pro purchases transfer across app stores and direct web purchases?
 - Should CSV export remain Pro-only, or should basic export be free to reinforce user data ownership?
 - Which currencies and locales should be supported in the first multi-currency release?
-
