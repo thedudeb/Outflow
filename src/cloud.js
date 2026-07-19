@@ -90,6 +90,36 @@ export async function readProEntitlement(userId) {
   return data;
 }
 
+export async function readNotificationPreferences(userId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud
+    .from("notification_preferences")
+    .select("email_enabled, paused_schedule_enabled, timezone, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    emailEnabled: data.email_enabled === true,
+    pausedScheduleEnabled: data.paused_schedule_enabled === true,
+    timezone: data.timezone || "UTC",
+    updatedAt: data.updated_at || "",
+  };
+}
+
+export async function saveNotificationPreferences({ emailEnabled, pausedScheduleEnabled, timezone }) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("save_notification_preferences", {
+    requested_email_enabled: emailEnabled === true,
+    requested_paused_schedule_enabled: pausedScheduleEnabled === true,
+    requested_timezone: timezone,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function readProOffer() {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");

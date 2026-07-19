@@ -24,7 +24,7 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend da
 ### Resend
 
 - Resend supplies Supabase authentication email through its managed integration.
-- Future charge and trial reminders are sent from authenticated or scheduled Edge Functions.
+- Charge and trial reminders are claimed from a durable, RLS-protected delivery ledger by the cron-authenticated `send-due-reminders` Edge Function. Resend idempotency keys protect provider retries.
 - The browser never receives a Resend API key.
 
 Reference: [Resend with Supabase](https://resend.com/docs/knowledge-base/getting-started-with-resend-and-supabase).
@@ -62,8 +62,9 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 7. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
 8. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
 9. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
-10. Signing out closes the cloud ledger and returns to the untouched local workspace.
-11. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
+10. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim.
+11. Signing out closes the cloud ledger and returns to the untouched local workspace.
+12. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
 
 ## Authorization Model
 
@@ -81,10 +82,11 @@ Before enabling accounts in a public build:
 
 1. Provision Supabase and apply the migration under `supabase/migrations`.
 2. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
-3. Deploy `stripe-webhook` with the function-specific JWT exception in `supabase/config.toml`; verify every request with the raw body and Stripe signing secret.
-4. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, a verified invitation sender, and an active fixed one-time Stripe Price.
+3. Deploy `stripe-webhook` and `send-due-reminders` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature and the reminder worker verifies its dedicated cron bearer secret.
+4. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, and an active fixed one-time Stripe Price.
 5. Connect a verified Resend sending domain to Supabase Auth.
 6. Configure permitted Auth redirect URLs for production and local development.
 7. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
 8. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
 9. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
+10. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).

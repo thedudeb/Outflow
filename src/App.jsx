@@ -10,6 +10,7 @@ import {
   getCloud,
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
+  readNotificationPreferences,
   readProEntitlement,
   readProOffer,
   renameCloudLedger,
@@ -18,6 +19,7 @@ import {
   requestAccountLink,
   revokeCloudLedgerInvitation,
   sendCloudLedgerInvitation,
+  saveNotificationPreferences,
   subscribeToCloudLedger,
   uploadGuestWorkspace,
   updateCloudLedgerMemberRole,
@@ -85,6 +87,26 @@ const MAX_CSV_BYTES = 2 * 1024 * 1024;
 const MAX_CSV_ROWS = 1000;
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
 const MAX_LEDGERS = 12;
+
+function browserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function notificationTimezones() {
+  const detected = browserTimezone();
+  try {
+    const supported = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+    return [...new Set([detected, "UTC", ...supported])];
+  } catch {
+    return [detected, "UTC"];
+  }
+}
+
+const availableNotificationTimezones = notificationTimezones();
 
 function isTrackerHash(hash = window.location.hash) {
   return hash === "#app" || hash.startsWith("#app?");
@@ -1295,6 +1317,12 @@ function Tracker({ onExit, pwa }) {
   const [accountSession, setAccountSession] = useState(null);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [emailPreferences, setEmailPreferences] = useState(() => ({
+    emailEnabled: false,
+    pausedScheduleEnabled: false,
+    timezone: browserTimezone(),
+  }));
+  const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false);
   const [proOffer, setProOffer] = useState(null);
   const [proOfferLoading, setProOfferLoading] = useState(false);
   const [proOfferError, setProOfferError] = useState("");
@@ -1418,6 +1446,35 @@ function Tracker({ onExit, pwa }) {
       })
       .finally(() => {
         if (active) setAccountEntitlementLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountSession?.user?.id]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!userId) {
+      setEmailPreferences({ emailEnabled: false, pausedScheduleEnabled: false, timezone: browserTimezone() });
+      setEmailPreferencesLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setEmailPreferencesLoading(true);
+    readNotificationPreferences(userId)
+      .then((preferences) => {
+        if (!active) return;
+        setEmailPreferences(preferences || {
+          emailEnabled: false,
+          pausedScheduleEnabled: false,
+          timezone: browserTimezone(),
+        });
+      })
+      .catch((error) => {
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read email reminder settings.");
+      })
+      .finally(() => {
+        if (active) setEmailPreferencesLoading(false);
       });
     return () => {
       active = false;
@@ -2243,6 +2300,30 @@ function Tracker({ onExit, pwa }) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not restore Pro access.");
     } finally {
       setAccountEntitlementLoading(false);
+      setAccountBusy("");
+    }
+  }
+
+  async function saveEmailReminderSettings(event) {
+    event.preventDefault();
+    if (!accountSession || accountBusy || emailPreferencesLoading) return;
+    if (emailPreferences.emailEnabled && accountEntitlement?.status !== "active") return;
+    setAccountBusy("email-preferences");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const saved = await saveNotificationPreferences(emailPreferences);
+      setEmailPreferences({
+        emailEnabled: saved?.emailEnabled === true,
+        pausedScheduleEnabled: saved?.pausedScheduleEnabled === true,
+        timezone: saved?.timezone || emailPreferences.timezone,
+      });
+      setAccountMessage(saved?.emailEnabled
+        ? "Email reminders enabled. Subscription lead times control each delivery."
+        : "Email reminders disabled. Device alert settings were not changed.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not save email reminder settings.");
+    } finally {
       setAccountBusy("");
     }
   }
@@ -3529,6 +3610,78 @@ function Tracker({ onExit, pwa }) {
                       </button>
                     </div>
                   </section>
+
+                  <form onSubmit={saveEmailReminderSettings} className="border-b border-zinc-800">
+                    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Email reminder channel</span>
+                      <span className={`font-mono text-[9px] font-black uppercase ${
+                        emailPreferences.emailEnabled ? "text-amber-300" : "text-zinc-600"
+                      }`}>
+                        {emailPreferencesLoading ? "Loading" : emailPreferences.emailEnabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </header>
+                    <div className="grid sm:grid-cols-2">
+                      <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-900 px-4 py-3 sm:border-r">
+                        <span className="min-w-0">
+                          <span className="block text-xs font-black uppercase tracking-[0.1em] text-zinc-200">Email reminders</span>
+                          <span className="mt-1 block font-mono text-[9px] uppercase leading-4 text-zinc-600">
+                            Independent from local device alerts / Pro
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={emailPreferences.emailEnabled}
+                          disabled={emailPreferencesLoading || (accountEntitlement?.status !== "active" && !emailPreferences.emailEnabled)}
+                          onChange={(event) => setEmailPreferences((current) => ({ ...current, emailEnabled: event.target.checked }))}
+                          className="h-5 w-5 accent-amber-400 disabled:opacity-30"
+                        />
+                      </label>
+                      <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-900 px-4 py-3">
+                        <span className="min-w-0">
+                          <span className="block text-xs font-black uppercase tracking-[0.1em] text-zinc-200">Paused schedules</span>
+                          <span className="mt-1 block font-mono text-[9px] uppercase leading-4 text-zinc-600">
+                            {emailPreferences.pausedScheduleEnabled ? "Included in email runs" : "Excluded from email runs"}
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={emailPreferences.pausedScheduleEnabled}
+                          disabled={emailPreferencesLoading || (accountEntitlement?.status !== "active" && !emailPreferences.emailEnabled)}
+                          onChange={(event) => setEmailPreferences((current) => ({ ...current, pausedScheduleEnabled: event.target.checked }))}
+                          className="h-5 w-5 accent-amber-400 disabled:opacity-30"
+                        />
+                      </label>
+                    </div>
+                    <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                      <Field label="Reminder timezone">
+                        <select
+                          value={emailPreferences.timezone}
+                          disabled={emailPreferencesLoading}
+                          onChange={(event) => setEmailPreferences((current) => ({ ...current, timezone: event.target.value }))}
+                          className="h-10 min-w-0 border border-zinc-700 bg-black px-3 font-mono text-[10px] text-zinc-200 outline-none focus:border-amber-400 disabled:opacity-40"
+                        >
+                          {!availableNotificationTimezones.includes(emailPreferences.timezone) && (
+                            <option value={emailPreferences.timezone}>{emailPreferences.timezone}</option>
+                          )}
+                          {availableNotificationTimezones.map((timezone) => (
+                            <option key={timezone} value={timezone}>{timezone}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <button
+                        type="submit"
+                        disabled={Boolean(accountBusy) || emailPreferencesLoading || (emailPreferences.emailEnabled && accountEntitlement?.status !== "active")}
+                        className="h-10 border border-amber-700 px-4 font-mono text-[10px] font-black uppercase text-amber-300 hover:border-amber-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                      >
+                        {accountBusy === "email-preferences" ? "Saving..." : "Save email rules"}
+                      </button>
+                      <div className="font-mono text-[9px] uppercase leading-4 text-zinc-700 sm:col-span-2">
+                        {accountEntitlement?.status === "active"
+                          ? "Delivery timing comes from each subscription's selected reminder lead days. Trial and charge notices are tracked separately."
+                          : "A one-time Pro unlock enables durable email automation. Existing local device alerts remain free."}
+                      </div>
+                    </div>
+                  </form>
 
                   <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div>

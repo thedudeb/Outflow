@@ -656,6 +656,181 @@ begin
 end;
 $$;
 
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.save_notification_preferences(true, false, 'UTC') as enabled_email_preferences;
+
+do $$
+begin
+  if (select count(*) from public.notification_preferences) <> 1 then
+    raise exception 'notification preference RLS exposed another account';
+  end if;
+  if not (select email_enabled from public.notification_preferences where user_id = auth.uid()) then
+    raise exception 'Pro email preference was not enabled';
+  end if;
+  begin
+    perform public.save_notification_preferences(true, false, 'Not/A_Timezone');
+    raise exception 'invalid notification timezone was accepted';
+  exception
+    when invalid_parameter_value then null;
+  end;
+  begin
+    update public.notification_preferences set email_enabled = false where user_id = auth.uid();
+    raise exception 'browser directly updated notification preferences';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.claim_due_email_notifications(25, gen_random_uuid());
+    raise exception 'browser claimed server email deliveries';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform count(*) from public.notification_deliveries;
+    raise exception 'browser read server email delivery state';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+do $$
+begin
+  perform public.save_notification_preferences(true, false, 'UTC');
+  raise exception 'free account enabled Pro email automation';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
+insert into public.subscriptions (
+  ledger_id, id, name, amount, currency, cycle, next_billing_date, category, tags, color,
+  trial_end_date, reminder_lead_days, paused, created_by, updated_by, source_created_by, source_updated_by
+) values
+  (
+    'personal-ledger', 'email-due', 'Linear', 10, 'USD', 'monthly', current_date + 7,
+    'Software', array['work'], '#8b5cf6', current_date + 1, array[7, 1], false,
+    '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
+  ),
+  (
+    'personal-ledger', 'email-paused', 'Paused service', 4, 'USD', 'monthly', current_date + 3,
+    'Software', array[]::text[], '#94a3b8', null, array[3], true,
+    '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
+  );
+
+do $$
+begin
+  if public.advance_notification_date('2024-01-31', 'monthly', '2024-02-01') <> '2024-03-02'::date then
+    raise exception 'monthly notification date does not match browser rollover behavior';
+  end if;
+  if public.advance_notification_date('2024-02-29', 'yearly', '2025-01-01') <> '2025-03-01'::date then
+    raise exception 'yearly notification date does not match browser rollover behavior';
+  end if;
+end;
+$$;
+
+set role service_role;
+create temporary table first_email_claim as
+select * from public.claim_due_email_notifications(25, 'aaaaaaaa-1111-4111-8111-111111111111');
+
+do $$
+declare
+  charge_delivery uuid;
+  trial_delivery uuid;
+begin
+  if (select count(*) from first_email_claim) <> 2 then
+    raise exception 'email worker did not claim one due charge and one due trial';
+  end if;
+  if exists (select 1 from first_email_claim where subscription_name = 'Paused service') then
+    raise exception 'paused subscription was claimed without opt-in';
+  end if;
+  if (select count(*) from public.claim_due_email_notifications(25, 'bbbbbbbb-2222-4222-8222-222222222222')) <> 0 then
+    raise exception 'active email claims were replayed concurrently';
+  end if;
+
+  select delivery_id into charge_delivery from first_email_claim where reminder_kind = 'charge';
+  select delivery_id into trial_delivery from first_email_claim where reminder_kind = 'trial';
+  if public.complete_email_notification(charge_delivery, 'bbbbbbbb-2222-4222-8222-222222222222', true, 'wrong-claim', null) then
+    raise exception 'wrong worker completed another worker claim';
+  end if;
+  if not public.complete_email_notification(charge_delivery, 'aaaaaaaa-1111-4111-8111-111111111111', true, 'resend-charge', null) then
+    raise exception 'charge email completion failed';
+  end if;
+  if not public.complete_email_notification(trial_delivery, 'aaaaaaaa-1111-4111-8111-111111111111', false, null, 'resend_503') then
+    raise exception 'trial email failure was not recorded';
+  end if;
+end;
+$$;
+
+reset role;
+update public.notification_deliveries
+set next_attempt_at = now() - interval '1 minute'
+where reminder_kind = 'trial' and status = 'failed';
+update public.subscriptions
+set name = 'Linear renamed', amount = 20
+where ledger_id = 'personal-ledger' and id = 'email-due';
+
+set role service_role;
+create temporary table retry_email_claim as
+select * from public.claim_due_email_notifications(25, 'cccccccc-3333-4333-8333-333333333333');
+
+do $$
+declare
+  retry_delivery uuid;
+begin
+  if (select count(*) from retry_email_claim) <> 1 then
+    raise exception 'failed email was not claimed exactly once for retry';
+  end if;
+  if (select subscription_name from retry_email_claim) <> 'Linear'
+    or (select amount from retry_email_claim) <> 10 then
+    raise exception 'email retry payload changed with the live subscription';
+  end if;
+  select delivery_id into retry_delivery from retry_email_claim;
+  if not public.complete_email_notification(retry_delivery, 'cccccccc-3333-4333-8333-333333333333', true, 'resend-trial', null) then
+    raise exception 'retried email completion failed';
+  end if;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.save_notification_preferences(true, true, 'UTC') as enabled_paused_email_preferences;
+
+reset role;
+set role service_role;
+create temporary table paused_email_claim as
+select * from public.claim_due_email_notifications(25, 'dddddddd-4444-4444-8444-444444444444');
+
+do $$
+declare
+  paused_delivery uuid;
+begin
+  if (select count(*) from paused_email_claim where subscription_name = 'Paused service') <> 1 then
+    raise exception 'paused email opt-in did not create the due reminder';
+  end if;
+  select delivery_id into paused_delivery from paused_email_claim where subscription_name = 'Paused service';
+  if not public.complete_email_notification(paused_delivery, 'dddddddd-4444-4444-8444-444444444444', true, 'resend-paused', null) then
+    raise exception 'paused email completion failed';
+  end if;
+end;
+$$;
+
+reset role;
+do $$
+begin
+  if (select count(*) from public.notification_deliveries where status = 'sent') <> 3 then
+    raise exception 'durable email delivery ledger has an unexpected result';
+  end if;
+  if exists (select 1 from public.notification_deliveries where claim_token is not null or claimed_at is not null) then
+    raise exception 'completed email claims retained worker ownership';
+  end if;
+end;
+$$;
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;
@@ -675,6 +850,8 @@ begin
   if (select count(*) from public.stripe_purchases) <> 2 then raise exception 'account deletion removed de-identified provider purchase records'; end if;
   if exists (select 1 from public.stripe_purchases where user_id is not null) then raise exception 'account deletion retained a purchase-to-user link'; end if;
   if (select count(*) from public.billing_checkout_requests) <> 0 then raise exception 'account deletion did not remove checkout reservations'; end if;
+  if (select count(*) from public.notification_preferences) <> 1 then raise exception 'account deletion did not remove its notification preference'; end if;
+  if (select count(*) from public.notification_deliveries) <> 0 then raise exception 'account deletion did not remove email delivery history'; end if;
   if (select status from public.stripe_purchases where checkout_session_id = 'cs_test_outflowtwo') <> 'refunded' then raise exception 'post-deletion refund was not reconciled'; end if;
   if (select count(*) from public.billing_events) <> 5 then raise exception 'account deletion removed provider event tombstones'; end if;
 end;
