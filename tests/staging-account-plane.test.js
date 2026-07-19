@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildAccountPlaneReport,
   openRealtimeProbe,
+  probeHostedCalendarLifecycle,
   resolveAccountAcceptanceConfig,
 } from "../scripts/check-staging-account-plane.mjs";
 
@@ -57,6 +58,10 @@ test("account-plane report records bounded evidence without synthetic identities
     "viewer write denial",
     "editor revision write",
     "two-client Realtime delivery",
+    "hosted calendar publication",
+    "calendar cache revalidation",
+    "calendar token rotation",
+    "calendar feed revocation",
     "idempotent write replay",
     "stale revision conflict",
     "member access revocation",
@@ -78,12 +83,12 @@ test("account-plane report records bounded evidence without synthetic identities
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /PASS\*\* \(15 authenticated checks\)/);
+  assert.match(report, /PASS\*\* \(19 authenticated checks\)/);
   assert.match(report, /PASS \/ cross-user ledger isolation/);
   assert.match(report, /PASS \/ two-client Realtime delivery/);
   assert.match(report, /Migration Inventory \(2\)/);
-  assert.match(report, /Provider email, Realtime reconnect behavior/);
-  assert.doesNotMatch(report, /publishable|sb_secret|@outflow\.invalid|password|token/i);
+  assert.match(report, /Provider email, Realtime reconnect behavior, third-party calendar clients/);
+  assert.doesNotMatch(report, /sb_(?:publishable|secret)_|@example\.com|Bearer\s|password|A{43}|B{43}/i);
   assert.doesNotMatch(report, /not-a-migration/);
   assert.throws(
     () => buildAccountPlaneReport({
@@ -152,6 +157,92 @@ test("Realtime probe waits for the exact authenticated insert and removes its ch
   assert.equal(removedChannel, channel);
 });
 
+test("hosted calendar probe validates private HTTP lifecycle without returning feed secrets", async () => {
+  const firstToken = "A".repeat(43);
+  const secondToken = "B".repeat(43);
+  const etag = `"${"c".repeat(64)}"`;
+  let activeToken = "";
+  let publishCount = 0;
+  const rpcCalls = [];
+  const client = {
+    async rpc(name, body) {
+      rpcCalls.push({ name, body });
+      if (name === "create_or_rotate_calendar_feed") {
+        publishCount += 1;
+        activeToken = publishCount === 1 ? firstToken : secondToken;
+        return { data: { ledgerId: "accept-ledger", includePaused: false, token: activeToken }, error: null };
+      }
+      if (name === "get_calendar_feed") {
+        return { data: activeToken ? { ledgerId: "accept-ledger", includePaused: false } : null, error: null };
+      }
+      if (name === "revoke_calendar_feed") {
+        activeToken = "";
+        return { data: true, error: null };
+      }
+      return { data: null, error: { code: "unexpected_rpc" } };
+    },
+  };
+  const calendarHeaders = {
+    "Content-Type": "text/calendar; charset=utf-8",
+    "Content-Disposition": 'inline; filename="outflow-accept-ledger.ics"',
+    "Cache-Control": "private, no-cache",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    ETag: etag,
+  };
+  const body = [
+    "BEGIN:VCALENDAR",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    "UID:accept-subscription.accept-ledger@outflow.local",
+    "SUMMARY:Editor Acceptance / $33.00",
+    "DTSTART;VALUE=DATE:20260819",
+    "RRULE:FREQ=MONTHLY",
+    "CLASS:PRIVATE",
+    "TRANSP:TRANSPARENT",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  const requestedTokens = [];
+  const fetchImpl = async (input, init) => {
+    const url = new URL(input);
+    const token = url.searchParams.get("token");
+    requestedTokens.push(token);
+    if (token !== activeToken) {
+      return new Response('{"error":"Calendar feed not found."}', {
+        status: 404,
+        headers: {
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+    if (init.headers?.["If-None-Match"] === etag) return new Response(null, { status: 304, headers: calendarHeaders });
+    return new Response(init.method === "HEAD" ? null : body, { status: 200, headers: calendarHeaders });
+  };
+
+  const completed = await probeHostedCalendarLifecycle({
+    client,
+    projectUrl: "https://abcdefghijklmnopqrst.supabase.co",
+    ledgerId: "accept-ledger",
+    subscriptionId: "accept-subscription",
+    forbiddenFragments: ["private-account-id", "synthetic"],
+    fetchImpl,
+  });
+  assert.deepEqual(completed, [
+    "hosted calendar publication",
+    "calendar cache revalidation",
+    "calendar token rotation",
+    "calendar feed revocation",
+  ]);
+  assert.deepEqual(requestedTokens, [firstToken, firstToken, firstToken, firstToken, secondToken, secondToken]);
+  assert.equal(rpcCalls.filter(({ name }) => name === "create_or_rotate_calendar_feed").length, 2);
+  assert.equal(rpcCalls.at(-1).name, "get_calendar_feed");
+  assert.doesNotMatch(JSON.stringify(completed), new RegExp(`${firstToken}|${secondToken}`));
+});
+
 test("the account-plane workflow is manual, protected, and provider-secret free", async () => {
   const source = await readFile(new URL("../.github/workflows/staging-account-plane.yml", import.meta.url), "utf8");
   assert.match(source, /workflow_dispatch:/);
@@ -182,6 +273,10 @@ test("the live harness uses authenticated sessions, fixed assertions, and finall
   assert.match(source, /event: "INSERT"/);
   assert.match(source, /await realtime\.delivered/);
   assert.match(source, /removeChannel\(channel\)/);
+  assert.match(source, /probeHostedCalendarLifecycle/);
+  assert.match(source, /If-None-Match/);
+  assert.match(source, /method: "HEAD"/);
+  assert.match(source, /revoke_calendar_feed/);
   assert.match(source, /functions\/v1\/delete-account/);
   assert.match(source, /finally \{/);
   assert.match(source, /cleanupAcceptance\(admin, createdUserIds, closeRealtime\)/);

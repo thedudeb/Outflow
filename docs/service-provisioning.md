@@ -103,7 +103,9 @@ The probe never sends a secret/service-role key, valid session, valid webhook, v
 
 After the public boundary passes, manually dispatch **Staging Account Plane**. It requires the protected server-only Supabase key to create two randomized, confirmed synthetic accounts, grant one synthetic test entitlement, and clean up all test identities. The harness refuses to run unless the configured project hostname matches `OUTFLOW_SUPABASE_PROJECT_REF` and `OUTFLOW_ACCEPTANCE_MODE` is the literal workflow-controlled value `staging`.
 
-The authenticated assertions use publishable-key clients and real user sessions. They cover transactional guest migration and replay, pre-membership RLS isolation, private invitation acceptance, viewer denial, editor writes, a filtered hosted Realtime insert delivered to the owner's separate authenticated client, idempotent replay, stale-revision conflicts, member removal, the deployed account-deletion function, and cascade cleanup. The Realtime channel must subscribe before the editor write, receive the exact synthetic subscription, and close before account teardown. Its GitHub summary contains fixed check names and deployment metadata only. It never records synthetic email addresses, user IDs, passwords, session tokens, invitation tokens, provider keys, event rows, or response bodies.
+The authenticated assertions use publishable-key clients and real user sessions. They cover transactional guest migration and replay, pre-membership RLS isolation, private invitation acceptance, viewer denial, editor writes, a filtered hosted Realtime insert delivered to the owner's separate authenticated client, idempotent replay, stale-revision conflicts, member removal, the deployed account-deletion function, and cascade cleanup. The Realtime channel must subscribe before the editor write, receive the exact synthetic subscription, and close before account teardown.
+
+The same run publishes a hosted calendar feed and validates its deployed `GET`, conditional `GET`, and `HEAD` behavior, exact iCalendar identity and recurrence fields, bounded privacy surface, strong ETag, private caching, rotation, metadata redaction, revocation, and indistinguishable old/revoked-token responses. Its GitHub summary contains fixed check names and deployment metadata only. It never records synthetic email addresses, user IDs, passwords, session tokens, invitation tokens, calendar tokens, provider keys, event rows, calendar bodies, or response bodies.
 
 The server-only secret is not passed to the public-boundary job and no Resend, Stripe, webhook, or cron credential is passed to either repository workflow. Protect the `staging` environment with required reviewers and restrict secret access to the two manually dispatched jobs.
 
@@ -116,7 +118,7 @@ Complete these tests with synthetic accounts and Stripe test mode:
 - Two-browser stale-edit protection and Realtime disconnect/reconnect behavior beyond the account-plane delivery probe.
 - Reminder opt-in/out, timezone boundaries, retry/idempotency, pause scope, and refund suspension.
 - Checkout success without webhook, signed fulfillment, duplicate webhook, restore, and full refund revocation.
-- Hosted calendar publication, one-time URL disclosure, refresh, rotation, pause scope, refund suspension, and revocation.
+- Hosted calendar import and refresh behavior in Apple Calendar, Google Calendar, Outlook, and a standards-focused iCalendar client; repeat paused scope and refund suspension against the hosted project.
 
 Record the project, deployment commit, migration list, tester, date, and pass/fail result without recording tokens or customer data. Promote only after every applicable matrix is green.
 

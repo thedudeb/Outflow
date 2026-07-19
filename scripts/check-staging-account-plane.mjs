@@ -16,6 +16,10 @@ const expectedCheckNames = Object.freeze([
   "viewer write denial",
   "editor revision write",
   "two-client Realtime delivery",
+  "hosted calendar publication",
+  "calendar cache revalidation",
+  "calendar token rotation",
+  "calendar feed revocation",
   "idempotent write replay",
   "stale revision conflict",
   "member access revocation",
@@ -266,6 +270,162 @@ async function cleanupAcceptance(admin, userIds, closeRealtime) {
   if (failed) throw new Error("synthetic cleanup: one or more resources could not be removed.");
 }
 
+function calendarPrivacyHeaders(response, cacheControl) {
+  return response.headers.get("cache-control") === cacheControl
+    && response.headers.get("referrer-policy") === "no-referrer"
+    && response.headers.get("x-content-type-options") === "nosniff";
+}
+
+async function requestCalendarFeed(projectUrl, token, fetchImpl, init = {}) {
+  assert(/^[a-zA-Z0-9_-]{43}$/.test(token), "hosted calendar token");
+  const url = new URL(`${projectUrl}/functions/v1/calendar-feed`);
+  url.searchParams.set("token", token);
+  try {
+    return await fetchImpl(url, {
+      method: "GET",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+      ...init,
+    });
+  } catch {
+    throw new Error("hosted calendar request: request failed.");
+  }
+}
+
+async function boundedResponseText(response, label) {
+  let body;
+  try {
+    body = await response.text();
+  } catch {
+    throw new Error(`${label}: response body could not be read.`);
+  }
+  assert(body.length <= 1_000_000, label);
+  return body;
+}
+
+function unfoldedCalendar(body) {
+  return body.replace(/\r?\n[ \t]/g, "");
+}
+
+function calendarFeedBodyIsValid(body, ledgerId, subscriptionId, forbiddenFragments) {
+  const unfolded = unfoldedCalendar(body);
+  return body.startsWith("BEGIN:VCALENDAR\r\n")
+    && body.endsWith("END:VCALENDAR\r\n")
+    && unfolded.includes("METHOD:PUBLISH\r\n")
+    && unfolded.includes(`UID:${subscriptionId}.${ledgerId}@outflow.local\r\n`)
+    && unfolded.includes("SUMMARY:Editor Acceptance / ")
+    && unfolded.includes("DTSTART;VALUE=DATE:20260819\r\n")
+    && unfolded.includes("RRULE:FREQ=MONTHLY\r\n")
+    && unfolded.includes("CLASS:PRIVATE\r\n")
+    && unfolded.includes("TRANSP:TRANSPARENT\r\n")
+    && forbiddenFragments.every((fragment) => !body.includes(fragment));
+}
+
+export async function probeHostedCalendarLifecycle({
+  client,
+  projectUrl,
+  ledgerId,
+  subscriptionId,
+  forbiddenFragments = [],
+  fetchImpl = fetch,
+}) {
+  const publish = async () => remoteResult(await client.rpc("create_or_rotate_calendar_feed", {
+    target_ledger_id: ledgerId,
+    requested_include_paused: false,
+  }), "hosted calendar publication");
+  const firstFeed = await publish();
+  assert(
+    firstFeed?.ledgerId === ledgerId
+      && firstFeed?.includePaused === false
+      && /^[a-zA-Z0-9_-]{43}$/.test(firstFeed?.token || ""),
+    "hosted calendar publication",
+  );
+  const metadata = remoteResult(await client.rpc("get_calendar_feed", {
+    target_ledger_id: ledgerId,
+  }), "hosted calendar metadata");
+  assert(
+    metadata?.ledgerId === ledgerId
+      && metadata?.includePaused === false
+      && !Object.prototype.hasOwnProperty.call(metadata, "token"),
+    "hosted calendar publication",
+  );
+
+  const firstResponse = await requestCalendarFeed(projectUrl, firstFeed.token, fetchImpl);
+  assert(
+    firstResponse.status === 200
+      && firstResponse.headers.get("content-type") === "text/calendar; charset=utf-8"
+      && firstResponse.headers.get("content-disposition") === `inline; filename="outflow-${ledgerId}.ics"`
+      && calendarPrivacyHeaders(firstResponse, "private, no-cache"),
+    "hosted calendar publication",
+  );
+  const etag = firstResponse.headers.get("etag") || "";
+  assert(/^"[a-f0-9]{64}"$/.test(etag), "hosted calendar publication");
+  const firstBody = await boundedResponseText(firstResponse, "hosted calendar publication");
+  assert(calendarFeedBodyIsValid(firstBody, ledgerId, subscriptionId, forbiddenFragments), "hosted calendar publication");
+
+  const conditionalResponse = await requestCalendarFeed(projectUrl, firstFeed.token, fetchImpl, {
+    headers: { "If-None-Match": etag },
+  });
+  assert(
+    conditionalResponse.status === 304
+      && conditionalResponse.headers.get("etag") === etag
+      && calendarPrivacyHeaders(conditionalResponse, "private, no-cache")
+      && await boundedResponseText(conditionalResponse, "calendar cache revalidation") === "",
+    "calendar cache revalidation",
+  );
+  const headResponse = await requestCalendarFeed(projectUrl, firstFeed.token, fetchImpl, { method: "HEAD" });
+  assert(
+    headResponse.status === 200
+      && headResponse.headers.get("etag") === etag
+      && await boundedResponseText(headResponse, "calendar cache revalidation") === "",
+    "calendar cache revalidation",
+  );
+
+  const secondFeed = await publish();
+  assert(
+    secondFeed?.ledgerId === ledgerId
+      && /^[a-zA-Z0-9_-]{43}$/.test(secondFeed?.token || "")
+      && secondFeed.token !== firstFeed.token,
+    "calendar token rotation",
+  );
+  const oldResponse = await requestCalendarFeed(projectUrl, firstFeed.token, fetchImpl);
+  assert(oldResponse.status === 404 && calendarPrivacyHeaders(oldResponse, "no-store"), "calendar token rotation");
+  const oldBody = await boundedResponseText(oldResponse, "calendar token rotation");
+  const rotatedResponse = await requestCalendarFeed(projectUrl, secondFeed.token, fetchImpl);
+  assert(
+    rotatedResponse.status === 200
+      && rotatedResponse.headers.get("etag") === etag
+      && calendarPrivacyHeaders(rotatedResponse, "private, no-cache"),
+    "calendar token rotation",
+  );
+  const rotatedBody = await boundedResponseText(rotatedResponse, "calendar token rotation");
+  assert(
+    rotatedBody === firstBody
+      && calendarFeedBodyIsValid(rotatedBody, ledgerId, subscriptionId, forbiddenFragments),
+    "calendar token rotation",
+  );
+
+  const revoked = remoteResult(await client.rpc("revoke_calendar_feed", {
+    target_ledger_id: ledgerId,
+  }), "calendar feed revocation");
+  assert(revoked === true, "calendar feed revocation");
+  const revokedMetadata = remoteResult(await client.rpc("get_calendar_feed", {
+    target_ledger_id: ledgerId,
+  }), "revoked calendar metadata");
+  assert(revokedMetadata === null, "calendar feed revocation");
+  const revokedResponse = await requestCalendarFeed(projectUrl, secondFeed.token, fetchImpl);
+  assert(revokedResponse.status === 404 && calendarPrivacyHeaders(revokedResponse, "no-store"), "calendar feed revocation");
+  const revokedBody = await boundedResponseText(revokedResponse, "calendar feed revocation");
+  assert(revokedBody === oldBody, "calendar feed revocation");
+
+  return [
+    "hosted calendar publication",
+    "calendar cache revalidation",
+    "calendar token rotation",
+    "calendar feed revocation",
+  ];
+}
+
 export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch } = {}) {
   const completed = [];
   const admin = clientFor(config.projectUrl, config.secretKey);
@@ -409,6 +569,15 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     closeRealtime = async () => {};
     completed.push("two-client Realtime delivery");
 
+    completed.push(...await probeHostedCalendarLifecycle({
+      client: owner.client,
+      projectUrl: config.projectUrl,
+      ledgerId: fixture.teamId,
+      subscriptionId: editorSubscriptionId,
+      forbiddenFragments: [ownerEmail, memberEmail, ownerUser.id, memberUser.id, "synthetic"],
+      fetchImpl,
+    }));
+
     const replay = remoteResult(await member.client.rpc("replace_ledger_snapshot", {
       target_ledger_id: fixture.teamId,
       expected_revision: 0,
@@ -519,7 +688,7 @@ export function buildAccountPlaneReport({
     "",
     ...validMigrations.map((name) => `- \`${name}\``),
     "",
-    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, two-client Realtime delivery, revocation, and account deletion. Provider email, Realtime reconnect behavior, hosted calendar clients, reminders, and Stripe still require their separate staging matrices.",
+    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, two-client Realtime delivery, hosted calendar publication/HTTP lifecycle, member revocation, and account deletion. Provider email, Realtime reconnect behavior, third-party calendar clients, reminders, and Stripe still require their separate staging matrices.",
     "",
   ].join("\n");
 }

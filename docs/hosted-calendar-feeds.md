@@ -28,7 +28,7 @@ The hosted feed preserves the local export identity model:
 | `TRANSP` | `TRANSPARENT` |
 | `STATUS` | `CONFIRMED`, or `TENTATIVE` for included paused schedules |
 
-Stable UIDs and increasing subscription revisions allow clients to update an existing event when its amount, date, status, or other visible field changes. The feed uses private, revalidated caching, emits an `ETag`, and honors `If-None-Match` so rotation and revocation are checked before cached data is reused. It includes only subscription name, amount/currency, cycle, category, date, pause state, and ledger name/kind. Tags, reminders, account identity, members, payment data, and bank data are excluded.
+Stable UIDs and increasing subscription revisions allow clients to update an existing event when its amount, date, status, or other visible field changes. `DTSTAMP` and `LAST-MODIFIED` are both derived from the stored subscription update timestamp, so an unchanged revision serializes byte-for-byte identically across requests. The feed uses private, revalidated caching, emits a stable body-derived `ETag`, and honors `If-None-Match` so rotation and revocation are checked before cached data is reused. It includes only subscription name, amount/currency, cycle, category, date, pause state, and ledger name/kind. Tags, reminders, account identity, members, payment data, and bank data are excluded.
 
 ## User Lifecycle
 
@@ -47,6 +47,8 @@ A downloaded `.ics` file remains available for local and cloud ledgers without p
 Closing and reopening the dialog recovers only feed metadata: the plaintext URL is absent and metadata requests contain neither the current nor prior token. After a simulated Pro refund, the feed is visibly suspended, mutation controls are locked, revocation remains available for data control, and the serialized browser-local workspace remains unchanged.
 
 The PostgreSQL contract separately proves hashed-token storage, old-token invalidation, live entitlement and membership checks, scope behavior, and revocation through `npm run test:account-foundation`.
+
+The pinned Edge runtime contract in `npm run test:function-runtime` proves unchanged payloads serialize byte-for-byte identically, with absolute UTC `DTSTAMP` and `LAST-MODIFIED` values derived from stored data. The protected staging account-plane workflow then verifies the deployed function's body-derived ETag, conditional `GET`, `HEAD`, token rotation, and revocation lifecycle without recording URLs or response bodies.
 
 ## Deployment Checks
 
