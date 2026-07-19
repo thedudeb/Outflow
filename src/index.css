@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .text-zinc-500,
+  .text-zinc-600,
+  .text-zinc-700 {
+    color: #82828c;
+  }
+}
+
 :root {
   color-scheme: dark;
   background: #08090a;

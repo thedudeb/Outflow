@@ -3539,7 +3539,7 @@ function Tracker({ onExit, pwa }) {
                           if (!currentMonth) setCalendarCursor(new Date(date.getFullYear(), date.getMonth(), 1));
                         }}
                         className={`relative min-h-16 min-w-0 bg-black p-1.5 text-left hover:bg-zinc-950 sm:min-h-24 sm:p-2 ${
-                          currentMonth ? "" : "opacity-30"
+                          currentMonth ? "" : "bg-zinc-950/80"
                         } ${selected ? "shadow-[inset_0_0_0_1px_#fbbf24]" : ""}`}
                       >
                         <div className="flex items-start justify-between gap-1 font-mono">
@@ -3617,7 +3617,7 @@ function Tracker({ onExit, pwa }) {
                       <article
                         key={subscription.id}
                         className={`grid gap-2 border border-zinc-800 bg-zinc-950/70 p-2 transition hover:border-zinc-700 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3 ${
-                          subscription.paused ? "opacity-50" : ""
+                          subscription.paused ? "border-zinc-700 bg-black/70" : ""
                         }`}
                       >
                         <div className="border border-violet-500/60 bg-violet-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
