@@ -13,6 +13,8 @@
     "check:staging-boundaries": "node scripts/check-staging-boundaries.mjs",
     "test:staging-account-plane": "node --test tests/staging-account-plane.test.js",
     "check:staging-account-plane": "node scripts/check-staging-account-plane.mjs",
+    "test:staging-billing-plane": "node --test tests/staging-billing-plane.test.js",
+    "check:staging-billing-plane": "node scripts/check-staging-billing-plane.mjs",
     "test:function-types": "deno check --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/delete-account/index.ts supabase/functions/send-ledger-invite/index.ts supabase/functions/create-pro-checkout/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/send-due-reminders/index.ts supabase/functions/calendar-feed/index.ts",
     "test:function-runtime": "deno test --allow-env=NODE_ENV --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts supabase/functions/calendar-feed/calendar.test.ts",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",

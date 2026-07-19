@@ -1,0 +1,46 @@
+name: Staging Billing Plane
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-staging-billing-plane
+  cancel-in-progress: false
+
+jobs:
+  billing-plane:
+    name: Signed test-mode billing acceptance
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify service contract
+        run: npm run test:service-readiness
+      - name: Verify billing-plane harness contract
+        run: npm run test:staging-billing-plane
+      - name: Run signed billing-plane acceptance
+        run: npm run check:staging-billing-plane -- --summary-file "$GITHUB_STEP_SUMMARY"
+        env:
+          SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.OUTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.OUTFLOW_SUPABASE_SECRET_KEY }}
+          OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          OUTFLOW_ACCEPTANCE_MODE: staging
+          STRIPE_SECRET_KEY: ${{ secrets.OUTFLOW_STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.OUTFLOW_STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRO_PRICE_ID: ${{ vars.OUTFLOW_STRIPE_PRO_PRICE_ID }}

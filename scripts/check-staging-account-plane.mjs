@@ -2,8 +2,8 @@ import { appendFile, readFile, readdir } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createClient } from "@supabase/supabase-js";
 import { parseEnvFile, resolveSupabaseKeys } from "./check-service-readiness.mjs";
+import { createAcceptanceClient } from "./staging-acceptance-client.mjs";
 
 const expectedCheckNames = Object.freeze([
   "synthetic accounts",
@@ -101,15 +101,7 @@ function remoteResult(result, label) {
 }
 
 function clientFor(projectUrl, key, options = {}) {
-  return createClient(projectUrl, key, {
-    auth: {
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      persistSession: false,
-      ...options.auth,
-    },
-    ...options,
-  });
+  return createAcceptanceClient(projectUrl, key, options);
 }
 
 function subscription(id, name, amount) {

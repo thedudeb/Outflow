@@ -1,6 +1,6 @@
 # Outflow Service Provisioning Runbook
 
-**Status:** Repository preflight ready; external staging project required
+**Status:** Repository preflight and protected acceptance workflows ready; external staging project required
 
 Use this runbook for a non-production environment before accounts, hosted calendars, email, or purchases are enabled publicly. Guest mode does not depend on these services.
 
@@ -14,6 +14,7 @@ npm run test:service-readiness
 npm run test:function-types
 npm run test:function-runtime
 npm run test:account-foundation
+npm run test:staging-billing-plane
 ```
 
 `test:service-readiness` enforces the six-function inventory, explicit JWT policy, hosted/local/legacy Supabase key modes, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values. `test:function-runtime` proves named-key precedence, fallback behavior, and opaque-secret header handling without contacting Supabase.
@@ -77,7 +78,7 @@ npm run test:staging-boundaries
 node scripts/check-staging-boundaries.mjs --env-file /absolute/path/to/outflow-stage.env
 ```
 
-For a durable repository-side record, configure the protected GitHub `staging` environment with these boundary-only values and manually dispatch the **Staging Boundary** workflow:
+For durable repository-side records, configure the protected GitHub `staging` environment with these values, then dispatch only the applicable manual workflow:
 
 | GitHub environment entry | Kind | Value |
 | --- | --- | --- |
@@ -85,8 +86,11 @@ For a durable repository-side record, configure the protected GitHub `staging` e
 | `OUTFLOW_APP_URL` | Variable | Staging application HTTPS URL |
 | `OUTFLOW_ALLOWED_ORIGINS` | Variable | Comma-separated exact HTTPS origins |
 | `OUTFLOW_SUPABASE_PROJECT_REF` | Variable | Exact 20-character staging project reference |
+| `OUTFLOW_STRIPE_PRO_PRICE_ID` | Variable | Active fixed one-time Stripe test Price ID |
 | `OUTFLOW_SUPABASE_PUBLISHABLE_KEY` | Secret | Browser-safe Supabase publishable key |
-| `OUTFLOW_SUPABASE_SECRET_KEY` | Secret | Server-only key used only by the account-plane setup and cleanup harness |
+| `OUTFLOW_SUPABASE_SECRET_KEY` | Secret | Server-only key used only by authenticated acceptance setup and cleanup |
+| `OUTFLOW_STRIPE_SECRET_KEY` | Secret | Stripe test-mode secret used only by billing acceptance |
+| `OUTFLOW_STRIPE_WEBHOOK_SECRET` | Secret | Signing secret for the deployed staging webhook endpoint |
 
 The **Staging Boundary** workflow has read-only repository permissions, does not receive the Supabase secret/service-role, Resend, Stripe, webhook, or cron credentials, and runs only by manual dispatch against the protected environment. A successful run writes the commit, actor, project host, app origin, timestamp, and ordered migration inventory to its GitHub summary. That summary is evidence for the public boundary step only; it deliberately does not mark the full staging acceptance matrix complete.
 
@@ -107,7 +111,13 @@ The authenticated assertions use publishable-key clients and real user sessions.
 
 The same run publishes a hosted calendar feed and validates its deployed `GET`, conditional `GET`, and `HEAD` behavior, exact iCalendar identity and recurrence fields, bounded privacy surface, strong ETag, private caching, rotation, metadata redaction, revocation, and indistinguishable old/revoked-token responses. Its GitHub summary contains fixed check names and deployment metadata only. It never records synthetic email addresses, user IDs, passwords, session tokens, invitation tokens, calendar tokens, provider keys, event rows, calendar bodies, or response bodies.
 
-The server-only secret is not passed to the public-boundary job and no Resend, Stripe, webhook, or cron credential is passed to either repository workflow. Protect the `staging` environment with required reviewers and restrict secret access to the two manually dispatched jobs.
+The server-only secret is not passed to the public-boundary job, and no Resend, Stripe, webhook, or cron credential is passed to the boundary or account-plane workflows. Protect the `staging` environment with required reviewers, restrict deployment branches to `main`, and restrict each secret to the workflow step that needs it. The billing job also refuses every dispatched ref except `refs/heads/main` before the environment can release credentials.
+
+After the account plane passes, manually dispatch **Staging Billing Plane**. The harness refuses live Stripe keys and binds itself to the protected project reference plus the literal `staging` mode. It creates one confirmed synthetic account, requests a real open test-mode Checkout Session through the deployed function, and retrieves the canonical Stripe session to verify `mode=payment`, fixed Price, quantity, redirect URLs, test mode, and authenticated user metadata.
+
+The same run creates an unconfirmed test PaymentIntent solely as a resolvable provider object, signs synthetic `checkout.session.completed` and `charge.refunded` payloads with the staging endpoint secret, and sends them to the deployed webhook. It verifies fulfillment, duplicate delivery, restore from a second authenticated session, full-refund revocation, and duplicate refund handling. Finally it expires the open Checkout Session, cancels the unconfirmed PaymentIntent, removes exact synthetic billing rows, and deletes the test identity. It never enters card details or makes a charge.
+
+The billing summary contains fixed check names and deployment metadata only. It excludes identities, credentials, Checkout URLs, Stripe object IDs, signed event bodies, and response bodies. A pass proves the deployed functions share the expected staging Price and signing secret; it does not prove Stripe's outbound endpoint registration or actual Checkout payment delivery.
 
 The local account-service suite performs the same Realtime refresh, stale-edit, and reconnect flow through two isolated browser contexts and a Phoenix-protocol fixture. Repeat it against the provisioned project because the fixture cannot prove publication configuration, network behavior, or hosted authorization.
 
@@ -117,7 +127,7 @@ Complete these tests with synthetic accounts and Stripe test mode:
 - Owner/editor/viewer invitation, acceptance, revocation, removal, and Pro downgrade behavior.
 - Two-browser stale-edit protection and Realtime disconnect/reconnect behavior beyond the account-plane delivery probe.
 - Reminder opt-in/out, timezone boundaries, retry/idempotency, pause scope, and refund suspension.
-- Checkout success without webhook, signed fulfillment, duplicate webhook, restore, and full refund revocation.
+- Actual Stripe-hosted Checkout payment and cancellation, delayed-payment success, and Stripe-originated webhook delivery; the repository billing-plane workflow separately proves signed fulfillment, duplicate handling, restore, and full-refund revocation without making a card charge.
 - Hosted calendar import and refresh behavior in Apple Calendar, Google Calendar, Outlook, and a standards-focused iCalendar client; repeat paused scope and refund suspension against the hosted project.
 
 Record the project, deployment commit, migration list, tester, date, and pass/fail result without recording tokens or customer data. Promote only after every applicable matrix is green.

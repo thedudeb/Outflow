@@ -43,6 +43,17 @@ An unconfigured build says **Paid once** instead of inventing a price and does n
 
 The PostgreSQL contract independently verifies checkout reservation idempotency and limits, service-only fulfillment, duplicate and out-of-order webhook handling, refund revocation, repurchase, and de-identified post-deletion reconciliation.
 
+## Staging Billing Contract
+
+`npm run test:staging-billing-plane` validates the protected acceptance harness without network access. After the staging project and Stripe test account are configured, manually dispatch **Staging Billing Plane** to verify the deployed contract. The run:
+
+- Creates one synthetic account and requests a real open test-mode Checkout Session through `create-pro-checkout`.
+- Retrieves the canonical Stripe session and verifies one-time mode, fixed Price, quantity, redirects, test mode, and authenticated identity metadata.
+- Sends correctly signed synthetic purchase and full-refund events to the deployed webhook, then proves duplicate handling, account-based restore, and entitlement revocation.
+- Expires the unpaid Checkout Session, cancels its unconfirmed acceptance PaymentIntent, deletes exact synthetic database rows, and removes the test identity.
+
+This contract makes no card charge and cannot prove that Stripe is configured to deliver outbound events. Complete an actual Stripe-hosted test payment, cancellation, delayed-payment case, refund, and endpoint-delivery inspection before promotion.
+
 ## Required Secrets
 
 Configure these only as Supabase Edge Function secrets:
@@ -61,12 +72,13 @@ The shared function configuration also requires the Supabase server values, `OUT
 2. Deploy `create-pro-checkout` with normal Supabase JWT verification.
 3. Deploy `stripe-webhook` using `supabase/config.toml`, which disables Supabase JWT verification only for that function.
 4. Register the webhook endpoint for `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `charge.refunded`, then save its signing secret.
-5. In Stripe test mode, verify successful payment, cancelled Checkout, delayed payment success, duplicate delivery, full refund, out-of-order delivery, restore on a second browser, and account deletion.
-6. Confirm that test-mode events cannot alter live-mode purchase mappings before enabling the production Price.
+5. Configure the protected GitHub staging entries in the service runbook and pass **Staging Billing Plane**.
+6. In Stripe test mode, verify an actual successful payment, cancelled Checkout, delayed payment success, Stripe-originated endpoint delivery, out-of-order delivery, restore on a second browser, and account deletion.
+7. Confirm that test-mode events cannot alter live-mode purchase mappings before enabling the production Price.
 
 ## Current Boundary
 
-The schema, functions, browser flow, and isolated database tests are implemented. No Stripe or Supabase project is provisioned in the repository, so the default build cannot sell or restore Pro yet.
+The schema, functions, browser flow, isolated database tests, and protected signed-event acceptance workflow are implemented. No Stripe or Supabase project is provisioned in the repository, so the default build cannot sell or restore Pro yet.
 
 The service-independent comparison, contextual Free gates, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`. The configured feature unlocks, entitlement-loss data preservation, offer, checkout, pending-success, and restore states are enforced by `npm run test:account-service`. Pure policy invariants are covered by `npm run test:feature-access`.
 

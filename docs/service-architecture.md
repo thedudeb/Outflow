@@ -98,6 +98,6 @@ Before enabling accounts in a public build:
 8. Run the public staging boundary probe and retain its pass result with the deployment commit.
 9. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
 10. Repeat the fixture-backed two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect matrix against the provisioned project before describing synchronization as available publicly.
-11. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
+11. Pass the protected signed-event billing-plane workflow, then complete the actual Stripe-hosted payment and provider-originated delivery matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
 12. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).
 13. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.
