@@ -32,6 +32,17 @@ Outflow uses three fixed shared-ledger roles. Database Row Level Security and tr
 
 Owners can view invitation metadata but cannot select token hashes. Browsers cannot create or mark invitations accepted directly. A ledger is limited to 25 live invitations, and the same address has a one-minute resend cooldown.
 
+## Automated Browser Contract
+
+`npm run test:account-service` exercises the configured collaboration UI against a stateful PostgREST-compatible fixture at desktop and narrow mobile widths. It proves that:
+
+- A Pro owner can change an editor/viewer role, send a normalized email invitation, revoke it with confirmation, and remove a member; each mutation is reloaded from authoritative service state.
+- After a Pro refund, invitation and role controls remain locked while member removal stays available so data control is never paywalled.
+- A signed-in recipient can explicitly accept a valid private token, see the newly granted shared-ledger access, and retain the exact serialized local workspace.
+- The authenticated member and invitation panel passes the automated WCAG 2.0, 2.1, and 2.2 A/AA ruleset in both viewport profiles.
+
+The database contract independently verifies owner/editor/viewer RLS, owner invariants, entitlement checks, hashed-token acceptance, recipient-email matching, expiry, one-time use, and deletion behavior through `npm run test:account-foundation`.
+
 ## Current Boundary
 
 The browser can list cloud ledger access, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime is implemented but the services are not deployed, and the default build remains fully local. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.

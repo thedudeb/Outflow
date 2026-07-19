@@ -1,8 +1,12 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { openTracker } from "../e2e/helpers";
 
+const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
 const authStorageKey = "sb-127-auth-token";
 const editorUserId = "22222222-2222-4222-8222-222222222222";
+const invitedUserId = "33333333-3333-4333-8333-333333333333";
+const invitationToken = "outflow-private-invitation-token-12345678901234567890";
 const fixtureUser = {
   id: "11111111-1111-4111-8111-111111111111",
   aud: "authenticated",
@@ -18,6 +22,11 @@ const fixtureUser = {
   updated_at: "2026-07-19T12:00:00.000Z",
   is_anonymous: false,
 };
+const invitedUser = {
+  ...fixtureUser,
+  id: invitedUserId,
+  email: "invited@example.com",
+};
 
 function storedSession(user = fixtureUser) {
   return {
@@ -30,10 +39,25 @@ function storedSession(user = fixtureUser) {
   };
 }
 
-function createCloudState({ replaceMode = "applied" } = {}) {
+function createCloudState({
+  replaceMode = "applied",
+  entitlementStatus = "active",
+  accessGranted = true,
+  canSync = true,
+  inviteToken = invitationToken,
+} = {}) {
   return {
     replaceMode,
+    entitlementStatus,
+    accessGranted,
+    canSync,
+    inviteToken,
     writes: [],
+    sentInvitations: [],
+    roleChanges: [],
+    removedMembers: [],
+    revokedInvitations: [],
+    acceptedInvitations: [],
     ledger: {
       id: "studio-cloud",
       name: "Studio Cloud",
@@ -60,7 +84,9 @@ function createCloudState({ replaceMode = "applied" } = {}) {
     profiles: [
       { id: fixtureUser.id, display_name: "Avery Owner" },
       { id: editorUserId, display_name: "Morgan Editor" },
+      { id: invitedUserId, display_name: "Riley Invitee" },
     ],
+    invitations: [],
     subscriptions: [{
       ledger_id: "studio-cloud",
       id: "figma-cloud",
@@ -126,7 +152,12 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
   await page.route("**/supabase/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const entry = { method: request.method(), path: url.pathname, body: request.postDataJSON?.() || null };
+    const entry = {
+      method: request.method(),
+      path: url.pathname,
+      search: url.search,
+      body: request.postDataJSON?.() || null,
+    };
     traffic.push(entry);
 
     const reply = (body, status = 200, headers = {}) => route.fulfill({
@@ -152,19 +183,69 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
       });
     }
     if (url.pathname.endsWith("/rest/v1/entitlements")) {
-      return cloudState
-        ? reply({ status: "active", provider: "stripe", purchased_at: "2026-07-19T12:00:00.000Z" })
+      return cloudState?.entitlementStatus
+        ? reply({ status: cloudState.entitlementStatus, provider: "stripe", purchased_at: "2026-07-19T12:00:00.000Z" })
         : reply([], 200, { "Content-Range": "0-0/0" });
     }
     if (url.pathname.endsWith("/rest/v1/notification_preferences")) {
       return reply([], 200, { "Content-Range": "0-0/0" });
     }
-    if (url.pathname.endsWith("/rest/v1/ledgers")) return reply(cloudState ? [cloudState.ledger] : []);
-    if (url.pathname.endsWith("/rest/v1/ledger_members")) return reply(cloudState?.members || []);
-    if (url.pathname.endsWith("/rest/v1/profiles")) return reply(cloudState?.profiles || []);
-    if (url.pathname.endsWith("/rest/v1/ledger_invitations")) return reply([]);
-    if (url.pathname.endsWith("/rest/v1/subscriptions")) return reply(cloudState?.subscriptions || []);
-    if (url.pathname.endsWith("/rest/v1/rpc/can_sync_ledger")) return reply(Boolean(cloudState));
+    if (url.pathname.endsWith("/rest/v1/ledgers")) {
+      return reply(cloudState?.accessGranted ? [cloudState.ledger] : []);
+    }
+    if (url.pathname.endsWith("/rest/v1/ledger_members")) {
+      if (entry.method === "PATCH" && cloudState) {
+        const targetUserId = (url.searchParams.get("user_id") || "").replace(/^eq\./, "");
+        const member = cloudState.members.find((candidate) => candidate.user_id === targetUserId);
+        if (member && ["editor", "viewer"].includes(entry.body?.role)) member.role = entry.body.role;
+        cloudState.roleChanges.push({ userId: targetUserId, role: entry.body?.role });
+        return reply([]);
+      }
+      if (entry.method === "DELETE" && cloudState) {
+        const targetUserId = (url.searchParams.get("user_id") || "").replace(/^eq\./, "");
+        cloudState.members = cloudState.members.filter((member) => member.user_id !== targetUserId);
+        cloudState.removedMembers.push(targetUserId);
+        return reply([]);
+      }
+      return reply(cloudState?.accessGranted ? cloudState.members : []);
+    }
+    if (url.pathname.endsWith("/rest/v1/profiles")) return reply(cloudState?.accessGranted ? cloudState.profiles : []);
+    if (url.pathname.endsWith("/rest/v1/ledger_invitations")) {
+      if (entry.method === "DELETE" && cloudState) {
+        const invitationId = (url.searchParams.get("id") || "").replace(/^eq\./, "");
+        cloudState.invitations = cloudState.invitations.filter((invitation) => invitation.id !== invitationId);
+        cloudState.revokedInvitations.push(invitationId);
+        return reply([]);
+      }
+      return reply(cloudState?.accessGranted ? cloudState.invitations : []);
+    }
+    if (url.pathname.endsWith("/rest/v1/subscriptions")) {
+      return reply(cloudState?.accessGranted ? cloudState.subscriptions : []);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/can_sync_ledger")) {
+      return reply(Boolean(cloudState?.accessGranted && cloudState.canSync));
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/accept_ledger_invitation") && cloudState) {
+      if (entry.body?.invitation_token !== cloudState.inviteToken || !verifiedUser) {
+        return reply({ message: "This invitation is invalid or expired." }, 400);
+      }
+      cloudState.accessGranted = true;
+      if (!cloudState.members.some((member) => member.user_id === verifiedUser.id)) {
+        cloudState.members.push({
+          ledger_id: cloudState.ledger.id,
+          user_id: verifiedUser.id,
+          role: "viewer",
+          joined_at: new Date().toISOString(),
+        });
+      }
+      cloudState.acceptedInvitations.push(entry.body.invitation_token);
+      return reply({
+        ledgerId: cloudState.ledger.id,
+        ledgerName: cloudState.ledger.name,
+        ledgerKind: cloudState.ledger.kind,
+        role: "viewer",
+      });
+    }
     if (url.pathname.endsWith("/rest/v1/rpc/replace_ledger_snapshot") && cloudState) {
       cloudState.writes.push(entry.body);
       if (cloudState.replaceMode === "conflict") {
@@ -201,6 +282,26 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
     if (url.pathname.endsWith("/functions/v1/create-pro-checkout")) {
       return reply({ message: "Checkout unavailable in account fixture" }, 503);
     }
+    if (url.pathname.endsWith("/functions/v1/send-ledger-invite") && cloudState) {
+      const id = `fixture-invite-${cloudState.sentInvitations.length + 1}`;
+      const invitation = {
+        id,
+        ledger_id: cloudState.ledger.id,
+        email: entry.body?.email,
+        role: entry.body?.role,
+        invited_by: verifiedUser?.id,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        accepted_at: null,
+        created_at: new Date().toISOString(),
+      };
+      cloudState.invitations.push(invitation);
+      cloudState.sentInvitations.push({
+        ledgerId: entry.body?.ledgerId,
+        email: entry.body?.email,
+        role: entry.body?.role,
+      });
+      return reply({ id, email: invitation.email, role: invitation.role, expiresAt: invitation.expires_at }, 201);
+    }
 
     return reply({ message: `Unhandled account fixture endpoint: ${request.method()} ${url.pathname}` }, 501);
   });
@@ -210,6 +311,12 @@ async function installCloudFixture(page, { verifiedUser = null, cloudState = nul
 
 function monthlyOutflow(page) {
   return page.getByText("Monthly outflow", { exact: true }).locator("xpath=ancestor::section[1]");
+}
+
+function violationSummary(violations) {
+  return violations
+    .map((violation) => `${violation.id}: ${violation.help}\n${violation.nodes.flatMap((node) => node.target).join(", ")}`)
+    .join("\n\n");
 }
 
 async function openStudioCloud(page) {
@@ -356,5 +463,115 @@ test("stale cloud write is rejected and replaced by the authoritative server rev
   await expect(authoritativeCard.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
   expect(cloudState.writes).toHaveLength(1);
   expect(cloudState.writes[0]?.expected_revision).toBe(2);
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("Pro owner manages shared roles, invitations, and removals through authoritative refreshes", async ({ page }) => {
+  const cloudState = createCloudState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Studio Cloud");
+  await dialog.getByRole("button", { name: "Members", exact: true }).click();
+
+  const access = dialog.getByRole("combobox", { name: "Access level for Morgan Editor", exact: true });
+  await expect(access).toHaveValue("editor");
+  await access.selectOption("viewer");
+  await expect(dialog.getByText("Member access changed to viewer.", { exact: true })).toBeVisible();
+  await expect(access).toHaveValue("viewer");
+  expect(cloudState.roleChanges).toEqual([{ userId: editorUserId, role: "viewer" }]);
+
+  await dialog.getByRole("textbox", { name: "Invite by email", exact: true }).fill("COLLABORATOR@EXAMPLE.COM");
+  await dialog.getByRole("combobox", { name: "Access", exact: true }).selectOption("editor");
+  await dialog.getByRole("button", { name: "Send invite", exact: true }).click();
+  await expect(dialog.getByText("Invitation sent to collaborator@example.com.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("collaborator@example.com", { exact: true })).toBeVisible();
+  expect(cloudState.sentInvitations).toEqual([{
+    ledgerId: "studio-cloud",
+    email: "collaborator@example.com",
+    role: "editor",
+  }]);
+
+  await dialog.getByRole("button", { name: "Revoke", exact: true }).click();
+  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog.getByText("Pending invitation revoked.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("collaborator@example.com", { exact: true })).toHaveCount(0);
+  expect(cloudState.revokedInvitations).toEqual(["fixture-invite-1"]);
+
+  const memberRow = dialog.getByRole("combobox", { name: "Access level for Morgan Editor", exact: true }).locator("xpath=ancestor::div[1]");
+  await memberRow.getByRole("button", { name: "Remove", exact: true }).click();
+  await memberRow.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog.getByText("Member removed from the cloud ledger.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Morgan Editor", { exact: true })).toHaveCount(0);
+  expect(cloudState.removedMembers).toEqual([editorUserId]);
+});
+
+test("configured shared collaboration controls meet the automated WCAG A and AA gate", async ({ page }) => {
+  const cloudState = createCloudState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Studio Cloud");
+  await dialog.getByRole("button", { name: "Members", exact: true }).click();
+  await expect(dialog.getByRole("textbox", { name: "Invite by email", exact: true })).toBeVisible();
+
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+});
+
+test("refunded owner keeps data-control removal while Pro collaboration actions stay locked", async ({ page }) => {
+  const cloudState = createCloudState({ entitlementStatus: "refunded", canSync: false });
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Entitlement Free");
+  await dialog.getByRole("button", { name: "Members", exact: true }).click();
+  await expect(dialog).toContainText("Pro is required for new invitations and role changes.");
+  await expect(dialog.getByRole("textbox", { name: "Invite by email", exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("combobox", { name: "Access level for Morgan Editor", exact: true })).toBeDisabled();
+
+  const memberRow = dialog.getByRole("combobox", { name: "Access level for Morgan Editor", exact: true }).locator("xpath=ancestor::div[1]");
+  const remove = memberRow.getByRole("button", { name: "Remove", exact: true });
+  await expect(remove).toBeEnabled();
+  await remove.click();
+  await memberRow.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog.getByText("Member removed from the cloud ledger.", { exact: true })).toBeVisible();
+  expect(cloudState.removedMembers).toEqual([editorUserId]);
+  expect(cloudState.roleChanges).toHaveLength(0);
+  expect(cloudState.sentInvitations).toHaveLength(0);
+});
+
+test("invited account accepts the private token without changing its local workspace", async ({ page }) => {
+  const cloudState = createCloudState({ entitlementStatus: null, accessGranted: false, canSync: false });
+  await installCloudFixture(page, { verifiedUser: invitedUser, cloudState });
+  await seedStoredSession(page, storedSession(invitedUser));
+  await page.goto(`/#app?invite=${invitationToken}`);
+
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toBeVisible();
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+  await expect(dialog).toContainText("Private ledger invitation");
+  await expect(dialog).toContainText("No cloud ledgers yet");
+  await dialog.getByRole("button", { name: "Accept invitation", exact: true }).click();
+
+  await expect(dialog.getByText("Joined Studio Cloud as viewer.", { exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Studio Cloud");
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("#app");
+  expect(cloudState.acceptedInvitations).toEqual([invitationToken]);
+  expect(cloudState.members).toEqual(expect.arrayContaining([
+    expect.objectContaining({ user_id: invitedUserId, role: "viewer" }),
+  ]));
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
 });

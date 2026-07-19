@@ -63,7 +63,7 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 6. The database validates the entire payload, applies it transactionally, and returns an idempotent receipt.
 7. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; the user explicitly opens that cloud ledger before synchronization begins.
 8. A cloud ledger loads its authoritative revision and exposes a visible sync state. Pro editors write through `replace_ledger_snapshot`; stale writes are rejected without changing server data.
-9. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
+9. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email. A stateful desktop/mobile browser contract verifies role changes, invitation creation and revocation, member removal after entitlement loss, and private recipient acceptance without local-data mutation.
 10. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
 11. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
 12. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim.
