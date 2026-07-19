@@ -5,6 +5,8 @@ const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
 const NOTIFIED_ALERTS_KEY = "outflow:notified-alerts";
 const ALERT_SETTINGS_KEY = "outflow:alert-settings";
+const LEDGER_META_KEY = "outflow:ledger-meta";
+const BACKUP_SCHEMA_VERSION = 1;
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -52,6 +54,7 @@ const MAX_DATE_ADVANCES = 50000;
 const MAX_TAGS = 10;
 const MAX_CSV_BYTES = 2 * 1024 * 1024;
 const MAX_CSV_ROWS = 1000;
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
 
 const seedSubscriptions = [
   {
@@ -183,6 +186,20 @@ function sanitizeAlertSettings(value, permission = "default") {
   };
 }
 
+function sanitizeLedgerMeta(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const now = new Date().toISOString();
+  const validTimestamp = (timestamp) => typeof timestamp === "string" && Number.isFinite(Date.parse(timestamp));
+  return {
+    id: typeof source.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(source.id) ? source.id : crypto.randomUUID(),
+    name: typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 60) : "Personal",
+    kind: "personal",
+    storage: "local",
+    createdAt: validTimestamp(source.createdAt) ? source.createdAt : now,
+    updatedAt: validTimestamp(source.updatedAt) ? source.updatedAt : now,
+  };
+}
+
 function sanitizeSubscription(value) {
   if (!value || typeof value !== "object") return null;
 
@@ -238,6 +255,51 @@ function sanitizeSubscription(value) {
 function sanitizeSubscriptions(value) {
   if (!Array.isArray(value)) throw new TypeError("Stored subscriptions must be an array");
   return value.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription).filter(Boolean);
+}
+
+function createLedgerBackup(ledger, subscriptions, alertSettings) {
+  return {
+    product: "Outflow",
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    ledger: sanitizeLedgerMeta(ledger),
+    alertSettings: {
+      deviceEnabled: alertSettings.deviceEnabled === true,
+      includePausedSchedules: alertSettings.includePausedSchedules === true,
+    },
+    subscriptions,
+  };
+}
+
+function parseLedgerBackup(value, permission = "default") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Backup root must be an object.");
+  if (value.product !== "Outflow") throw new TypeError("This is not an Outflow backup.");
+  if (value.schemaVersion !== BACKUP_SCHEMA_VERSION) throw new TypeError("This backup version is not supported.");
+  if (!value.ledger || typeof value.ledger.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(value.ledger.id)) {
+    throw new TypeError("The backup ledger identifier is invalid.");
+  }
+  if (!Array.isArray(value.subscriptions)) throw new TypeError("The backup has no subscription list.");
+  if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new TypeError(`Backups may contain at most ${MAX_SUBSCRIPTIONS} subscriptions.`);
+  if (
+    value.subscriptions.some(
+      (subscription) => !subscription || typeof subscription.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(subscription.id),
+    )
+  ) {
+    throw new TypeError("Every backup subscription must have an identifier.");
+  }
+  if (new Set(value.subscriptions.map((subscription) => subscription.id)).size !== value.subscriptions.length) {
+    throw new TypeError("Backup subscription identifiers must be unique.");
+  }
+
+  const subscriptions = value.subscriptions.map(sanitizeSubscription);
+  if (subscriptions.some((subscription) => !subscription)) throw new TypeError("One or more backup subscriptions are invalid.");
+
+  return {
+    exportedAt: typeof value.exportedAt === "string" && Number.isFinite(Date.parse(value.exportedAt)) ? value.exportedAt : "",
+    ledger: sanitizeLedgerMeta(value.ledger),
+    alertSettings: sanitizeAlertSettings(value.alertSettings, permission),
+    subscriptions,
+  };
 }
 
 function addCycle(date, cycle) {
@@ -905,6 +967,16 @@ function Tracker({ onExit, pwa }) {
       return sanitizeSubscriptions(seedSubscriptions).map((item) => normalizeBillingDate(item));
     }
   });
+  const [ledgerMeta, setLedgerMeta] = useState(() => {
+    try {
+      return sanitizeLedgerMeta(JSON.parse(localStorage.getItem(LEDGER_META_KEY) || "null"));
+    } catch {
+      return sanitizeLedgerMeta(null);
+    }
+  });
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [backupSession, setBackupSession] = useState(null);
+  const [backupError, setBackupError] = useState("");
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
@@ -929,6 +1001,7 @@ function Tracker({ onExit, pwa }) {
   const [csvSession, setCsvSession] = useState(null);
   const [csvMapping, setCsvMapping] = useState({});
   const [csvError, setCsvError] = useState("");
+  const ledgerChangeReady = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
@@ -939,6 +1012,18 @@ function Tracker({ onExit, pwa }) {
   }, [alertSettings]);
 
   useEffect(() => {
+    localStorage.setItem(LEDGER_META_KEY, JSON.stringify(ledgerMeta));
+  }, [ledgerMeta]);
+
+  useEffect(() => {
+    if (!ledgerChangeReady.current) {
+      ledgerChangeReady.current = true;
+      return;
+    }
+    setLedgerMeta((current) => ({ ...current, updatedAt: new Date().toISOString() }));
+  }, [subscriptions, alertSettings]);
+
+  useEffect(() => {
     if (!alertSettingsOpen) return undefined;
     const closeOnEscape = (event) => {
       if (event.key === "Escape") setAlertSettingsOpen(false);
@@ -946,6 +1031,20 @@ function Tracker({ onExit, pwa }) {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [alertSettingsOpen]);
+
+  useEffect(() => {
+    if (!ledgerOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setLedgerOpen(false);
+        setBackupSession(null);
+        setBackupError("");
+        setLedgerMeta((current) => sanitizeLedgerMeta(current));
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [ledgerOpen]);
 
   useEffect(() => {
     setSubscriptions((current) => current.map((item) => normalizeBillingDate(item)));
@@ -1022,11 +1121,22 @@ function Tracker({ onExit, pwa }) {
     () => csvSession ? buildCsvCandidates(csvSession.rows, csvMapping, subscriptions) : [],
     [csvSession, csvMapping, subscriptions],
   );
+  const backupMergeCandidates = useMemo(() => {
+    if (!backupSession) return [];
+    const existingIds = new Set(subscriptions.map((subscription) => subscription.id));
+    const existingKeys = new Set(subscriptions.map(importDuplicateKey));
+    return backupSession.subscriptions.filter(
+      (subscription) => !existingIds.has(subscription.id) && !existingKeys.has(importDuplicateKey(subscription)),
+    );
+  }, [backupSession, subscriptions]);
   const importableCandidates = csvCandidates.filter((candidate) => candidate.subscription && !candidate.duplicate);
   const invalidImportCount = csvCandidates.filter((candidate) => candidate.errors.length > 0).length;
   const duplicateImportCount = csvCandidates.filter((candidate) => candidate.duplicate).length;
   const configuredAlertCount = subscriptions.filter((subscription) => subscription.reminderLeadDays.length > 0).length;
+  const backupDuplicateCount = backupSession ? backupSession.subscriptions.length - backupMergeCandidates.length : 0;
   const availableImportSlots = Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
+  const backupMergeCount = Math.min(backupMergeCandidates.length, availableImportSlots);
+  const backupCapacityOmittedCount = backupMergeCandidates.length - backupMergeCount;
   const importConfirmCount = Math.min(importableCandidates.length, availableImportSlots);
 
   useEffect(() => {
@@ -1176,6 +1286,65 @@ function Tracker({ onExit, pwa }) {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function closeLedgerControls() {
+    setLedgerOpen(false);
+    setBackupSession(null);
+    setBackupError("");
+    setLedgerMeta((current) => sanitizeLedgerMeta(current));
+  }
+
+  function exportLedgerBackup() {
+    const backup = createLedgerBackup(ledgerMeta, subscriptions, alertSettings);
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const ledgerSlug = ledgerMeta.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "personal";
+    link.href = url;
+    link.download = `outflow-${ledgerSlug}-backup-${toDateInput(new Date())}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function selectLedgerBackup(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      setBackupSession(null);
+      setBackupError("Backup files must be 2 MB or smaller.");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(await file.text());
+      const permission = "Notification" in window ? window.Notification.permission : "unsupported";
+      setBackupSession({ ...parseLedgerBackup(parsed, permission), fileName: file.name.slice(0, 120) });
+      setBackupError("");
+    } catch (error) {
+      setBackupSession(null);
+      setBackupError(error instanceof Error ? error.message : "Outflow could not read this backup.");
+    }
+  }
+
+  function mergeLedgerBackup() {
+    if (!backupMergeCount) return;
+    const additions = backupMergeCandidates
+      .slice(0, availableImportSlots)
+      .map((subscription) => normalizeBillingDate(subscription));
+    setSubscriptions((current) => [...current, ...additions].slice(0, MAX_SUBSCRIPTIONS));
+    closeLedgerControls();
+  }
+
+  function replaceLedgerFromBackup() {
+    if (!backupSession) return;
+    setSubscriptions(backupSession.subscriptions.map((subscription) => normalizeBillingDate(subscription)));
+    setAlertSettings(backupSession.alertSettings);
+    setLedgerMeta({ ...backupSession.ledger, storage: "local", kind: "personal", updatedAt: new Date().toISOString() });
+    closeLedgerControls();
   }
 
   function closeCsvImport() {
@@ -1487,8 +1656,17 @@ function Tracker({ onExit, pwa }) {
             </div>
             <div className="flex flex-col gap-2 border-t border-zinc-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em]">
-                <span className={`h-2 w-2 ${pwa.online ? "bg-emerald-400" : "bg-red-400"}`} />
-                <span className="text-zinc-300">Local ledger</span>
+                <button
+                  type="button"
+                  onClick={() => setLedgerOpen(true)}
+                  aria-label={`Open ${ledgerMeta.name} ledger controls`}
+                  className="flex items-center gap-2 text-zinc-300 hover:text-amber-300"
+                >
+                  <span className={`h-2 w-2 ${pwa.online ? "bg-emerald-400" : "bg-red-400"}`} />
+                  <span className="max-w-40 truncate">{ledgerMeta.name}</span>
+                  <span className="text-zinc-700">/</span>
+                  <span className="text-zinc-500">Local</span>
+                </button>
                 <span className="text-zinc-700">/</span>
                 <span className={pwa.online ? "text-zinc-600" : "text-red-300"}>{pwa.online ? "Online" : "Offline"}</span>
               </div>
@@ -1942,6 +2120,150 @@ function Tracker({ onExit, pwa }) {
           </div>
         </section>
       </div>
+
+      {ledgerOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ledger-controls-title"
+            className="flex max-h-[calc(100vh-24px)] w-full max-w-3xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Data control</div>
+                <h2 id="ledger-controls-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Ledger controls</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeLedgerControls}
+                aria-label="Close ledger controls"
+                autoFocus
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-auto">
+              <section className="border-b border-zinc-800 p-4">
+                <Field label="Ledger name">
+                  <input
+                    value={ledgerMeta.name}
+                    maxLength={60}
+                    onChange={(event) => setLedgerMeta((current) => ({ ...current, name: event.target.value.slice(0, 60), updatedAt: new Date().toISOString() }))}
+                    onBlur={() => setLedgerMeta((current) => ({ ...current, name: current.name.trim() || "Personal" }))}
+                    className="h-10 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                  />
+                </Field>
+
+                <div className="mt-3 grid grid-cols-2 border border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
+                  <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
+                    Kind <span className="ml-1 text-zinc-200">Personal</span>
+                  </div>
+                  <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                    Storage <span className="ml-1 text-zinc-200">Local</span>
+                  </div>
+                  <div className="border-r border-zinc-800 px-3 py-2">
+                    Sync <span className="ml-1 text-zinc-500">Off</span>
+                  </div>
+                  <div className="px-3 py-2">
+                    Account <span className="ml-1 text-zinc-500">Guest</span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-2 sm:items-end">
+                <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                  Download backup
+                  <button
+                    type="button"
+                    onClick={exportLedgerBackup}
+                    className="h-10 border border-zinc-700 bg-black px-3 font-mono text-xs font-black uppercase text-zinc-300 hover:border-amber-400 hover:text-amber-300"
+                  >
+                    Export full ledger
+                  </button>
+                </div>
+
+                <Field label="Restore backup">
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={selectLedgerBackup}
+                    className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black"
+                  />
+                </Field>
+              </section>
+
+              {backupError && <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{backupError}</div>}
+
+              {backupSession && (
+                <section>
+                  <header className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
+                    <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
+                      Ledger <span className="ml-1 text-zinc-200">{backupSession.ledger.name}</span>
+                    </div>
+                    <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                      Records <span className="ml-1 text-zinc-200">{backupSession.subscriptions.length}</span>
+                    </div>
+                    <div className="border-r border-zinc-800 px-3 py-2">
+                      New <span className="ml-1 text-emerald-300">{backupMergeCandidates.length}</span>
+                    </div>
+                    <div className="px-3 py-2">
+                      Existing <span className="ml-1 text-amber-300">{backupDuplicateCount}</span>
+                    </div>
+                  </header>
+
+                  <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{backupSession.fileName}</div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-600">
+                        Exported {backupSession.exportedAt ? new Date(backupSession.exportedAt).toLocaleString() : "date unavailable"}
+                      </div>
+                      <div className="mt-2 font-mono text-xs text-amber-300">
+                        {formatCurrencyTotals(totalsByCurrency(backupSession.subscriptions, monthlyEquivalent))} monthly
+                      </div>
+                      {backupCapacityOmittedCount > 0 && (
+                        <div className="mt-2 font-mono text-[10px] uppercase text-red-300">
+                          Capacity blocks {backupCapacityOmittedCount} new {backupCapacityOmittedCount === 1 ? "record" : "records"}
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        disabled={!backupMergeCount}
+                        onClick={mergeLedgerBackup}
+                        className="h-10 border border-zinc-600 bg-black px-3 text-xs font-black uppercase tracking-[0.1em] text-zinc-200 hover:border-zinc-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                      >
+                        Merge {backupMergeCount}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={replaceLedgerFromBackup}
+                        className="h-10 border border-red-600 bg-red-950/30 px-3 text-xs font-black uppercase tracking-[0.1em] text-red-200 hover:border-red-300"
+                      >
+                        Replace all
+                      </button>
+                    </div>
+                  </div>
+                </section>
+              )}
+            </div>
+
+            {!backupSession && (
+              <footer className="grid grid-cols-2 border-t border-zinc-800 font-mono text-[10px] uppercase text-zinc-600">
+                <div className="border-r border-zinc-800 px-4 py-3">
+                  Records <span className="text-zinc-200">{subscriptions.length}</span>
+                </div>
+                <div className="px-4 py-3 text-right">
+                  Updated <span className="text-zinc-300">{new Date(ledgerMeta.updatedAt).toLocaleDateString()}</span>
+                </div>
+              </footer>
+            )}
+          </section>
+        </div>
+      )}
 
       {alertSettingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">

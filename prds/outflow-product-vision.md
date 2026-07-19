@@ -21,7 +21,7 @@ The product will remain deliberately narrower than a general personal-finance pl
 
 ## Current Delivery State
 
-- **Shipped locally:** Guest ledger, subscription CRUD, pause/resume, forecasts, billing calendar, trials, categories, tags, multiple currencies without implied conversion, CSV import/export, configurable device-alert lead times, paused-alert opt-in, installable web metadata, update handling, and verified offline relaunch.
+- **Shipped locally:** Guest ledger, subscription CRUD, pause/resume, forecasts, billing calendar, trials, categories, tags, multiple currencies without implied conversion, CSV import/export, configurable device-alert lead times, paused-alert opt-in, versioned full-ledger backup/restore, installable web metadata, update handling, and verified offline relaunch.
 - **Partially delivered:** Ledger status language and device alerts are present, but optional identity, email delivery, durable background notification delivery, and Pro entitlements still require service architecture.
 - **Not yet delivered:** Account creation and deletion, one-time purchase and restore, cross-device sync, personal/shared ledger switching, invitations and permissions, change attribution, external calendar integration, native mobile, and native desktop.
 - **Next architecture gate:** Select the identity, data, email, and payment services together so guest-ledger migration, deletion, entitlement restore, and privacy boundaries are designed as one system.
