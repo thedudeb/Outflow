@@ -3784,10 +3784,10 @@ function Tracker({ onExit, pwa }) {
               </Panel>
             </section>
 
-            <Panel title="Upcoming 30" marker action={<span className="font-mono text-xs text-amber-300">{timeline.length}</span>} className="min-w-0">
-              <div className="max-h-[640px] overflow-auto">
-                {timeline.map((event) => (
-                  <div key={event.eventId} className="grid grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-zinc-900 px-3 py-3">
+            <Panel title="Upcoming 30 days" marker action={<span className="font-mono text-xs text-amber-300">{timeline.length}</span>} className="min-w-0">
+              <ol className="max-h-[640px] overflow-auto">
+                {timeline.length ? timeline.map((event) => (
+                  <li key={event.eventId} className="grid grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-zinc-900 px-3 py-3">
                     <div className="font-mono text-xs text-zinc-500">
                       <div>{shortDate(event.date)}</div>
                       <div className="text-[10px] uppercase text-zinc-700">{dayLabel(event.daysOut)}</div>
@@ -3800,9 +3800,11 @@ function Tracker({ onExit, pwa }) {
                       <div className="mt-0.5 text-xs text-zinc-600">{event.category}</div>
                     </div>
                     <div className="font-mono text-sm font-bold text-zinc-100">{money(event.amount, event.currency)}</div>
-                  </div>
-                ))}
-              </div>
+                  </li>
+                )) : (
+                  <li className="px-3 py-8 text-sm text-zinc-600">No active charges inside the next 30 days.</li>
+                )}
+              </ol>
             </Panel>
           </div>
         </section>

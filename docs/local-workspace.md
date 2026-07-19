@@ -26,7 +26,7 @@ The workspace is stored under `outflow:workspace`:
 }
 ```
 
-Every ledger has its own subscription array. Dashboard totals, forecasts, alerts, CSV operations, backups, and calendar exports read only from the active ledger; Outflow never combines personal and household/team totals implicitly.
+Every ledger has its own subscription array. Dashboard totals, forecasts, alerts, CSV operations, backups, calendar views, and calendar exports read only from the active ledger; Outflow never combines personal and household/team totals implicitly.
 
 Workspace loading requires a supported schema version, exactly one personal ledger, unique ASCII-safe ledger IDs, unique ASCII-safe subscription IDs within each ledger, no more than 12 ledgers, and no more than 500 valid subscriptions per ledger. The envelope is rejected as a unit when any of those invariants fail.
 
