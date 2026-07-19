@@ -50,10 +50,21 @@ async function expectNoWcagViolations(page, scope = null) {
 async function expectDocumentToReflow(page) {
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
+    offenders: Array.from(document.body.querySelectorAll("*")).flatMap((element) => {
+      const bounds = element.getBoundingClientRect();
+      if (bounds.left >= -1 && bounds.right <= document.documentElement.clientWidth + 1) return [];
+      return [{
+        className: typeof element.className === "string" ? element.className.slice(0, 160) : "",
+        left: Math.round(bounds.left),
+        right: Math.round(bounds.right),
+        tagName: element.tagName,
+        text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+      }];
+    }).slice(0, 8),
     viewportWidth: document.documentElement.clientWidth,
   }));
 
-  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  expect(dimensions.documentWidth, JSON.stringify(dimensions, null, 2)).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
 }
 
 async function expectDialogInsideViewport(page, dialog) {
