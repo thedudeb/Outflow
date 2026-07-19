@@ -201,10 +201,12 @@ function fullDate(value) {
   }).format(parseDate(value));
 }
 
-function buildTimeline(subscriptions, days = 30) {
-  const today = toDateInput(new Date());
-  const endDate = parseDate(today);
-  endDate.setDate(endDate.getDate() + days);
+function buildSchedule(subscriptions, startValue, endValue) {
+  if (!isValidDate(startValue) || !isValidDate(endValue)) return [];
+
+  const startDate = parseDate(startValue);
+  const endDate = parseDate(endValue);
+  if (startDate > endDate) return [];
 
   return subscriptions
     .filter((subscription) => !subscription.paused)
@@ -215,12 +217,17 @@ function buildTimeline(subscriptions, days = 30) {
       let eventDate = parseDate(subscription.nextBillingDate);
       let eventCount = 0;
 
-      while (eventDate <= endDate && eventCount < 64) {
+      while (eventDate < startDate && eventCount < MAX_DATE_ADVANCES) {
+        eventDate = addCycle(eventDate, subscription.cycle);
+        eventCount += 1;
+      }
+
+      while (eventDate <= endDate && eventCount < MAX_DATE_ADVANCES) {
+        const date = toDateInput(eventDate);
         events.push({
           ...subscription,
-          eventId: `${subscription.id}-${toDateInput(eventDate)}`,
-          date: toDateInput(eventDate),
-          daysOut: daysBetween(today, toDateInput(eventDate)),
+          eventId: `${subscription.id}-${date}`,
+          date,
         });
         eventDate = addCycle(eventDate, subscription.cycle);
         eventCount += 1;
@@ -229,6 +236,63 @@ function buildTimeline(subscriptions, days = 30) {
       return events;
     })
     .sort((a, b) => parseDate(a.date) - parseDate(b.date) || a.name.localeCompare(b.name));
+}
+
+function buildTimeline(subscriptions, days = 30) {
+  const today = toDateInput(new Date());
+  const endDate = parseDate(today);
+  endDate.setDate(endDate.getDate() + days);
+
+  return buildSchedule(subscriptions, today, toDateInput(endDate)).map((event) => ({
+    ...event,
+    daysOut: daysBetween(today, event.date),
+  }));
+}
+
+function monthLabel(date) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function monthBounds(date) {
+  return {
+    start: toDateInput(new Date(date.getFullYear(), date.getMonth(), 1)),
+    end: toDateInput(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
+  };
+}
+
+function calendarDays(date) {
+  const first = new Date(date.getFullYear(), date.getMonth(), 1);
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - first.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(gridStart);
+    day.setDate(gridStart.getDate() + index);
+    return day;
+  });
+}
+
+function weeklyForecast(events, days) {
+  const today = parseDate(toDateInput(new Date()));
+  const bucketCount = Math.ceil((days + 1) / 7);
+
+  return Array.from({ length: bucketCount }, (_, index) => {
+    const start = new Date(today);
+    start.setDate(start.getDate() + index * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+
+    const bucketEvents = events.filter((event) => Math.floor(event.daysOut / 7) === index);
+    return {
+      id: `${toDateInput(start)}-${toDateInput(end)}`,
+      label: `${shortDate(toDateInput(start))}-${shortDate(toDateInput(end))}`,
+      total: bucketEvents.reduce((sum, event) => sum + Number(event.amount), 0),
+      count: bucketEvents.length,
+    };
+  });
 }
 
 function dayLabel(daysOut) {
@@ -255,7 +319,7 @@ function Panel({ title, marker, action, children, className = "" }) {
           {marker && <span className="h-3 w-1 shrink-0 bg-amber-400" />}
           <h2 className="truncate text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">{title}</h2>
         </div>
-        {action}
+        <div className="min-w-0 shrink truncate text-right">{action}</div>
       </header>
       {children}
     </section>
@@ -451,6 +515,12 @@ function Tracker({ onExit }) {
   });
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
+  const [forecastHorizon, setForecastHorizon] = useState(30);
+  const [calendarCursor, setCalendarCursor] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+  const [selectedDate, setSelectedDate] = useState(() => toDateInput(new Date()));
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(subscriptions));
@@ -475,11 +545,50 @@ function Tracker({ onExit }) {
   );
 
   const timeline = useMemo(() => buildTimeline(subscriptions, 30), [subscriptions]);
+  const forecastTimeline = useMemo(
+    () => buildTimeline(subscriptions, forecastHorizon),
+    [subscriptions, forecastHorizon],
+  );
+  const forecastWeeks = useMemo(
+    () => weeklyForecast(forecastTimeline, forecastHorizon),
+    [forecastTimeline, forecastHorizon],
+  );
+  const forecastCategories = useMemo(() => {
+    const totals = new Map();
+    forecastTimeline.forEach((event) => {
+      const current = totals.get(event.category) || { name: event.category, total: 0, count: 0 };
+      current.total += Number(event.amount);
+      current.count += 1;
+      totals.set(event.category, current);
+    });
+    return [...totals.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [forecastTimeline]);
+
+  const calendarBounds = useMemo(() => monthBounds(calendarCursor), [calendarCursor]);
+  const calendarGrid = useMemo(() => calendarDays(calendarCursor), [calendarCursor]);
+  const calendarEvents = useMemo(
+    () => buildSchedule(subscriptions, calendarBounds.start, calendarBounds.end),
+    [subscriptions, calendarBounds],
+  );
+  const calendarEventsByDate = useMemo(() => {
+    const eventsByDate = new Map();
+    calendarEvents.forEach((event) => {
+      const events = eventsByDate.get(event.date) || [];
+      events.push(event);
+      eventsByDate.set(event.date, events);
+    });
+    return eventsByDate;
+  }, [calendarEvents]);
+  const selectedDayEvents = calendarEventsByDate.get(selectedDate) || [];
   const upcomingWeek = timeline.filter((event) => event.daysOut <= 7);
   const monthlyTotal = activeSubscriptions.reduce((sum, item) => sum + monthlyEquivalent(item), 0);
   const yearlyRunRate = monthlyTotal * 12;
   const pausedCount = subscriptions.length - activeSubscriptions.length;
   const thirtyDayTotal = timeline.reduce((sum, event) => sum + Number(event.amount), 0);
+  const forecastTotal = forecastTimeline.reduce((sum, event) => sum + Number(event.amount), 0);
+  const forecastPeak = Math.max(...forecastWeeks.map((week) => week.total), 0);
+  const forecastCategoryPeak = Math.max(...forecastCategories.map((category) => category.total), 0);
+  const calendarMonthTotal = calendarEvents.reduce((sum, event) => sum + Number(event.amount), 0);
   const nextCharge = timeline[0];
 
   function updateField(field, value) {
@@ -545,9 +654,23 @@ function Tracker({ onExit }) {
     );
   }
 
+  function moveCalendar(months) {
+    setCalendarCursor((current) => {
+      const next = new Date(current.getFullYear(), current.getMonth() + months, 1);
+      setSelectedDate(toDateInput(next));
+      return next;
+    });
+  }
+
+  function showCurrentMonth() {
+    const today = new Date();
+    setCalendarCursor(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedDate(toDateInput(today));
+  }
+
   return (
     <main className="min-h-screen text-zinc-200">
-      <div className="mx-auto grid w-full max-w-[1560px] gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="mx-auto grid w-full max-w-[1560px] grid-cols-[minmax(0,1fr)] gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="border border-zinc-800 bg-black/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:sticky lg:top-3 lg:h-fit">
           <header className="border-b border-zinc-800 bg-zinc-950/70 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
@@ -740,8 +863,204 @@ function Tracker({ onExit }) {
             <StatCell label="Annualized" value={money(yearlyRunRate)} sublabel="Projected active run rate" code="ARR" />
           </div>
 
-          <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,1fr)_380px]">
-            <section className="grid min-w-0 gap-3">
+          <Panel
+            title="Cash-out forecast"
+            marker
+            action={(
+              <div className="grid grid-cols-3 border border-zinc-700" role="group" aria-label="Forecast horizon">
+                {[30, 60, 90].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    aria-pressed={forecastHorizon === days}
+                    onClick={() => setForecastHorizon(days)}
+                    className={`border-r border-zinc-700 px-2 py-1 font-mono text-[10px] font-black last:border-r-0 ${
+                      forecastHorizon === days ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:text-zinc-100"
+                    }`}
+                  >
+                    {days}D
+                  </button>
+                ))}
+              </div>
+            )}
+          >
+            <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="min-w-0 border-b border-zinc-800 xl:border-b-0 xl:border-r">
+                <div className="grid grid-cols-3 border-b border-zinc-800 font-mono">
+                  <div className="border-r border-zinc-800 px-3 py-3">
+                    <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Scheduled</div>
+                    <div className="mt-1 truncate text-sm font-black text-amber-300 sm:text-lg">{money(forecastTotal)}</div>
+                  </div>
+                  <div className="border-r border-zinc-800 px-3 py-3">
+                    <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Debits</div>
+                    <div className="mt-1 text-sm font-black text-zinc-100 sm:text-lg">{forecastTimeline.length}</div>
+                  </div>
+                  <div className="px-3 py-3">
+                    <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Avg / week</div>
+                    <div className="mt-1 truncate text-sm font-black text-zinc-100 sm:text-lg">
+                      {money(forecastTotal / Math.max(forecastWeeks.length, 1))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 p-3">
+                  <div className="grid grid-cols-[74px_minmax(0,1fr)_72px] gap-2 font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-700 sm:grid-cols-[112px_minmax(0,1fr)_88px] sm:text-[10px]">
+                    <span>Window</span>
+                    <span>Pressure</span>
+                    <span className="text-right">Pull</span>
+                  </div>
+                  {forecastWeeks.map((week) => {
+                    const width = forecastPeak ? (week.total / forecastPeak) * 100 : 0;
+                    return (
+                      <div key={week.id} className="grid min-h-7 grid-cols-[74px_minmax(0,1fr)_72px] items-center gap-2 sm:grid-cols-[112px_minmax(0,1fr)_88px]">
+                        <div className="truncate font-mono text-[9px] text-zinc-500 sm:text-[10px]">{week.label}</div>
+                        <div className="h-2 bg-zinc-900">
+                          <div className="h-full bg-amber-400" style={{ width: `${width}%` }} />
+                        </div>
+                        <div className="text-right font-mono text-[10px] font-bold text-zinc-300 sm:text-xs">
+                          {money(week.total)}
+                          <span className="ml-1 text-[9px] text-zinc-700">/{week.count}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <div className="border-b border-zinc-800 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">
+                  Category load
+                </div>
+                <div className="grid gap-3 p-3">
+                  {forecastCategories.length ? (
+                    forecastCategories.map((category) => {
+                      const width = forecastCategoryPeak ? (category.total / forecastCategoryPeak) * 100 : 0;
+                      return (
+                        <div key={category.name}>
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="truncate font-bold uppercase text-zinc-400">{category.name}</span>
+                            <span className="shrink-0 font-mono text-zinc-200">{money(category.total)}</span>
+                          </div>
+                          <div className="mt-1.5 flex h-1.5 bg-zinc-900">
+                            <div className="bg-red-500" style={{ width: `${width}%` }} />
+                          </div>
+                          <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">{category.count} scheduled</div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-8 text-sm text-zinc-600">No active charges in this forecast window.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Billing calendar"
+            marker
+            action={<span className="font-mono text-[10px] text-amber-300">{money(calendarMonthTotal)} / {calendarEvents.length}</span>}
+          >
+            <div className="flex flex-col gap-3 border-b border-zinc-800 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Projected withdrawals</div>
+                <div className="mt-1 text-lg font-black uppercase tracking-[0.08em] text-zinc-100">{monthLabel(calendarCursor)}</div>
+              </div>
+              <div className="grid grid-cols-[1fr_auto_1fr] border border-zinc-700 font-mono text-[10px] font-black uppercase">
+                <button type="button" onClick={() => moveCalendar(-1)} className="border-r border-zinc-700 px-3 py-2 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">Prev</button>
+                <button type="button" onClick={showCurrentMonth} className="border-r border-zinc-700 px-3 py-2 text-amber-300 hover:bg-zinc-900">Today</button>
+                <button type="button" onClick={() => moveCalendar(1)} className="px-3 py-2 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100">Next</button>
+              </div>
+            </div>
+
+            <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="min-w-0">
+                <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950 font-mono text-[9px] uppercase text-zinc-600 sm:text-[10px]">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+                    <div key={day} className="border-r border-zinc-800 px-1 py-2 text-center last:border-r-0">
+                      <span className="sm:hidden">{day[0]}</span>
+                      <span className="hidden sm:inline">{day}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 bg-zinc-800 gap-px">
+                  {calendarGrid.map((date) => {
+                    const value = toDateInput(date);
+                    const events = calendarEventsByDate.get(value) || [];
+                    const total = events.reduce((sum, event) => sum + Number(event.amount), 0);
+                    const currentMonth = date.getMonth() === calendarCursor.getMonth();
+                    const selected = selectedDate === value;
+                    const today = value === toDateInput(new Date());
+
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${money(total)}` : ", no charges"}`}
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setSelectedDate(value);
+                          if (!currentMonth) setCalendarCursor(new Date(date.getFullYear(), date.getMonth(), 1));
+                        }}
+                        className={`relative min-h-16 min-w-0 bg-black p-1.5 text-left hover:bg-zinc-950 sm:min-h-24 sm:p-2 ${
+                          currentMonth ? "" : "opacity-30"
+                        } ${selected ? "shadow-[inset_0_0_0_1px_#fbbf24]" : ""}`}
+                      >
+                        <div className="flex items-start justify-between gap-1 font-mono">
+                          <span className={`text-[10px] sm:text-xs ${today ? "bg-amber-400 px-1 font-black text-black" : "text-zinc-500"}`}>
+                            {date.getDate()}
+                          </span>
+                          {events.length > 0 && <span className="text-[8px] text-zinc-700 sm:text-[9px]">{events.length}X</span>}
+                        </div>
+                        {events.length > 0 && (
+                          <div className="mt-2 min-w-0">
+                            <div className="flex gap-0.5">
+                              {events.slice(0, 3).map((event) => (
+                                <span key={event.eventId} className="h-1 w-2 sm:h-1.5 sm:w-3" style={{ background: event.color }} />
+                              ))}
+                            </div>
+                            <div className="mt-1 truncate font-mono text-[8px] font-black text-amber-300 sm:text-[10px]">{money(total)}</div>
+                            <div className="mt-1 hidden truncate text-[9px] uppercase text-zinc-600 sm:block">{events[0].name}</div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="min-w-0 border-t border-zinc-800 xl:border-l xl:border-t-0">
+                <div className="border-b border-zinc-800 px-3 py-3">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Selected day</div>
+                  <div className="mt-1 font-mono text-sm font-black text-zinc-200">{fullDate(selectedDate)}</div>
+                  <div className="mt-1 font-mono text-xs text-amber-300">
+                    {money(selectedDayEvents.reduce((sum, event) => sum + Number(event.amount), 0))} / {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "debit" : "debits"}
+                  </div>
+                </div>
+                <div className="divide-y divide-zinc-900">
+                  {selectedDayEvents.length ? (
+                    selectedDayEvents.map((event) => (
+                      <div key={event.eventId} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 shrink-0" style={{ background: event.color }} />
+                            <span className="truncate text-sm font-bold text-zinc-100">{event.name}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-600">{event.category} / {event.cycle}</div>
+                        </div>
+                        <div className="font-mono text-sm font-black text-amber-300">{money(event.amount)}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-8 text-sm text-zinc-600">No withdrawals scheduled for this day.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Panel>
+
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[minmax(0,1fr)_380px]">
+            <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
               <Panel
                 title="Active subscriptions"
                 marker
