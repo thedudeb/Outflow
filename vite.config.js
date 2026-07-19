@@ -1,16 +1,33 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-function cacheVersion(paths) {
-  let hash = 5381;
-  for (const character of paths.join("|")) hash = ((hash << 5) + hash) ^ character.charCodeAt(0);
-  return (hash >>> 0).toString(36);
+export function cacheVersion(entries) {
+  const hash = createHash("sha256");
+  [...entries]
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .forEach((entry) => {
+      hash.update(entry.path);
+      hash.update("\0");
+      hash.update(entry.content);
+      hash.update("\0");
+    });
+  return hash.digest("hex").slice(0, 12);
 }
 
 function outflowServiceWorker() {
+  let projectRoot = "";
+  let publicDir = "";
+
   return {
     name: "outflow-service-worker",
     apply: "build",
+    configResolved(config) {
+      projectRoot = config.root;
+      publicDir = config.publicDir;
+    },
     generateBundle(_options, bundle) {
       const publicAssets = [
         "/",
@@ -22,11 +39,23 @@ function outflowServiceWorker() {
         "/apple-touch-icon.png",
         "/og.png",
       ];
-      const generatedAssets = Object.values(bundle)
-        .filter((entry) => entry.type === "asset" || entry.isEntry)
-        .map((entry) => `/${entry.fileName}`);
+      const generatedEntries = Object.values(bundle)
+        .map((entry) => ({
+          path: `/${entry.fileName}`,
+          content: entry.type === "asset" ? entry.source : entry.code,
+        }));
+      const contentByPath = new Map(generatedEntries.map((entry) => [entry.path, entry.content]));
+      const indexContent = readFileSync(resolve(projectRoot, "index.html"));
+      contentByPath.set("/index.html", indexContent);
+
+      publicAssets.forEach((path) => {
+        if (contentByPath.has(path)) return;
+        contentByPath.set(path, path === "/" ? indexContent : readFileSync(resolve(publicDir, path.slice(1))));
+      });
+
+      const generatedAssets = generatedEntries.map((entry) => entry.path);
       const precache = [...new Set([...publicAssets, ...generatedAssets])].sort();
-      const cacheName = `outflow-${cacheVersion(precache)}`;
+      const cacheName = `outflow-${cacheVersion([...contentByPath].map(([path, content]) => ({ path, content })))}`;
       const source = `const CACHE_NAME = ${JSON.stringify(cacheName)};
 const PRECACHE = ${JSON.stringify(precache)};
 
