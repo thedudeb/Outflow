@@ -8,11 +8,15 @@ import {
   deleteCloudAccount,
   getCloud,
   readCloudLedgerAccess,
+  readCloudLedgerSnapshot,
   readProEntitlement,
+  renameCloudLedger,
   removeCloudLedgerMember,
+  replaceCloudLedgerSnapshot,
   requestAccountLink,
   revokeCloudLedgerInvitation,
   sendCloudLedgerInvitation,
+  subscribeToCloudLedger,
   uploadGuestWorkspace,
   updateCloudLedgerMemberRole,
 } from "./cloud";
@@ -359,6 +363,38 @@ function sanitizeWorkspace(value) {
     schemaVersion: WORKSPACE_SCHEMA_VERSION,
     activeLedgerId,
     ledgers,
+  };
+}
+
+function sanitizeCloudLedgerSnapshot(value) {
+  if (!value || typeof value !== "object" || !value.ledger || !Array.isArray(value.subscriptions)) {
+    throw new TypeError("Cloud ledger snapshot is invalid.");
+  }
+  const source = value.ledger;
+  if (typeof source.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(source.id)) {
+    throw new TypeError("Cloud ledger identifier is invalid.");
+  }
+  if (!validLedgerKinds.has(source.kind) || typeof source.name !== "string" || !source.name.trim()) {
+    throw new TypeError("Cloud ledger metadata is invalid.");
+  }
+  if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new TypeError("Cloud ledger exceeds subscription capacity.");
+  const subscriptions = value.subscriptions.map(sanitizeSubscription);
+  if (subscriptions.some((subscription) => !subscription)) throw new TypeError("Cloud ledger contains an invalid subscription.");
+
+  return {
+    ledger: {
+      id: source.id,
+      name: source.name.trim().slice(0, 60),
+      kind: source.kind,
+      storage: "cloud",
+      ownerId: source.ownerId,
+      currentRole: ["owner", "editor", "viewer"].includes(source.currentRole) ? source.currentRole : "viewer",
+      revision: Number.isSafeInteger(source.revision) && source.revision >= 0 ? source.revision : 0,
+      canSync: source.canSync === true,
+      createdAt: isValidTimestamp(source.createdAt) ? source.createdAt : new Date().toISOString(),
+      updatedAt: isValidTimestamp(source.updatedAt) ? source.updatedAt : new Date().toISOString(),
+    },
+    subscriptions: subscriptions.map((subscription) => normalizeBillingDate(subscription)),
   };
 }
 
@@ -1162,11 +1198,39 @@ function LandingPage({ onOpen, pwa }) {
 
 function Tracker({ onExit, pwa }) {
   const [workspace, setWorkspace] = useState(loadWorkspace);
-  const activeLedgerRecord = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId) || workspace.ledgers[0];
+  const [cloudLedgerSession, setCloudLedgerSession] = useState(null);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState("off");
+  const [cloudSyncMessage, setCloudSyncMessage] = useState("");
+  const [cloudRemotePending, setCloudRemotePending] = useState(false);
+  const [cloudLedgerNameDraft, setCloudLedgerNameDraft] = useState("");
+  const cloudSyncingRef = useRef(false);
+  const localActiveLedgerRecord = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId) || workspace.ledgers[0];
+  const activeLedgerRecord = cloudLedgerSession || localActiveLedgerRecord;
   const ledgerMeta = activeLedgerRecord.ledger;
   const subscriptions = activeLedgerRecord.subscriptions;
+  const usingCloudLedger = ledgerMeta.storage === "cloud";
+  const cloudLedgerWriteDisabled = usingCloudLedger && (
+    !ledgerMeta.canSync
+    || cloudSyncingRef.current
+    || cloudRemotePending
+    || ["loading", "syncing", "refreshing", "stale", "conflict"].includes(cloudSyncStatus)
+  );
+  const cloudLedgerCanRename = usingCloudLedger
+    && ledgerMeta.currentRole === "owner"
+    && ledgerMeta.canSync
+    && !cloudSyncingRef.current
+    && !cloudRemotePending
+    && !["loading", "syncing", "refreshing", "stale", "conflict"].includes(cloudSyncStatus);
 
   function setSubscriptions(nextSubscriptions) {
+    if (cloudLedgerSession) {
+      if (cloudLedgerWriteDisabled) return;
+      const next = typeof nextSubscriptions === "function"
+        ? nextSubscriptions(cloudLedgerSession.subscriptions)
+        : nextSubscriptions;
+      commitCloudSubscriptions(next);
+      return;
+    }
     setWorkspace((current) => ({
       ...current,
       ledgers: current.ledgers.map((entry) => {
@@ -1183,6 +1247,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   function setLedgerMeta(nextLedger) {
+    if (cloudLedgerSession) return;
     setWorkspace((current) => ({
       ...current,
       ledgers: current.ledgers.map((entry) => {
@@ -1207,6 +1272,7 @@ function Tracker({ onExit, pwa }) {
   const [cloudLedgers, setCloudLedgers] = useState([]);
   const [cloudLedgersLoading, setCloudLedgersLoading] = useState(false);
   const [cloudAccessRefresh, setCloudAccessRefresh] = useState(0);
+  const [cloudOpenId, setCloudOpenId] = useState("");
   const [managedCloudLedgerId, setManagedCloudLedgerId] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("viewer");
@@ -1254,6 +1320,11 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
   }, [alertSettings]);
+
+  useEffect(() => {
+    if (cloudLedgerSession) setCloudLedgerNameDraft(cloudLedgerSession.ledger.name);
+    else setCloudLedgerNameDraft("");
+  }, [cloudLedgerSession?.ledger.id, cloudLedgerSession?.ledger.name]);
 
   useEffect(() => {
     if (!cloudConfigured) {
@@ -1339,6 +1410,10 @@ function Tracker({ onExit, pwa }) {
       setCloudLedgers([]);
       setCloudLedgersLoading(false);
       setManagedCloudLedgerId("");
+      setCloudLedgerSession(null);
+      setCloudSyncStatus("off");
+      setCloudSyncMessage("");
+      setCloudRemotePending(false);
       return undefined;
     }
     let active = true;
@@ -1359,6 +1434,61 @@ function Tracker({ onExit, pwa }) {
       active = false;
     };
   }, [accountSession?.user?.id, cloudAccessRefresh]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    const ledgerId = cloudLedgerSession?.ledger?.id;
+    if (!userId || !ledgerId) return undefined;
+    let active = true;
+    let unsubscribe = () => {};
+    let refreshTimer;
+
+    const receiveRemoteChange = () => {
+      if (!active) return;
+      if (cloudSyncingRef.current || editingId) {
+        setCloudRemotePending(true);
+        setCloudSyncStatus("stale");
+        setCloudSyncMessage("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+        return;
+      }
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(async () => {
+        if (!active || cloudSyncingRef.current) return;
+        setCloudSyncStatus("refreshing");
+        setCloudSyncMessage("A remote change arrived. Refreshing the cloud ledger...");
+        try {
+          const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
+          if (!active) return;
+          setCloudLedgerSession(snapshot);
+          setCloudSyncStatus(snapshot.ledger.canSync ? "synced" : "read-only");
+          setCloudSyncMessage("Remote changes applied.");
+          setCloudRemotePending(false);
+          setCloudAccessRefresh((current) => current + 1);
+        } catch (error) {
+          if (!active) return;
+          setCloudSyncStatus("offline");
+          setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not apply a remote change.");
+        }
+      }, 150);
+    };
+
+    subscribeToCloudLedger(ledgerId, receiveRemoteChange)
+      .then((cleanup) => {
+        if (active) unsubscribe = cleanup;
+        else cleanup();
+      })
+      .catch((error) => {
+        if (!active) return;
+        setCloudSyncStatus("offline");
+        setCloudSyncMessage(error instanceof Error ? error.message : "Realtime synchronization is unavailable.");
+      });
+
+    return () => {
+      active = false;
+      window.clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [accountSession?.user?.id, cloudLedgerSession?.ledger?.id, editingId]);
 
   useEffect(() => {
     if (!alertSettingsOpen) return undefined;
@@ -1514,7 +1644,7 @@ function Tracker({ onExit, pwa }) {
 
       pending.forEach((alert) => {
         const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
-        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} local ledger.`;
+        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} ${ledgerMeta.storage} ledger.`;
         const body = alert.type === "trial"
           ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
           : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
@@ -1526,7 +1656,7 @@ function Tracker({ onExit, pwa }) {
     } catch {
       // Device notifications are best-effort; the in-app alert remains available.
     }
-  }, [alerts, alertSettings.deviceEnabled, notificationPermission, ledgerMeta.id, ledgerMeta.kind, ledgerMeta.name]);
+  }, [alerts, alertSettings.deviceEnabled, notificationPermission, ledgerMeta.id, ledgerMeta.kind, ledgerMeta.name, ledgerMeta.storage]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1548,7 +1678,9 @@ function Tracker({ onExit, pwa }) {
 
   function submitSubscription(event) {
     event.preventDefault();
+    if (cloudLedgerWriteDisabled) return;
     const existingSubscription = editingId ? subscriptions.find((subscription) => subscription.id === editingId) : null;
+    const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
 
     const payload = sanitizeSubscription({
       id: editingId || crypto.randomUUID(),
@@ -1565,8 +1697,8 @@ function Tracker({ onExit, pwa }) {
       paused: form.paused,
       revision: existingSubscription ? existingSubscription.revision + 1 : 0,
       updatedAt: new Date().toISOString(),
-      createdBy: existingSubscription?.createdBy || "Local guest",
-      updatedBy: "Local guest",
+      createdBy: existingSubscription?.createdBy || actorLabel,
+      updatedBy: actorLabel,
     });
 
     if (!payload) return;
@@ -1582,6 +1714,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   function editSubscription(subscription) {
+    if (cloudLedgerWriteDisabled) return;
     setEditingId(subscription.id);
     setForm({
       name: subscription.name,
@@ -1599,18 +1732,20 @@ function Tracker({ onExit, pwa }) {
   }
 
   function deleteSubscription(id) {
+    if (cloudLedgerWriteDisabled) return;
     setSubscriptions((current) => current.filter((subscription) => subscription.id !== id));
     if (editingId === id) resetForm();
   }
 
   function togglePaused(id) {
+    if (cloudLedgerWriteDisabled) return;
     setSubscriptions((current) =>
       current.map((subscription) =>
         subscription.id === id ? {
           ...normalizeBillingDate({ ...subscription, paused: !subscription.paused }),
           revision: subscription.revision + 1,
           updatedAt: new Date().toISOString(),
-          updatedBy: "Local guest",
+          updatedBy: usingCloudLedger ? "Cloud member" : "Local guest",
         } : subscription,
       ),
     );
@@ -1687,6 +1822,224 @@ function Tracker({ onExit, pwa }) {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  async function openCloudLedger(ledgerId) {
+    const userId = accountSession?.user?.id;
+    if (!userId || cloudOpenId || cloudSyncingRef.current) return;
+    setCloudOpenId(ledgerId);
+    setCloudSyncStatus("loading");
+    setCloudSyncMessage("");
+    try {
+      const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
+      setCloudLedgerSession(snapshot);
+      setCloudSyncStatus(snapshot.ledger.canSync ? "synced" : "read-only");
+      setCloudSyncMessage(snapshot.ledger.canSync
+        ? "Cloud ledger loaded. Changes use optimistic revision checks."
+        : "Cloud ledger opened read-only. Pro editor access is required to synchronize changes.");
+      setCloudRemotePending(false);
+      setAccountOpen(false);
+      setLedgerOpen(false);
+      setBackupSession(null);
+      setBackupError("");
+      resetForm();
+      setCalendarCursor(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+      setSelectedDate(toDateInput(new Date()));
+    } catch (error) {
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not open this cloud ledger.");
+    } finally {
+      setCloudOpenId("");
+    }
+  }
+
+  function closeCloudLedger() {
+    if (!cloudLedgerSession || cloudSyncingRef.current) return;
+    setCloudLedgerSession(null);
+    setCloudSyncStatus("off");
+    setCloudSyncMessage("");
+    setCloudRemotePending(false);
+    setBackupSession(null);
+    setBackupError("");
+    resetForm();
+    setLedgerOpen(false);
+  }
+
+  async function refreshActiveCloudLedger() {
+    const userId = accountSession?.user?.id;
+    const ledgerId = cloudLedgerSession?.ledger?.id;
+    if (!userId || !ledgerId || cloudSyncingRef.current) return;
+    setCloudSyncStatus("refreshing");
+    setCloudSyncMessage("Checking the authoritative cloud revision...");
+    try {
+      const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
+      setCloudLedgerSession(snapshot);
+      setCloudSyncStatus(snapshot.ledger.canSync ? "synced" : "read-only");
+      setCloudSyncMessage("Cloud ledger refreshed.");
+      setCloudRemotePending(false);
+      resetForm();
+    } catch (error) {
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not refresh this cloud ledger.");
+    }
+  }
+
+  async function commitCloudSubscriptions(nextSubscriptions) {
+    const baseSession = cloudLedgerSession;
+    const userId = accountSession?.user?.id;
+    if (!baseSession || !userId || !baseSession.ledger.canSync || cloudSyncingRef.current) return;
+    const sanitized = nextSubscriptions.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription);
+    if (sanitized.some((subscription) => !subscription)) {
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage("The pending cloud change contains an invalid subscription.");
+      return;
+    }
+
+    cloudSyncingRef.current = true;
+    setCloudSyncStatus("syncing");
+    setCloudSyncMessage(`Writing revision ${baseSession.ledger.revision + 1}...`);
+    setCloudLedgerSession({
+      ...baseSession,
+      ledger: { ...baseSession.ledger, updatedAt: new Date().toISOString() },
+      subscriptions: sanitized,
+    });
+
+    let result;
+    try {
+      result = await replaceCloudLedgerSnapshot(
+        baseSession.ledger.id,
+        baseSession.ledger.revision,
+        sanitized,
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      setCloudLedgerSession(baseSession);
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Cloud synchronization failed before the change was committed.");
+      cloudSyncingRef.current = false;
+      return;
+    }
+
+    try {
+      if (result?.status === "conflict") {
+        try {
+          const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
+          setCloudLedgerSession(serverSnapshot);
+          setCloudRemotePending(false);
+        } catch {
+          setCloudLedgerSession(baseSession);
+          setCloudRemotePending(true);
+        }
+        setCloudSyncStatus("conflict");
+        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. Your stale write was rejected; refresh and review the server copy.`);
+      } else {
+        const committedRevision = Number.isInteger(result?.currentRevision)
+          ? result.currentRevision
+          : baseSession.ledger.revision + 1;
+        const committedSession = {
+          ...baseSession,
+          ledger: {
+            ...baseSession.ledger,
+            revision: committedRevision,
+            updatedAt: new Date().toISOString(),
+          },
+          subscriptions: sanitized,
+        };
+        setCloudLedgerSession(committedSession);
+        try {
+          const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
+          setCloudLedgerSession(serverSnapshot);
+          setCloudRemotePending(false);
+          setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
+          setCloudSyncMessage(`Synchronized revision ${committedRevision}.`);
+        } catch {
+          setCloudRemotePending(true);
+          setCloudSyncStatus("stale");
+          setCloudSyncMessage(`Revision ${committedRevision} was committed, but confirmation failed. Refresh before making another change.`);
+        }
+      }
+      setCloudAccessRefresh((current) => current + 1);
+    } finally {
+      cloudSyncingRef.current = false;
+    }
+  }
+
+  async function renameActiveCloudLedger(event) {
+    event.preventDefault();
+    const baseSession = cloudLedgerSession;
+    const userId = accountSession?.user?.id;
+    const name = cloudLedgerNameDraft.trim().slice(0, 60);
+    if (
+      !baseSession
+      || !userId
+      || baseSession.ledger.currentRole !== "owner"
+      || !baseSession.ledger.canSync
+      || cloudSyncingRef.current
+      || !name
+      || name === baseSession.ledger.name
+    ) return;
+
+    cloudSyncingRef.current = true;
+    setCloudSyncStatus("syncing");
+    setCloudSyncMessage(`Renaming cloud revision ${baseSession.ledger.revision}...`);
+    let result;
+    try {
+      result = await renameCloudLedger(
+        baseSession.ledger.id,
+        baseSession.ledger.revision,
+        name,
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      setCloudLedgerNameDraft(baseSession.ledger.name);
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Cloud ledger rename failed before it was committed.");
+      cloudSyncingRef.current = false;
+      return;
+    }
+
+    try {
+      if (result?.status === "conflict") {
+        try {
+          const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
+          setCloudLedgerSession(serverSnapshot);
+          setCloudRemotePending(false);
+        } catch {
+          setCloudLedgerSession(baseSession);
+          setCloudRemotePending(true);
+        }
+        setCloudSyncStatus("conflict");
+        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. The rename was rejected; refresh the current name.`);
+      } else {
+        const committedRevision = Number.isInteger(result?.currentRevision)
+          ? result.currentRevision
+          : baseSession.ledger.revision + 1;
+        const committedSession = {
+          ...baseSession,
+          ledger: {
+            ...baseSession.ledger,
+            name,
+            revision: committedRevision,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        setCloudLedgerSession(committedSession);
+        try {
+          const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
+          setCloudLedgerSession(serverSnapshot);
+          setCloudRemotePending(false);
+          setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
+          setCloudSyncMessage(`Renamed and synchronized revision ${committedRevision}.`);
+        } catch {
+          setCloudRemotePending(true);
+          setCloudSyncStatus("stale");
+          setCloudSyncMessage(`The rename committed at revision ${committedRevision}, but confirmation failed. Refresh before making another change.`);
+        }
+      }
+      setCloudAccessRefresh((current) => current + 1);
+    } finally {
+      cloudSyncingRef.current = false;
+    }
+  }
+
   function closeAccountControls() {
     if (accountBusy) return;
     setAccountOpen(false);
@@ -1734,7 +2087,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   async function signOutAccount() {
-    if (!cloudClient || accountBusy) return;
+    if (!cloudClient || accountBusy || cloudSyncingRef.current) return;
     setAccountBusy("signout");
     setAccountError("");
     setAccountMessage("");
@@ -1753,7 +2106,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   async function removeCloudAccount() {
-    if (!accountSession || accountBusy) return;
+    if (!accountSession || accountBusy || cloudSyncingRef.current) return;
     if (!deleteAccountArmed) {
       setDeleteAccountArmed(true);
       return;
@@ -1883,7 +2236,11 @@ function Tracker({ onExit, pwa }) {
   }
 
   function switchLedger(id) {
-    if (!workspace.ledgers.some((entry) => entry.ledger.id === id)) return;
+    if (cloudSyncingRef.current || !workspace.ledgers.some((entry) => entry.ledger.id === id)) return;
+    setCloudLedgerSession(null);
+    setCloudSyncStatus("off");
+    setCloudSyncMessage("");
+    setCloudRemotePending(false);
     setWorkspace((current) => ({ ...current, activeLedgerId: id }));
     resetForm();
     setDeleteLedgerId(null);
@@ -1896,10 +2253,14 @@ function Tracker({ onExit, pwa }) {
 
   function createLocalLedger(event) {
     event.preventDefault();
-    if (workspace.ledgers.length >= MAX_LEDGERS) return;
+    if (cloudSyncingRef.current || workspace.ledgers.length >= MAX_LEDGERS) return;
     const name = newLedgerName.trim().slice(0, 60);
     if (!name || !ledgerKinds.some((kind) => kind.value === newLedgerKind)) return;
     const ledger = sanitizeLedgerMeta({ name, kind: newLedgerKind });
+    setCloudLedgerSession(null);
+    setCloudSyncStatus("off");
+    setCloudSyncMessage("");
+    setCloudRemotePending(false);
     setWorkspace((current) => current.ledgers.length >= MAX_LEDGERS ? current : ({
       ...current,
       activeLedgerId: ledger.id,
@@ -1971,7 +2332,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   function mergeLedgerBackup() {
-    if (!backupMergeCount) return;
+    if (!backupMergeCount || cloudLedgerWriteDisabled) return;
     const additions = backupMergeCandidates
       .slice(0, availableImportSlots)
       .map((subscription) => normalizeBillingDate(subscription));
@@ -1980,7 +2341,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   function replaceLedgerFromBackup() {
-    if (!backupSession) return;
+    if (!backupSession || usingCloudLedger) return;
     setSubscriptions(backupSession.subscriptions.map((subscription) => normalizeBillingDate(subscription)));
     setAlertSettings(backupSession.alertSettings);
     setLedgerMeta((current) => ({
@@ -2039,7 +2400,7 @@ function Tracker({ onExit, pwa }) {
     const imported = importableCandidates
       .slice(0, availableImportSlots)
       .map((candidate) => normalizeBillingDate(candidate.subscription));
-    if (!imported.length) return;
+    if (!imported.length || cloudLedgerWriteDisabled) return;
     setSubscriptions((current) => [...current, ...imported].slice(0, MAX_SUBSCRIPTIONS));
     closeCsvImport();
   }
@@ -2099,6 +2460,7 @@ function Tracker({ onExit, pwa }) {
               )}
             </div>
 
+            <fieldset disabled={cloudLedgerWriteDisabled} className="contents">
             <Field label="Name">
               <input
                 value={form.name}
@@ -2269,10 +2631,11 @@ function Tracker({ onExit, pwa }) {
 
             <button
               type="submit"
-              className="h-11 border border-amber-400 bg-amber-400 px-3 text-xs font-black uppercase tracking-[0.18em] text-black hover:bg-amber-300"
+              className="h-11 border border-amber-400 bg-amber-400 px-3 text-xs font-black uppercase tracking-[0.18em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
             >
               {editingId ? "Commit changes" : "Add subscription"}
             </button>
+            </fieldset>
           </form>
         </aside>
 
@@ -2306,13 +2669,34 @@ function Tracker({ onExit, pwa }) {
                   aria-label={`Open ${ledgerMeta.name} ledger controls`}
                   className="flex items-center gap-2 text-zinc-300 hover:text-amber-300"
                 >
-                  <span className={`h-2 w-2 ${pwa.online ? "bg-emerald-400" : "bg-red-400"}`} />
+                  <span className={`h-2 w-2 ${
+                    usingCloudLedger
+                      ? cloudSyncStatus === "synced" ? "bg-emerald-400" : cloudSyncStatus === "read-only" ? "bg-zinc-500" : "bg-amber-400"
+                      : pwa.online ? "bg-emerald-400" : "bg-red-400"
+                  }`} />
                   <span className="max-w-40 truncate">{ledgerMeta.name}</span>
                   <span className="text-zinc-700">/</span>
-                  <span className="text-zinc-500">{ledgerKindLabel(ledgerMeta.kind)} / Local</span>
+                  <span className="text-zinc-500">
+                    {ledgerKindLabel(ledgerMeta.kind)} / {usingCloudLedger ? `Cloud ${ledgerMeta.currentRole}` : "Local"}
+                  </span>
                 </button>
                 <span className="text-zinc-700">/</span>
-                <span className={pwa.online ? "text-zinc-600" : "text-red-300"}>{pwa.online ? "Online" : "Offline"}</span>
+                <span className={usingCloudLedger
+                  ? cloudSyncStatus === "synced" ? "text-emerald-400" : cloudSyncStatus === "offline" ? "text-red-300" : "text-amber-300"
+                  : pwa.online ? "text-zinc-600" : "text-red-300"
+                }>
+                  {usingCloudLedger ? cloudSyncStatus : pwa.online ? "Online" : "Offline"}
+                </span>
+                {usingCloudLedger && (["stale", "conflict", "offline"].includes(cloudSyncStatus) || cloudRemotePending) && (
+                  <button
+                    type="button"
+                    onClick={refreshActiveCloudLedger}
+                    disabled={cloudSyncingRef.current}
+                    className="border border-amber-800 px-2 py-1 font-mono text-[9px] font-black uppercase text-amber-300 hover:border-amber-400 disabled:opacity-40"
+                  >
+                    Refresh
+                  </button>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 {pwa.offlineReady && (
@@ -2364,7 +2748,8 @@ function Tracker({ onExit, pwa }) {
                 <button
                   type="button"
                   onClick={() => setImportOpen(true)}
-                  className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white"
+                  disabled={cloudLedgerWriteDisabled}
+                  className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700"
                 >
                   Import CSV
                 </button>
@@ -2378,6 +2763,19 @@ function Tracker({ onExit, pwa }) {
               </div>
             </div>
           </header>
+
+          {usingCloudLedger && (
+            <div className={`grid gap-2 border px-3 py-2 font-mono text-[10px] uppercase sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+              cloudSyncStatus === "offline"
+                ? "border-red-900 bg-red-950/25 text-red-200"
+                : cloudSyncStatus === "conflict" || cloudSyncStatus === "stale"
+                  ? "border-amber-900 bg-amber-950/20 text-amber-200"
+                  : "border-cyan-950 bg-cyan-950/10 text-cyan-200"
+            }`}>
+              <span>{cloudSyncMessage || `Cloud revision ${ledgerMeta.revision}`}</span>
+              <span className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
+            </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <StatCell label="Monthly outflow" value={formatCurrencyTotals(monthlyTotals)} sublabel={`${activeSubscriptions.length} active subscriptions / no FX conversion`} tone="hot" code="MRC" />
@@ -2704,7 +3102,8 @@ function Tracker({ onExit, pwa }) {
                             <button
                               type="button"
                               onClick={() => togglePaused(subscription.id)}
-                              className={`shrink-0 border px-2 py-1 font-mono text-[11px] uppercase ${
+                              disabled={cloudLedgerWriteDisabled}
+                              className={`shrink-0 border px-2 py-1 font-mono text-[11px] uppercase disabled:cursor-not-allowed disabled:opacity-40 ${
                                 subscription.paused
                                   ? "border-zinc-600 bg-black/40 text-zinc-400 hover:text-zinc-100"
                                   : "border-red-300/50 bg-black/30 text-red-100 hover:border-red-100"
@@ -2718,14 +3117,16 @@ function Tracker({ onExit, pwa }) {
                             <button
                               type="button"
                               onClick={() => editSubscription(subscription)}
-                              className="border border-red-200/30 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100"
+                              disabled={cloudLedgerWriteDisabled}
+                              className="border border-red-200/30 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               Edit
                             </button>
                             <button
                               type="button"
                               onClick={() => deleteSubscription(subscription.id)}
-                              className="border border-red-300/50 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100"
+                              disabled={cloudLedgerWriteDisabled}
+                              className="border border-red-300/50 bg-black/30 px-3 py-1.5 text-[11px] uppercase tracking-[0.12em] text-red-100 hover:border-red-100 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               Del
                             </button>
@@ -2908,12 +3309,14 @@ function Tracker({ onExit, pwa }) {
                     <div className="min-w-0">
                       <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Authenticated identity</div>
                       <div className="mt-1 truncate text-sm font-bold text-zinc-200">{accountSession.user.email || "Email unavailable"}</div>
-                      <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">Local workspace remains authoritative</div>
+                      <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">
+                        {usingCloudLedger ? `${ledgerMeta.name} cloud ledger active / local workspace isolated` : "Local workspace active"}
+                      </div>
                     </div>
                     <button
                       type="button"
                       onClick={signOutAccount}
-                      disabled={Boolean(accountBusy)}
+                      disabled={Boolean(accountBusy) || cloudSyncStatus === "syncing"}
                       className="h-9 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
                     >
                       {accountBusy === "signout" ? "Signing out..." : "Sign out"}
@@ -2951,7 +3354,7 @@ function Tracker({ onExit, pwa }) {
 
                     {!cloudLedgersLoading && cloudLedgers.length === 0 && (
                       <div className="px-4 py-4 font-mono text-[10px] uppercase leading-5 text-zinc-600">
-                        No cloud ledgers yet. Uploading creates a durable copy; live synchronization is not enabled in this build.
+                        No cloud ledgers yet. Upload a local workspace to create the first cloud revision.
                       </div>
                     )}
 
@@ -2964,26 +3367,36 @@ function Tracker({ onExit, pwa }) {
                             <div className="min-w-0">
                               <div className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{cloudLedger.name}</div>
                               <div className="mt-1 font-mono text-[9px] uppercase text-zinc-600">
-                                {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / {cloudLedger.members.length} {cloudLedger.members.length === 1 ? "member" : "members"} / cloud copy
+                                {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / {cloudLedger.members.length} {cloudLedger.members.length === 1 ? "member" : "members"} / rev {cloudLedger.revision}
                               </div>
                             </div>
-                            {manageable && (
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setManagedCloudLedgerId(managing ? "" : cloudLedger.id);
-                                  setInviteEmail("");
-                                  setInviteRole("viewer");
-                                  setRemoveMemberArmed("");
-                                  setRevokeInviteArmed("");
-                                }}
-                                disabled={Boolean(accountBusy)}
-                                aria-expanded={managing}
-                                className="h-8 border border-zinc-700 px-3 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+                                onClick={() => openCloudLedger(cloudLedger.id)}
+                                disabled={Boolean(accountBusy) || Boolean(cloudOpenId)}
+                                className="h-8 border border-cyan-800 px-3 font-mono text-[9px] font-black uppercase text-cyan-300 hover:border-cyan-400 disabled:opacity-40"
                               >
-                                {managing ? "Close" : "Members"}
+                                {cloudOpenId === cloudLedger.id ? "Opening..." : "Open"}
                               </button>
-                            )}
+                              {manageable && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManagedCloudLedgerId(managing ? "" : cloudLedger.id);
+                                    setInviteEmail("");
+                                    setInviteRole("viewer");
+                                    setRemoveMemberArmed("");
+                                    setRevokeInviteArmed("");
+                                  }}
+                                  disabled={Boolean(accountBusy) || Boolean(cloudOpenId)}
+                                  aria-expanded={managing}
+                                  className="h-8 border border-zinc-700 px-3 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+                                >
+                                  {managing ? "Close" : "Members"}
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {managing && managedCloudLedger?.id === cloudLedger.id && (
@@ -3112,7 +3525,7 @@ function Tracker({ onExit, pwa }) {
                     <button
                       type="button"
                       onClick={removeCloudAccount}
-                      disabled={Boolean(accountBusy)}
+                      disabled={Boolean(accountBusy) || cloudSyncStatus === "syncing"}
                       className={`h-10 border px-4 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-40 ${
                         deleteAccountArmed
                           ? "border-red-500 bg-red-950/40 text-red-100"
@@ -3289,15 +3702,16 @@ function Tracker({ onExit, pwa }) {
                 </header>
                 <div className="divide-y divide-zinc-900">
                   {workspace.ledgers.map((entry) => {
-                    const active = entry.ledger.id === workspace.activeLedgerId;
+                    const active = !usingCloudLedger && entry.ledger.id === workspace.activeLedgerId;
                     const deleting = deleteLedgerId === entry.ledger.id;
                     return (
                       <div key={entry.ledger.id} className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 ${active ? "bg-amber-950/15" : ""}`}>
                         <button
                           type="button"
                           onClick={() => switchLedger(entry.ledger.id)}
+                          disabled={cloudSyncStatus === "syncing"}
                           aria-current={active ? "true" : undefined}
-                          className="min-w-0 text-left"
+                          className="min-w-0 text-left disabled:opacity-40"
                         >
                           <span className="flex min-w-0 items-center gap-2">
                             <span className={`h-2.5 w-2.5 shrink-0 ${active ? "bg-amber-400" : "bg-zinc-700"}`} />
@@ -3348,40 +3762,100 @@ function Tracker({ onExit, pwa }) {
                   </Field>
                   <button
                     type="submit"
-                    disabled={!newLedgerName.trim() || workspace.ledgers.length >= MAX_LEDGERS}
+                    disabled={!newLedgerName.trim() || workspace.ledgers.length >= MAX_LEDGERS || cloudSyncStatus === "syncing"}
                     className="h-10 border border-zinc-600 bg-black px-3 text-xs font-black uppercase tracking-[0.1em] text-zinc-200 hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
                   >
                     Create local
                   </button>
                 </form>
                 <div className="border-t border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase text-zinc-700">
-                  Local household and team ledgers stay on this browser. Member invitations and sync require the future account service.
+                  Local ledgers stay on this browser and never merge into cloud totals unless explicitly uploaded.
                 </div>
               </section>
 
+              {accountSession && (
+                <section className="border-b border-zinc-800">
+                  <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                    <span>Cloud ledgers</span>
+                    <span>{cloudLedgersLoading ? "Checking" : cloudLedgers.length}</span>
+                  </header>
+                  {cloudLedgers.length === 0 && !cloudLedgersLoading && (
+                    <div className="px-4 py-4 font-mono text-[10px] uppercase text-zinc-700">No cloud ledger access</div>
+                  )}
+                  {cloudLedgers.map((cloudLedger) => {
+                    const active = usingCloudLedger && cloudLedger.id === ledgerMeta.id;
+                    return (
+                      <div key={cloudLedger.id} className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-zinc-900 px-4 py-3 last:border-b-0 ${active ? "bg-cyan-950/15" : ""}`}>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`h-2.5 w-2.5 shrink-0 ${active ? "bg-cyan-400" : "bg-zinc-700"}`} />
+                            <span className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{cloudLedger.name}</span>
+                            {active && <span className="border border-cyan-800 px-1.5 py-0.5 font-mono text-[8px] uppercase text-cyan-300">Active</span>}
+                          </div>
+                          <div className="mt-1 pl-[18px] font-mono text-[10px] uppercase text-zinc-600">
+                            {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / rev {cloudLedger.revision}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => active ? closeCloudLedger() : openCloudLedger(cloudLedger.id)}
+                          disabled={Boolean(cloudOpenId) || cloudSyncingRef.current}
+                          className="h-8 border border-cyan-900 px-3 font-mono text-[9px] font-black uppercase text-cyan-300 hover:border-cyan-500 disabled:opacity-40"
+                        >
+                          {cloudOpenId === cloudLedger.id ? "Opening..." : active ? "Close cloud" : "Open"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+
               <section className="border-b border-zinc-800 p-4">
-                <Field label="Ledger name">
-                  <input
-                    value={ledgerMeta.name}
-                    maxLength={60}
-                    onChange={(event) => setLedgerMeta((current) => ({ ...current, name: event.target.value.slice(0, 60), updatedAt: new Date().toISOString() }))}
-                    onBlur={() => setLedgerMeta((current) => ({ ...current, name: current.name.trim() || ledgerKindLabel(current.kind) }))}
-                    className="h-10 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
-                  />
-                </Field>
+                {usingCloudLedger ? (
+                  <form onSubmit={renameActiveCloudLedger} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <Field label="Cloud ledger name">
+                      <input
+                        value={cloudLedgerNameDraft}
+                        maxLength={60}
+                        disabled={!cloudLedgerCanRename}
+                        onChange={(event) => setCloudLedgerNameDraft(event.target.value.slice(0, 60))}
+                        className="h-10 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-cyan-400 disabled:border-zinc-900 disabled:text-zinc-500"
+                      />
+                    </Field>
+                    <button
+                      type="submit"
+                      disabled={!cloudLedgerCanRename || !cloudLedgerNameDraft.trim() || cloudLedgerNameDraft.trim() === ledgerMeta.name}
+                      className="h-10 border border-cyan-800 px-4 text-xs font-black uppercase tracking-[0.1em] text-cyan-300 hover:border-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Save name
+                    </button>
+                  </form>
+                ) : (
+                  <Field label="Ledger name">
+                    <input
+                      value={ledgerMeta.name}
+                      maxLength={60}
+                      onChange={(event) => setLedgerMeta((current) => ({ ...current, name: event.target.value.slice(0, 60), updatedAt: new Date().toISOString() }))}
+                      onBlur={() => setLedgerMeta((current) => ({ ...current, name: current.name.trim() || ledgerKindLabel(current.kind) }))}
+                      className="h-10 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                    />
+                  </Field>
+                )}
 
                 <div className="mt-3 grid grid-cols-2 border border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
                   <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
                     Kind <span className="ml-1 text-zinc-200">{ledgerKindLabel(ledgerMeta.kind)}</span>
                   </div>
                   <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
-                    Storage <span className="ml-1 text-zinc-200">Local</span>
+                    Storage <span className={`ml-1 ${usingCloudLedger ? "text-cyan-300" : "text-zinc-200"}`}>{usingCloudLedger ? "Cloud" : "Local"}</span>
                   </div>
                   <div className="border-r border-zinc-800 px-3 py-2">
-                    Sync <span className="ml-1 text-zinc-500">Off</span>
+                    Sync <span className={`ml-1 ${usingCloudLedger && cloudSyncStatus === "synced" ? "text-emerald-300" : "text-zinc-500"}`}>
+                      {usingCloudLedger ? cloudSyncStatus : "Off"}
+                    </span>
                   </div>
                   <div className="px-3 py-2">
-                    Account <span className="ml-1 text-zinc-500">Guest</span>
+                    Account <span className={`ml-1 ${accountSession ? "text-cyan-300" : "text-zinc-500"}`}>{accountSession ? ledgerMeta.currentRole || "Signed in" : "Guest"}</span>
                   </div>
                 </div>
               </section>
@@ -3403,7 +3877,8 @@ function Tracker({ onExit, pwa }) {
                     type="file"
                     accept=".json,application/json"
                     onChange={selectLedgerBackup}
-                    className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black"
+                    disabled={usingCloudLedger}
+                    className="h-10 min-w-0 border border-zinc-700 bg-black px-2 py-2 font-mono text-xs text-zinc-400 file:mr-3 file:border-0 file:bg-amber-400 file:px-2 file:py-1 file:font-mono file:text-[10px] file:font-black file:uppercase file:text-black disabled:border-zinc-900 disabled:text-zinc-700"
                   />
                 </Field>
               </section>
@@ -3676,7 +4151,7 @@ function Tracker({ onExit, pwa }) {
               </div>
               <button
                 type="button"
-                disabled={!importConfirmCount}
+                disabled={!importConfirmCount || cloudLedgerWriteDisabled}
                 onClick={confirmCsvImport}
                 className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
               >

@@ -33,4 +33,4 @@ Owners can view invitation metadata but cannot select token hashes. Browsers can
 
 ## Current Boundary
 
-The browser can list cloud ledger access, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. Cloud copies are not yet live-synchronized with the local tracker, and the default build remains fully local.
+The browser can list cloud ledger access, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime is implemented but the services are not deployed, and the default build remains fully local. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.

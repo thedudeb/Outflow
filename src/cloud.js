@@ -166,6 +166,104 @@ export async function readCloudLedgerAccess(userId) {
   }));
 }
 
+function cloudMemberLabel(member, userId) {
+  if (!member) return "Cloud member";
+  if (member.userId === userId) return "You";
+  return member.displayName || `Member ${member.userId.slice(0, 8)}`;
+}
+
+export async function readCloudLedgerSnapshot(ledgerId, userId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+
+  const access = (await readCloudLedgerAccess(userId)).find((ledger) => ledger.id === ledgerId);
+  if (!access) throw new Error("This cloud ledger is unavailable.");
+
+  const { data: rows, error } = await cloud
+    .from("subscriptions")
+    .select("ledger_id, id, name, amount, currency, cycle, next_billing_date, category, tags, color, trial_end_date, reminder_lead_days, paused, revision, created_by, updated_by, source_created_by, source_updated_by, client_updated_at, created_at, updated_at")
+    .eq("ledger_id", ledgerId)
+    .order("next_billing_date", { ascending: true });
+  if (error) throw error;
+
+  const { data: canSync, error: syncError } = await cloud.rpc("can_sync_ledger", { target_ledger_id: ledgerId });
+  if (syncError) throw syncError;
+  const memberById = new Map(access.members.map((member) => [member.userId, member]));
+
+  return {
+    ledger: {
+      id: access.id,
+      name: access.name,
+      kind: access.kind,
+      storage: "cloud",
+      ownerId: access.ownerId,
+      currentRole: access.currentRole,
+      revision: access.revision,
+      canSync: canSync === true,
+      createdAt: access.createdAt,
+      updatedAt: access.updatedAt,
+    },
+    subscriptions: (rows || []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      amount: Number(row.amount),
+      currency: row.currency,
+      cycle: row.cycle,
+      nextBillingDate: row.next_billing_date,
+      category: row.category,
+      tags: row.tags || [],
+      color: row.color,
+      trialEndDate: row.trial_end_date || "",
+      reminderLeadDays: row.reminder_lead_days || [],
+      paused: row.paused === true,
+      revision: Number(row.revision || 0),
+      updatedAt: row.client_updated_at || row.updated_at,
+      createdBy: row.created_by ? cloudMemberLabel(memberById.get(row.created_by), userId) : row.source_created_by,
+      updatedBy: row.updated_by ? cloudMemberLabel(memberById.get(row.updated_by), userId) : row.source_updated_by,
+    })),
+  };
+}
+
+export async function replaceCloudLedgerSnapshot(ledgerId, expectedRevision, subscriptions, operationId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("replace_ledger_snapshot", {
+    target_ledger_id: ledgerId,
+    expected_revision: expectedRevision,
+    client_operation_id: operationId,
+    subscriptions_payload: subscriptions,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function renameCloudLedger(ledgerId, expectedRevision, name, operationId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("rename_cloud_ledger", {
+    target_ledger_id: ledgerId,
+    expected_revision: expectedRevision,
+    client_operation_id: operationId,
+    ledger_name: name,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function subscribeToCloudLedger(ledgerId, onChange) {
+  const cloud = await getCloud();
+  if (!cloud) return () => {};
+  const channel = cloud
+    .channel(`outflow-ledger-${ledgerId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "ledgers", filter: `id=eq.${ledgerId}` }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "subscriptions", filter: `ledger_id=eq.${ledgerId}` }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "ledger_members", filter: `ledger_id=eq.${ledgerId}` }, onChange)
+    .subscribe();
+  return () => {
+    cloud.removeChannel(channel);
+  };
+}
+
 export async function sendCloudLedgerInvitation({ ledgerId, email, role }) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");

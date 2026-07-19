@@ -14,7 +14,8 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 - Membership authorization is enforced in database policies, not inferred from client UI.
 - Guest migration runs as one authenticated database function and returns an idempotent receipt.
 - Shared-ledger invitations use server-generated one-use tokens, database-enforced email matching, and fixed owner/editor/viewer permissions.
-- Realtime can observe ledger, membership, and subscription changes after conflict rules are implemented.
+- Cloud writes use ledger revisions, idempotent operation IDs, transactional snapshots, and explicit conflict results.
+- Realtime observes active ledger, membership, and subscription changes and defers refresh while a local edit is open.
 - Account deletion runs in an authenticated Edge Function because deleting an Auth user requires a server-only secret.
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend data security](https://supabase.com/docs/guides/database/secure-data), [Row Level Security](https://supabase.com/features/row-level-security), [database functions](https://supabase.com/docs/guides/database/functions), [Realtime Postgres changes](https://supabase.com/docs/guides/realtime/postgres-changes), and [server-only user deletion](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
@@ -55,10 +56,11 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 2. After authentication, the user sees the number of local ledgers and records that can be uploaded.
 3. Upload is explicit. The client calls `migrate_guest_workspace` with the validated versioned workspace.
 4. The database validates the entire payload, applies it transactionally, and returns an idempotent receipt.
-5. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; it does not mark the ledger synchronized.
-6. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
-7. Signing out never removes the local workspace.
-8. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, and migration receipts while leaving browser-local data untouched.
+5. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; the user explicitly opens that cloud ledger before synchronization begins.
+6. A cloud ledger loads its authoritative revision and exposes a visible sync state. Pro editors write through `replace_ledger_snapshot`; stale writes are rejected without changing server data.
+7. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
+8. Signing out closes the cloud ledger and returns to the untouched local workspace.
+9. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, sync operations, and migration receipts while leaving browser-local data untouched.
 
 ## Authorization Model
 
@@ -80,4 +82,5 @@ Before enabling accounts in a public build:
 4. Connect a verified Resend sending domain to Supabase Auth.
 5. Configure permitted Auth redirect URLs for production and local development.
 6. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
-7. Provision Stripe only after account deletion and entitlement ownership tests pass.
+7. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
+8. Provision Stripe only after account deletion and entitlement ownership tests pass.

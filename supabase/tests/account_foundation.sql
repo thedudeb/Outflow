@@ -170,6 +170,60 @@ begin
 end;
 $$;
 
+select public.replace_ledger_snapshot(
+  'team-ledger',
+  0,
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  $snapshot$
+  [{
+    "id":"figma","name":"Figma","amount":12,"currency":"USD","cycle":"monthly",
+    "nextBillingDate":"2026-08-19","category":"Design","tags":["work"],"color":"#8b5cf6",
+    "trialEndDate":"","reminderLeadDays":[7,1],"paused":false,
+    "revision":0,"updatedAt":"2026-07-19T18:00:00.000Z","createdBy":"Owner","updatedBy":"Owner"
+  }]
+  $snapshot$::jsonb
+) as first_sync;
+
+select public.replace_ledger_snapshot(
+  'team-ledger',
+  0,
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  '[]'::jsonb
+) as idempotent_sync;
+
+do $$
+begin
+  if (select revision from public.ledgers where id = 'team-ledger') <> 1 then raise exception 'ledger revision did not advance once'; end if;
+  if (select count(*) from public.subscriptions where ledger_id = 'team-ledger') <> 1 then raise exception 'synchronized subscription was not stored'; end if;
+  if (select count(*) from public.ledger_sync_operations where ledger_id = 'team-ledger') <> 1 then raise exception 'idempotent sync created another operation'; end if;
+end;
+$$;
+
+select public.replace_ledger_snapshot(
+  'team-ledger',
+  0,
+  'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  $snapshot$
+  [{
+    "id":"figma","name":"Figma","amount":20,"currency":"USD","cycle":"monthly",
+    "nextBillingDate":"2026-08-19","category":"Design","tags":["work"],"color":"#8b5cf6",
+    "trialEndDate":"","reminderLeadDays":[7,1],"paused":false,
+    "revision":0,"updatedAt":"2026-07-19T18:05:00.000Z","createdBy":"Owner","updatedBy":"Owner"
+  }]
+  $snapshot$::jsonb
+) as conflicting_sync;
+
+do $$
+begin
+  if (select amount from public.subscriptions where ledger_id = 'team-ledger' and id = 'figma') <> 12 then
+    raise exception 'stale snapshot overwrote the cloud subscription';
+  end if;
+  if (select result ->> 'status' from public.ledger_sync_operations where operation_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb') <> 'conflict' then
+    raise exception 'stale snapshot did not record a conflict';
+  end if;
+end;
+$$;
+
 select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
 
 do $$
@@ -177,6 +231,16 @@ begin
   if (select count(*) from public.ledgers) <> 0 then raise exception 'RLS exposed another user ledger'; end if;
   if (select count(*) from public.subscriptions) <> 0 then raise exception 'RLS exposed another user subscription'; end if;
   if (select count(*) from public.migration_receipts) <> 0 then raise exception 'RLS exposed another user receipt'; end if;
+  if (select count(*) from public.ledger_sync_operations) <> 0 then raise exception 'RLS exposed another user sync operation'; end if;
+end;
+$$;
+
+do $$
+begin
+  perform public.replace_ledger_snapshot('team-ledger', 1, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', '[]'::jsonb);
+  raise exception 'non-member synchronized another ledger';
+exception
+  when insufficient_privilege then null;
 end;
 $$;
 
@@ -249,6 +313,41 @@ begin
 end;
 $$;
 
+select public.replace_ledger_snapshot(
+  'team-ledger',
+  1,
+  'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  $snapshot$
+  [{
+    "id":"figma","name":"Figma","amount":13,"currency":"USD","cycle":"monthly",
+    "nextBillingDate":"2026-08-19","category":"Design","tags":["work","shared"],"color":"#8b5cf6",
+    "trialEndDate":"","reminderLeadDays":[7],"paused":false,
+    "revision":1,"updatedAt":"2026-07-19T18:10:00.000Z","createdBy":"Owner","updatedBy":"Editor"
+  }]
+  $snapshot$::jsonb
+) as editor_sync;
+
+do $$
+begin
+  if (select revision from public.ledgers where id = 'team-ledger') <> 2 then raise exception 'editor sync did not advance ledger revision'; end if;
+  if (select amount from public.subscriptions where ledger_id = 'team-ledger' and id = 'figma') <> 13 then raise exception 'editor sync was not applied'; end if;
+  if (select updated_by from public.subscriptions where ledger_id = 'team-ledger' and id = 'figma') <> auth.uid() then
+    raise exception 'editor sync attribution is incorrect';
+  end if;
+end;
+$$;
+
+do $$
+begin
+  perform public.rename_cloud_ledger(
+    'team-ledger', 2, '24681357-2468-4468-8468-246813579024', 'Editor rename'
+  );
+  raise exception 'editor renamed a shared ledger';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
 update public.ledger_members
 set role = 'viewer'
 where ledger_id = 'team-ledger' and user_id = auth.uid();
@@ -309,6 +408,15 @@ begin
 end;
 $$;
 
+do $$
+begin
+  perform public.replace_ledger_snapshot('team-ledger', 2, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '[]'::jsonb);
+  raise exception 'shared ledger synchronized after owner Pro revocation';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
 reset role;
 update public.entitlements
 set status = 'active', revoked_at = null
@@ -325,6 +433,45 @@ begin
   if (select role from public.ledger_members where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222') <> 'viewer' then
     raise exception 'owner could not change collaborator role';
   end if;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+do $$
+begin
+  perform public.replace_ledger_snapshot('team-ledger', 2, 'ffffffff-ffff-4fff-8fff-ffffffffffff', '[]'::jsonb);
+  raise exception 'viewer synchronized a shared ledger';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+select public.replace_ledger_snapshot(
+  'team-ledger',
+  2,
+  '12345678-1234-4234-8234-123456789012',
+  '[]'::jsonb
+) as owner_delete_sync;
+
+do $$
+begin
+  if (select revision from public.ledgers where id = 'team-ledger') <> 3 then raise exception 'delete sync did not advance ledger revision'; end if;
+  if exists (select 1 from public.subscriptions where ledger_id = 'team-ledger') then raise exception 'snapshot deletion was not applied'; end if;
+end;
+$$;
+
+select public.rename_cloud_ledger(
+  'team-ledger',
+  3,
+  '13572468-1357-4357-8357-135724680135',
+  'Studio Ops'
+) as owner_rename_sync;
+
+do $$
+begin
+  if (select name from public.ledgers where id = 'team-ledger') <> 'Studio Ops' then raise exception 'owner rename was not applied'; end if;
+  if (select revision from public.ledgers where id = 'team-ledger') <> 4 then raise exception 'owner rename did not advance ledger revision'; end if;
 end;
 $$;
 
@@ -359,5 +506,6 @@ begin
   if (select count(*) from public.ledgers) <> 0 then raise exception 'account deletion did not cascade ledgers'; end if;
   if (select count(*) from public.subscriptions) <> 0 then raise exception 'account deletion did not cascade subscriptions'; end if;
   if (select count(*) from public.migration_receipts) <> 0 then raise exception 'account deletion did not cascade receipts'; end if;
+  if (select count(*) from public.ledger_sync_operations) <> 0 then raise exception 'account deletion did not cascade sync operations'; end if;
 end;
 $$;
