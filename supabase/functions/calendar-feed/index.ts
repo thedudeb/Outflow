@@ -1,5 +1,5 @@
-import { createClient } from "npm:@supabase/supabase-js@2.75.0";
 import { createEvents } from "npm:ics@3.12.0";
+import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 type FeedSubscription = {
   id: string;
@@ -127,16 +127,13 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: "Method not allowed." }, 405);
   }
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const secretKey = Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const { projectUrl, secretKey } = resolveSupabaseRuntime();
   if (!projectUrl || !secretKey) return jsonResponse({ error: "Calendar feeds are not configured." }, 503);
 
   const token = new URL(request.url).searchParams.get("token") || "";
   if (!/^[a-zA-Z0-9_-]{43}$/.test(token)) return jsonResponse({ error: "Calendar feed not found." }, 404);
 
-  const adminClient = createClient(projectUrl, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const adminClient = createAdminClient(projectUrl, secretKey);
   const { data, error } = await adminClient.rpc("resolve_calendar_feed", { target_token_hash: await sha256(token) });
   if (error) return jsonResponse({ error: "Calendar feed is temporarily unavailable." }, 503);
   if (!validPayload(data)) return jsonResponse({ error: "Calendar feed not found." }, 404);

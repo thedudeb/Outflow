@@ -12,10 +12,11 @@ Install Node dependencies, install Deno 2.8.1, and run:
 npm ci
 npm run test:service-readiness
 npm run test:function-types
+npm run test:function-runtime
 npm run test:account-foundation
 ```
 
-`test:service-readiness` enforces the six-function inventory, explicit JWT policy, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values.
+`test:service-readiness` enforces the six-function inventory, explicit JWT policy, hosted/local/legacy Supabase key modes, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values. `test:function-runtime` proves named-key precedence, fallback behavior, and opaque-secret header handling without contacting Supabase.
 
 ## 2. Prepare The Environment
 
@@ -29,12 +30,12 @@ node scripts/check-service-readiness.mjs --env-file /absolute/path/to/outflow-st
 
 Add `--allow-local` only for a local file that uses `http://localhost` or `http://127.0.0.1`. Never use that switch to approve staging or production configuration.
 
-Supabase injects its reserved `SUPABASE_*` runtime values. Do not include those names in `supabase secrets set`. Upload only the custom `OUTFLOW_*`, `RESEND_*`, and `STRIPE_*` entries through the dashboard or a second ignored provider-secrets file.
+Supabase injects its reserved `SUPABASE_*` runtime values. Hosted projects should expose JSON key collections named `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS`, each with the selected key under `default`. The local CLI may expose singular keys instead; legacy anon/service-role JWTs remain a migration fallback. Do not include reserved names in `supabase secrets set`. Upload only the custom `OUTFLOW_*`, `RESEND_*`, and `STRIPE_*` entries through the dashboard or a second ignored provider-secrets file.
 
 ## 3. Provision Supabase
 
 1. Create a non-production project and link the Supabase CLI to it.
-2. Confirm the project exposes its URL, publishable/anon key, and secret/service-role key to Edge Functions.
+2. Confirm the project exposes its URL plus the named `default` publishable and secret keys to Edge Functions. Use legacy keys only while migrating an existing project.
 3. Apply every migration in `supabase/migrations` in filename order.
 4. Confirm Row Level Security is enabled on every exposed table.
 5. Configure the production app origin and explicit local callback in Auth redirect URLs.
@@ -65,7 +66,7 @@ Deploy from the repository root so `supabase/config.toml` supplies the reviewed 
 | `send-due-reminders` | Disabled | Dedicated cron bearer secret |
 | `calendar-feed` | Disabled | Hashed, revocable feed token |
 
-After deployment, run the repository readiness and function type checks again. A JWT change must update both `supabase/config.toml` and `scripts/check-service-readiness.mjs` in the same review.
+After deployment, run the repository readiness, function type, and function runtime checks again. A JWT or Supabase key-mode change must update both the shared runtime and `scripts/check-service-readiness.mjs` in the same review.
 
 ## 6. Staging Acceptance
 

@@ -19,6 +19,11 @@ function validEnvironment() {
   };
 }
 
+function legacyKey(role) {
+  const encoded = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encoded({ alg: "HS256", typ: "JWT" })}.${encoded({ role })}.test-signature`;
+}
+
 test("repository service inventory and JWT policy are complete", async () => {
   const result = await validateRepository();
   assert.deepEqual(result.errors, []);
@@ -41,6 +46,34 @@ OUTFLOW_INVITE_FROM="Outflow <invites@outflow.example>"
 
 test("a complete production environment passes without exposing values", () => {
   assert.deepEqual(validateServiceEnvironment(validEnvironment()), []);
+});
+
+test("hosted named Supabase key collections satisfy the production contract", () => {
+  const env = { ...validEnvironment() };
+  delete env.SUPABASE_PUBLISHABLE_KEY;
+  delete env.SUPABASE_SECRET_KEY;
+  env.SUPABASE_PUBLISHABLE_KEYS = JSON.stringify({ default: `sb_publishable_${"h".repeat(24)}` });
+  env.SUPABASE_SECRET_KEYS = JSON.stringify({ default: `sb_secret_${"k".repeat(24)}` });
+  assert.deepEqual(validateServiceEnvironment(env), []);
+});
+
+test("legacy Supabase keys require the correct embedded roles", () => {
+  const valid = { ...validEnvironment() };
+  delete valid.SUPABASE_PUBLISHABLE_KEY;
+  delete valid.SUPABASE_SECRET_KEY;
+  valid.SUPABASE_ANON_KEY = legacyKey("anon");
+  valid.SUPABASE_SERVICE_ROLE_KEY = legacyKey("service_role");
+  assert.deepEqual(validateServiceEnvironment(valid), []);
+
+  const invalid = {
+    ...valid,
+    SUPABASE_ANON_KEY: legacyKey("service_role"),
+    SUPABASE_SERVICE_ROLE_KEY: "private-value-that-must-not-appear",
+  };
+  const errors = validateServiceEnvironment(invalid);
+  assert.ok(errors.some((error) => error.startsWith("SUPABASE_ANON_KEY:")));
+  assert.ok(errors.some((error) => error.startsWith("SUPABASE_SERVICE_ROLE_KEY:")));
+  assert.equal(JSON.stringify(errors).includes("private-value-that-must-not-appear"), false);
 });
 
 test("wildcards, local production URLs, mismatched browser values, and weak secrets fail closed", () => {

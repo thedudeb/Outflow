@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.75.0";
+import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 type Delivery = {
   delivery_id: string;
@@ -77,8 +77,7 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return response({ error: "Method not allowed." }, 405);
   if (Number(request.headers.get("content-length") || 0) > 1024) return response({ error: "Request is too large." }, 413);
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const secretKey = Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const { projectUrl, secretKey } = resolveSupabaseRuntime();
   const resendKey = Deno.env.get("RESEND_API_KEY") || "";
   const cronSecret = Deno.env.get("OUTFLOW_CRON_SECRET") || "";
   const reminderFrom = Deno.env.get("OUTFLOW_REMINDER_FROM") || "";
@@ -106,9 +105,7 @@ Deno.serve(async (request) => {
     return response({ error: "Batch size must be between 1 and 100." }, 400);
   }
 
-  const adminClient = createClient(projectUrl, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const adminClient = createAdminClient(projectUrl, secretKey);
   const claimToken = crypto.randomUUID();
   const { data, error: claimError } = await adminClient.rpc("claim_due_email_notifications", {
     requested_batch_size: requestedBatchSize,

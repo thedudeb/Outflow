@@ -1,5 +1,5 @@
 import Stripe from "npm:stripe@22.0.0";
-import { createClient } from "npm:@supabase/supabase-js@2.75.0";
+import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 const PRODUCT = "outflow_pro_lifetime";
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
@@ -15,8 +15,7 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return response({ error: "Method not allowed." }, 405);
   if (Number(request.headers.get("content-length") || 0) > MAX_WEBHOOK_BYTES) return response({ error: "Request is too large." }, 413);
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const secretKey = Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const { projectUrl, secretKey } = resolveSupabaseRuntime();
   const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
   const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") || "";
   const priceId = Deno.env.get("STRIPE_PRO_PRICE_ID") || "";
@@ -41,9 +40,7 @@ Deno.serve(async (request) => {
     return response({ error: "Webhook signature is invalid." }, 400);
   }
 
-  const adminClient = createClient(projectUrl, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const adminClient = createAdminClient(projectUrl, secretKey);
 
   try {
     if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {

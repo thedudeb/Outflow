@@ -51,6 +51,8 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 
 `src/cloud.js` refuses known `sb_secret_` values and legacy JWTs with the `service_role` claim. Supabase secret/service-role keys, Resend keys, Stripe secret keys, and Stripe webhook secrets belong only in server-function secrets.
 
+Edge Functions resolve current hosted `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS` collections first, singular local-development keys second, and legacy anon/service-role JWTs only as a migration fallback. Modern opaque secret keys are sent only through the `apikey` header; the shared runtime removes the invalid bearer-key header added by the pinned generic client. The readiness check validates the hosted JSON shape and legacy JWT roles without logging key values.
+
 When browser configuration is absent, the Supabase client is not downloaded or initialized. The account surface reports `Not configured`, and all Free-core functionality continues unchanged.
 
 ## Account Lifecycle

@@ -19,6 +19,7 @@ jobs:
         with:
           deno-version: 2.8.1
       - run: npm run test:function-types
+      - run: npm run test:function-runtime
 
   database:
     runs-on: ubuntu-latest

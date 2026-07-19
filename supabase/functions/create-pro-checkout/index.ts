@@ -1,5 +1,6 @@
 import Stripe from "npm:stripe@22.0.0";
 import { createClient } from "npm:@supabase/supabase-js@2.75.0";
+import { resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 const PRODUCT = "outflow_pro_lifetime";
 const OFFER_CACHE_MS = 5 * 60 * 1000;
@@ -80,8 +81,7 @@ Deno.serve(async (request) => {
   if (!['GET', 'POST'].includes(request.method)) return response({ error: "Method not allowed." }, 405, origin);
   if (Number(request.headers.get("content-length") || 0) > 4096) return response({ error: "Request is too large." }, 413, origin);
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
+  const { projectUrl, publishableKey } = resolveSupabaseRuntime();
   const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
   const priceId = Deno.env.get("STRIPE_PRO_PRICE_ID") || "";
   const appUrl = Deno.env.get("OUTFLOW_APP_URL") || "";

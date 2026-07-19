@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.75.0";
+import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 function allowedOrigin(request: Request) {
   const origin = request.headers.get("origin") || "";
@@ -37,9 +38,7 @@ Deno.serve(async (request) => {
   }
   if (request.method !== "POST") return response({ error: "Method not allowed." }, 405, origin);
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
-  const secretKey = Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const { projectUrl, publishableKey, secretKey } = resolveSupabaseRuntime();
   const authorization = request.headers.get("authorization") || "";
   if (!projectUrl || !publishableKey || !secretKey || !authorization.startsWith("Bearer ")) {
     return response({ error: "Account deletion is not configured." }, 503, origin);
@@ -52,9 +51,7 @@ Deno.serve(async (request) => {
   const { data: userData, error: userError } = await userClient.auth.getUser();
   if (userError || !userData.user) return response({ error: "Authentication is required." }, 401, origin);
 
-  const adminClient = createClient(projectUrl, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const adminClient = createAdminClient(projectUrl, secretKey);
   const { error: deleteError } = await adminClient.auth.admin.deleteUser(userData.user.id, false);
   if (deleteError) return response({ error: "Account deletion failed." }, 500, origin);
 

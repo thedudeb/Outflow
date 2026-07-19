@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.75.0";
+import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
 
 const PRODUCT = "Outflow";
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
@@ -72,9 +73,7 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return response({ error: "Method not allowed." }, 405, origin);
   if (Number(request.headers.get("content-length") || 0) > 4096) return response({ error: "Request is too large." }, 413, origin);
 
-  const projectUrl = Deno.env.get("SUPABASE_URL") || "";
-  const publishableKey = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
-  const secretKey = Deno.env.get("SUPABASE_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  const { projectUrl, publishableKey, secretKey } = resolveSupabaseRuntime();
   const resendKey = Deno.env.get("RESEND_API_KEY") || "";
   const inviteFrom = Deno.env.get("OUTFLOW_INVITE_FROM") || "";
   const appUrl = Deno.env.get("OUTFLOW_APP_URL") || "";
@@ -109,9 +108,7 @@ Deno.serve(async (request) => {
   });
   if (permissionError || !permission?.ledgerId) return response({ error: "A Pro ledger owner is required." }, 403, origin);
 
-  const adminClient = createClient(projectUrl, secretKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const adminClient = createAdminClient(projectUrl, secretKey);
   const { count: pendingCount, error: countError } = await adminClient
     .from("ledger_invitations")
     .select("id", { count: "exact", head: true })
