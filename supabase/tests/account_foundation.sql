@@ -498,8 +498,173 @@ begin
 end;
 $$;
 
+do $$
+declare
+  first_reservation jsonb;
+  replay_reservation jsonb;
+  reservation_index integer;
+begin
+  first_reservation := public.reserve_pro_checkout('abcdefab-cdef-4abc-8def-abcdefabcdef');
+  replay_reservation := public.reserve_pro_checkout('abcdefab-cdef-4abc-8def-abcdefabcdef');
+  if first_reservation ->> 'status' <> 'reserved' then raise exception 'checkout request was not reserved'; end if;
+  if replay_reservation ->> 'status' <> 'replay' then raise exception 'checkout request replay was not idempotent'; end if;
+  for reservation_index in 1..9 loop
+    perform public.reserve_pro_checkout(gen_random_uuid());
+  end loop;
+  begin
+    perform public.reserve_pro_checkout(gen_random_uuid());
+    raise exception 'checkout request limit was not enforced';
+  exception
+    when program_limit_exceeded then null;
+  end;
+end;
+$$;
+
+do $$
+begin
+  perform public.fulfill_stripe_pro_purchase(
+    'evt_clientblocked',
+    'checkout.session.completed',
+    'cs_test_clientblocked',
+    'pi_clientblocked',
+    auth.uid(),
+    false,
+    now()
+  );
+  raise exception 'authenticated client fulfilled its own entitlement';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+do $$
+begin
+  perform count(*) from public.stripe_purchases;
+  raise exception 'authenticated client read server-only purchase records';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
 reset role;
+set role service_role;
+
+select public.fulfill_stripe_pro_purchase(
+  'evt_checkoutpaidone',
+  'checkout.session.completed',
+  'cs_test_outflowone',
+  'pi_outflowone',
+  '11111111-1111-4111-8111-111111111111',
+  false,
+  now() - interval '90 minutes'
+) as first_stripe_purchase;
+
+select public.fulfill_stripe_pro_purchase(
+  'evt_checkoutpaidone',
+  'checkout.session.completed',
+  'cs_test_ignoredduplicate',
+  'pi_ignoredduplicate',
+  '22222222-2222-4222-8222-222222222222',
+  false,
+  now() - interval '89 minutes'
+) as duplicate_stripe_event;
+
+reset role;
+
+do $$
+begin
+  if (select count(*) from public.stripe_purchases where user_id = '11111111-1111-4111-8111-111111111111') <> 1 then
+    raise exception 'Stripe fulfillment did not create exactly one purchase';
+  end if;
+  if (select provider from public.entitlements where user_id = '11111111-1111-4111-8111-111111111111') <> 'stripe' then
+    raise exception 'Stripe fulfillment did not replace the server entitlement source';
+  end if;
+  if (select status from public.entitlements where user_id = '11111111-1111-4111-8111-111111111111') <> 'active' then
+    raise exception 'Stripe fulfillment did not activate Pro';
+  end if;
+  if exists (select 1 from public.stripe_purchases where checkout_session_id = 'cs_test_ignoredduplicate') then
+    raise exception 'duplicate Stripe event was processed twice';
+  end if;
+end;
+$$;
+
+set role service_role;
+
+select public.refund_stripe_pro_purchase(
+  'evt_refundone',
+  'pi_outflowone',
+  now() - interval '60 minutes'
+) as stripe_refund;
+
+select public.refund_stripe_pro_purchase(
+  'evt_refundone',
+  'pi_outflowone',
+  now() - interval '59 minutes'
+) as duplicate_stripe_refund;
+
+select public.fulfill_stripe_pro_purchase(
+  'evt_latepaymentone',
+  'checkout.session.async_payment_succeeded',
+  'cs_test_outflowone',
+  'pi_outflowone',
+  '11111111-1111-4111-8111-111111111111',
+  false,
+  now() - interval '90 minutes'
+) as late_payment_after_refund;
+
+reset role;
+
+do $$
+begin
+  if (select status from public.stripe_purchases where checkout_session_id = 'cs_test_outflowone') <> 'refunded' then
+    raise exception 'full refund did not update the purchase';
+  end if;
+  if (select status from public.entitlements where user_id = '11111111-1111-4111-8111-111111111111') <> 'refunded' then
+    raise exception 'full refund did not revoke the matching entitlement';
+  end if;
+  if (select result from public.billing_events where event_id = 'evt_latepaymentone') <> 'stale' then
+    raise exception 'out-of-order payment event was not marked stale';
+  end if;
+end;
+$$;
+
+set role service_role;
+
+select public.fulfill_stripe_pro_purchase(
+  'evt_checkoutpaidtwo',
+  'checkout.session.async_payment_succeeded',
+  'cs_test_outflowtwo',
+  'pi_outflowtwo',
+  '11111111-1111-4111-8111-111111111111',
+  false,
+  now() - interval '30 minutes'
+) as restored_stripe_purchase;
+
+reset role;
+
+do $$
+begin
+  if (select status from public.entitlements where user_id = '11111111-1111-4111-8111-111111111111') <> 'active' then
+    raise exception 'new purchase did not restore Pro after a refund';
+  end if;
+  if (select provider_reference from public.entitlements where user_id = '11111111-1111-4111-8111-111111111111') <> 'cs_test_outflowtwo' then
+    raise exception 'restored entitlement does not reference the latest purchase';
+  end if;
+  if (select count(*) from public.billing_events) <> 4 then
+    raise exception 'billing event idempotency ledger is incorrect';
+  end if;
+end;
+$$;
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
+
+set role service_role;
+select public.refund_stripe_pro_purchase(
+  'evt_refundafterdelete',
+  'pi_outflowtwo',
+  now()
+) as refund_after_account_deletion;
+reset role;
 
 do $$
 begin
@@ -507,5 +672,10 @@ begin
   if (select count(*) from public.subscriptions) <> 0 then raise exception 'account deletion did not cascade subscriptions'; end if;
   if (select count(*) from public.migration_receipts) <> 0 then raise exception 'account deletion did not cascade receipts'; end if;
   if (select count(*) from public.ledger_sync_operations) <> 0 then raise exception 'account deletion did not cascade sync operations'; end if;
+  if (select count(*) from public.stripe_purchases) <> 2 then raise exception 'account deletion removed de-identified provider purchase records'; end if;
+  if exists (select 1 from public.stripe_purchases where user_id is not null) then raise exception 'account deletion retained a purchase-to-user link'; end if;
+  if (select count(*) from public.billing_checkout_requests) <> 0 then raise exception 'account deletion did not remove checkout reservations'; end if;
+  if (select status from public.stripe_purchases where checkout_session_id = 'cs_test_outflowtwo') <> 'refunded' then raise exception 'post-deletion refund was not reconciled'; end if;
+  if (select count(*) from public.billing_events) <> 5 then raise exception 'account deletion removed provider event tombstones'; end if;
 end;
 $$;

@@ -17,6 +17,7 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 - Cloud writes use ledger revisions, idempotent operation IDs, transactional snapshots, and explicit conflict results.
 - Realtime observes active ledger, membership, and subscription changes and defers refresh while a local edit is open.
 - Account deletion runs in an authenticated Edge Function because deleting an Auth user requires a server-only secret.
+- Direct-web Pro uses an authenticated Checkout function and a separate signature-verified Stripe webhook. The browser cannot write billing entitlements; direct-web access is fulfilled only by the webhook.
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend data security](https://supabase.com/docs/guides/database/secure-data), [Row Level Security](https://supabase.com/features/row-level-security), [database functions](https://supabase.com/docs/guides/database/functions), [Realtime Postgres changes](https://supabase.com/docs/guides/realtime/postgres-changes), and [server-only user deletion](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
 
@@ -59,8 +60,10 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 5. The browser keeps its local workspace. A migration receipt proves only that a cloud copy exists; the user explicitly opens that cloud ledger before synchronization begins.
 6. A cloud ledger loads its authoritative revision and exposes a visible sync state. Pro editors write through `replace_ledger_snapshot`; stale writes are rejected without changing server data.
 7. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email.
-8. Signing out closes the cloud ledger and returns to the untouched local workspace.
-9. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, sync operations, and migration receipts while leaving browser-local data untouched.
+8. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
+9. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
+10. Signing out closes the cloud ledger and returns to the untouched local workspace.
+11. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
 
 ## Authorization Model
 
@@ -77,10 +80,11 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 Before enabling accounts in a public build:
 
 1. Provision Supabase and apply the migration under `supabase/migrations`.
-2. Deploy `supabase/functions/delete-account` and `supabase/functions/send-ledger-invite` with JWT verification enabled.
-3. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, and a verified invitation sender.
-4. Connect a verified Resend sending domain to Supabase Auth.
-5. Configure permitted Auth redirect URLs for production and local development.
-6. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
-7. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
-8. Provision Stripe only after account deletion and entitlement ownership tests pass.
+2. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
+3. Deploy `stripe-webhook` with the function-specific JWT exception in `supabase/config.toml`; verify every request with the raw body and Stripe signing secret.
+4. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, a verified invitation sender, and an active fixed one-time Stripe Price.
+5. Connect a verified Resend sending domain to Supabase Auth.
+6. Configure permitted Auth redirect URLs for production and local development.
+7. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
+8. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
+9. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.

@@ -5,11 +5,13 @@ import {
   acceptCloudLedgerInvitation,
   cloudConfigured,
   cloudConfigError,
+  createProCheckout,
   deleteCloudAccount,
   getCloud,
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
   readProEntitlement,
+  readProOffer,
   renameCloudLedger,
   removeCloudLedgerMember,
   replaceCloudLedgerSnapshot,
@@ -94,6 +96,23 @@ function readInviteToken() {
   if (!isTrackerHash(hash) || queryIndex < 0) return "";
   const token = new URLSearchParams(hash.slice(queryIndex + 1)).get("invite") || "";
   return /^[a-zA-Z0-9_-]{40,128}$/.test(token) ? token : "";
+}
+
+function readProReturn() {
+  const hash = window.location.hash;
+  const queryIndex = hash.indexOf("?");
+  if (!isTrackerHash(hash) || queryIndex < 0) return "";
+  const status = new URLSearchParams(hash.slice(queryIndex + 1)).get("pro") || "";
+  return ["success", "cancelled"].includes(status) ? status : "";
+}
+
+function clearTrackerHashParameter(name) {
+  const queryIndex = window.location.hash.indexOf("?");
+  if (queryIndex < 0) return;
+  const params = new URLSearchParams(window.location.hash.slice(queryIndex + 1));
+  params.delete(name);
+  const query = params.toString();
+  window.history.replaceState(null, "", query ? `#app?${query}` : "#app");
 }
 
 const seedSubscriptions = [
@@ -526,6 +545,13 @@ function money(value, currency = "USD") {
     currency: validCurrencies.has(currency) ? currency : "USD",
     minimumFractionDigits: 2,
   }).format(Number(value) || 0);
+}
+
+function stripeMoney(unitAmount, currency = "USD") {
+  const normalizedCurrency = /^[A-Z]{3}$/.test(currency) ? currency : "USD";
+  const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: normalizedCurrency });
+  const fractionDigits = formatter.resolvedOptions().maximumFractionDigits;
+  return formatter.format((Number(unitAmount) || 0) / (10 ** fractionDigits));
 }
 
 function totalsByCurrency(items, amountFor = (item) => item.amount) {
@@ -1269,6 +1295,10 @@ function Tracker({ onExit, pwa }) {
   const [accountSession, setAccountSession] = useState(null);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [proOffer, setProOffer] = useState(null);
+  const [proOfferLoading, setProOfferLoading] = useState(false);
+  const [proOfferError, setProOfferError] = useState("");
+  const [proReturn, setProReturn] = useState(readProReturn);
   const [cloudLedgers, setCloudLedgers] = useState([]);
   const [cloudLedgersLoading, setCloudLedgersLoading] = useState(false);
   const [cloudAccessRefresh, setCloudAccessRefresh] = useState(0);
@@ -1395,14 +1425,105 @@ function Tracker({ onExit, pwa }) {
   }, [accountSession?.user?.id]);
 
   useEffect(() => {
-    const syncInvitation = () => setPendingInviteToken(readInviteToken());
-    window.addEventListener("hashchange", syncInvitation);
-    return () => window.removeEventListener("hashchange", syncInvitation);
+    const syncTrackerParameters = () => {
+      setPendingInviteToken(readInviteToken());
+      setProReturn(readProReturn());
+    };
+    window.addEventListener("hashchange", syncTrackerParameters);
+    return () => window.removeEventListener("hashchange", syncTrackerParameters);
   }, []);
 
   useEffect(() => {
-    if (pendingInviteToken) setAccountOpen(true);
-  }, [pendingInviteToken]);
+    if (pendingInviteToken || proReturn) setAccountOpen(true);
+  }, [pendingInviteToken, proReturn]);
+
+  useEffect(() => {
+    if (proReturn !== "cancelled") return;
+    setAccountMessage("Pro checkout was cancelled. No product subscription or recurring charge was created.");
+    setAccountError("");
+    clearTrackerHashParameter("pro");
+    setProReturn("");
+  }, [proReturn]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!userId || proReturn !== "success") return undefined;
+    let active = true;
+    let timer;
+    let attempt = 0;
+
+    const confirmPurchase = async () => {
+      timer = undefined;
+      attempt += 1;
+      setAccountEntitlementLoading(true);
+      try {
+        const entitlement = await readProEntitlement(userId);
+        if (!active) return;
+        setAccountEntitlement(entitlement);
+        if (entitlement?.status === "active") {
+          setAccountMessage("Outflow Pro is active. Your one-time purchase is restored on this account.");
+          setAccountError("");
+          setCloudAccessRefresh((current) => current + 1);
+          clearTrackerHashParameter("pro");
+          setProReturn("");
+          return;
+        }
+        if (attempt < 6) {
+          timer = window.setTimeout(confirmPurchase, 1500);
+          return;
+        }
+        setAccountMessage("Payment confirmation is still pending. Use Restore access in a moment; the checkout redirect is not treated as proof of payment.");
+        clearTrackerHashParameter("pro");
+        setProReturn("");
+      } catch {
+        if (!active) return;
+        if (attempt < 6) {
+          timer = window.setTimeout(confirmPurchase, 1500);
+          return;
+        }
+        setAccountError("Outflow could not confirm the purchase yet. Use Restore access after the webhook finishes.");
+        clearTrackerHashParameter("pro");
+        setProReturn("");
+      } finally {
+        if (active && (!timer || attempt >= 6)) setAccountEntitlementLoading(false);
+      }
+    };
+
+    confirmPurchase();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [accountSession?.user?.id, proReturn]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!accountOpen || !userId || accountEntitlement?.status === "active") {
+      setProOffer(null);
+      setProOfferLoading(false);
+      setProOfferError("");
+      return undefined;
+    }
+    let active = true;
+    setProOfferLoading(true);
+    setProOfferError("");
+    readProOffer()
+      .then((offer) => {
+        if (active) setProOffer(offer);
+      })
+      .catch(() => {
+        if (active) {
+          setProOffer(null);
+          setProOfferError("One-time checkout is not available in this environment.");
+        }
+      })
+      .finally(() => {
+        if (active) setProOfferLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountOpen, accountSession?.user?.id, accountEntitlement?.status]);
 
   useEffect(() => {
     const userId = accountSession?.user?.id;
@@ -2082,6 +2203,46 @@ function Tracker({ onExit, pwa }) {
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not upload this workspace.");
     } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function startProCheckout() {
+    if (!accountSession || !proOffer || accountBusy || accountEntitlement?.status === "active") return;
+    setAccountBusy("checkout");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const checkoutUrl = await createProCheckout(crypto.randomUUID());
+      window.location.assign(checkoutUrl);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not open the hosted one-time checkout.");
+      setAccountBusy("");
+    }
+  }
+
+  async function restoreProAccess() {
+    const userId = accountSession?.user?.id;
+    if (!userId || accountBusy) return;
+    setAccountBusy("restore-pro");
+    setAccountEntitlementLoading(true);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const entitlement = await readProEntitlement(userId);
+      setAccountEntitlement(entitlement);
+      if (entitlement?.status === "active") {
+        setAccountMessage("Outflow Pro access restored from this account.");
+        setCloudAccessRefresh((current) => current + 1);
+      } else if (entitlement?.status === "refunded" || entitlement?.status === "revoked") {
+        setAccountMessage(`The previous Pro entitlement is ${entitlement.status}; no active access was restored.`);
+      } else {
+        setAccountMessage("No completed Outflow Pro purchase is attached to this account.");
+      }
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not restore Pro access.");
+    } finally {
+      setAccountEntitlementLoading(false);
       setAccountBusy("");
     }
   }
@@ -3279,7 +3440,9 @@ function Tracker({ onExit, pwa }) {
                   <div className="font-mono text-[9px] uppercase text-zinc-700 sm:col-span-2">
                     {pendingInviteToken
                       ? "Sign in with the address that received this private invitation. Local ledger data stays untouched."
-                      : "Creating an account does not upload or remove local ledger data."}
+                      : proReturn === "success"
+                        ? "Sign in to confirm and restore the account entitlement. The return URL does not grant Pro."
+                        : "Creating an account does not upload or remove local ledger data."}
                   </div>
                 </form>
               )}
@@ -3321,6 +3484,50 @@ function Tracker({ onExit, pwa }) {
                     >
                       {accountBusy === "signout" ? "Signing out..." : "Sign out"}
                     </button>
+                  </section>
+
+                  <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-xs font-black uppercase tracking-[0.12em] text-zinc-200">Outflow Pro</div>
+                        <span className={`border px-1.5 py-0.5 font-mono text-[9px] font-black uppercase ${
+                          accountEntitlement?.status === "active"
+                            ? "border-amber-700 text-amber-300"
+                            : "border-zinc-800 text-zinc-600"
+                        }`}>
+                          {accountEntitlementLoading ? "Checking" : accountEntitlement?.status === "active" ? "Lifetime active" : "One-time unlock"}
+                        </span>
+                      </div>
+                      <div className="mt-2 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                        {accountEntitlement?.status === "active"
+                          ? `Purchased ${accountEntitlement.purchased_at ? shortDate(accountEntitlement.purchased_at.slice(0, 10)) : "previously"} / ${accountEntitlement.provider || "account"} / no renewal`
+                          : proOfferLoading
+                            ? "Loading the hosted one-time offer"
+                            : proOffer
+                              ? `${proOffer.name} / ${stripeMoney(proOffer.unitAmount, proOffer.currency)} once / no product subscription`
+                              : proOfferError || "One-time checkout has not been configured"}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      {accountEntitlement?.status !== "active" && (
+                        <button
+                          type="button"
+                          onClick={startProCheckout}
+                          disabled={Boolean(accountBusy) || accountEntitlementLoading || proOfferLoading || !proOffer}
+                          className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                        >
+                          {accountBusy === "checkout" ? "Opening Stripe..." : "Review checkout"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={restoreProAccess}
+                        disabled={Boolean(accountBusy) || accountEntitlementLoading}
+                        className="h-10 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+                      >
+                        {accountBusy === "restore-pro" ? "Checking..." : "Restore access"}
+                      </button>
+                    </div>
                   </section>
 
                   <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -3561,7 +3768,13 @@ function Tracker({ onExit, pwa }) {
                   <div className="p-4">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Pro</span>
-                      <span className="font-mono text-xs text-amber-300">Paid once</span>
+                      <span className="font-mono text-xs text-amber-300">
+                        {accountEntitlement?.status === "active"
+                          ? "Lifetime active"
+                          : proOffer
+                            ? `${stripeMoney(proOffer.unitAmount, proOffer.currency)} once`
+                            : "Paid once"}
+                      </span>
                     </div>
                     <div className="mt-3 font-mono text-[10px] uppercase leading-5 text-zinc-600">
                       Cross-device sync / member invitations / email automation / connected calendars

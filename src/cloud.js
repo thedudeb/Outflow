@@ -90,6 +90,40 @@ export async function readProEntitlement(userId) {
   return data;
 }
 
+export async function readProOffer() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.functions.invoke("create-pro-checkout", { method: "GET" });
+  if (error) throw error;
+  const unitAmount = Number(data?.unitAmount);
+  const currency = typeof data?.currency === "string" ? data.currency.toUpperCase() : "";
+  if (!Number.isSafeInteger(unitAmount) || unitAmount <= 0 || !/^[A-Z]{3}$/.test(currency)) {
+    throw new Error("The Outflow Pro offer is unavailable.");
+  }
+  return {
+    currency,
+    name: typeof data?.name === "string" ? data.name.slice(0, 80) : "Outflow Pro",
+    unitAmount,
+  };
+}
+
+export async function createProCheckout(operationId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.functions.invoke("create-pro-checkout", {
+    method: "POST",
+    body: { operationId },
+  });
+  if (error) throw error;
+  try {
+    const url = new URL(data?.url);
+    if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+    return url.toString();
+  } catch {
+    throw new Error("Stripe did not return a valid hosted checkout URL.");
+  }
+}
+
 export async function readCloudLedgerAccess(userId) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");
