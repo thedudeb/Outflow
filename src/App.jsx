@@ -533,12 +533,26 @@ function parseLedgerBackup(value, permission = "default") {
   };
 }
 
-function addCycle(date, cycle) {
-  const next = new Date(date);
-  if (cycle === "weekly") next.setDate(next.getDate() + 7);
-  if (cycle === "monthly") next.setMonth(next.getMonth() + 1);
-  if (cycle === "yearly") next.setFullYear(next.getFullYear() + 1);
-  return next;
+function clampedCalendarDate(year, month, day) {
+  const target = new Date(year, month, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return target;
+}
+
+function addCycle(date, cycle, anchorDay = date.getDate(), anchorMonth = date.getMonth()) {
+  if (cycle === "weekly") {
+    const next = new Date(date);
+    next.setDate(next.getDate() + 7);
+    return next;
+  }
+  if (cycle === "monthly") {
+    return clampedCalendarDate(date.getFullYear(), date.getMonth() + 1, anchorDay);
+  }
+  if (cycle === "yearly") {
+    return clampedCalendarDate(date.getFullYear() + 1, anchorMonth, anchorDay);
+  }
+  return new Date(date);
 }
 
 function normalizeBillingDate(subscription, today = new Date()) {
@@ -547,10 +561,12 @@ function normalizeBillingDate(subscription, today = new Date()) {
 
   const startOfToday = parseDate(toDateInput(today));
   let nextDate = parseDate(subscription.nextBillingDate);
+  const anchorDay = nextDate.getDate();
+  const anchorMonth = nextDate.getMonth();
   let advances = 0;
 
   while (nextDate < startOfToday && advances < MAX_DATE_ADVANCES) {
-    nextDate = addCycle(nextDate, subscription.cycle);
+    nextDate = addCycle(nextDate, subscription.cycle, anchorDay, anchorMonth);
     advances += 1;
   }
 
@@ -644,10 +660,12 @@ function buildSchedule(subscriptions, startValue, endValue) {
 
       const events = [];
       let eventDate = parseDate(subscription.nextBillingDate);
+      const anchorDay = eventDate.getDate();
+      const anchorMonth = eventDate.getMonth();
       let eventCount = 0;
 
       while (eventDate < startDate && eventCount < MAX_DATE_ADVANCES) {
-        eventDate = addCycle(eventDate, subscription.cycle);
+        eventDate = addCycle(eventDate, subscription.cycle, anchorDay, anchorMonth);
         eventCount += 1;
       }
 
@@ -658,7 +676,7 @@ function buildSchedule(subscriptions, startValue, endValue) {
           eventId: `${subscription.id}-${date}`,
           date,
         });
-        eventDate = addCycle(eventDate, subscription.cycle);
+        eventDate = addCycle(eventDate, subscription.cycle, anchorDay, anchorMonth);
         eventCount += 1;
       }
 
