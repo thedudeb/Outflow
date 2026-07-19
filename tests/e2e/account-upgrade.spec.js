@@ -22,12 +22,12 @@ test("guest upgrade comparison keeps the local free core available", async ({ pa
   await expect(free).toContainText("$0");
   await expect(free.getByRole("listitem")).toHaveCount(5);
   await expect(free).toContainText("Local subscription tracking");
-  await expect(free).toContainText("CSV, backup, and calendar downloads");
+  await expect(free).toContainText("CSV, backup, and calendar exports");
 
   await expect(pro).toContainText("Paid once");
-  await expect(pro.getByRole("listitem")).toHaveCount(5);
-  await expect(pro).toContainText("Cross-device cloud sync");
-  await expect(pro).toContainText("Household and team invitations");
+  await expect(pro.getByRole("listitem")).toHaveCount(6);
+  await expect(pro).toContainText("Cross-device sync and shared access");
+  await expect(pro).toContainText("Reviewed CSV import");
 
   await expect(dialog).toContainText("Cloud service setup pending");
   await expect(dialog).toContainText("This build remains guest-only");
@@ -43,6 +43,38 @@ test("guest upgrade comparison keeps the local free core available", async ({ pa
 
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Still Local" })).toHaveCount(1);
+});
+
+test("guest Pro gates are contextual and leave the local workspace byte-exact", async ({ page }) => {
+  await openTracker(page);
+  const workspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+
+  await page.getByRole("button", { name: "Import CSV / Locked", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Lifetime Pro / CSV import");
+  await expect(dialog).toContainText("CSV export remains free for data ownership");
+  await expect(page.getByRole("dialog", { name: "Import subscriptions" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+
+  const currency = page.getByRole("combobox", { name: "Currency", exact: true });
+  await expect(currency.locator('option[value="USD"]')).not.toHaveAttribute("disabled", "");
+  await expect(currency.locator('option[value="CAD"]')).toHaveAttribute("disabled", "");
+  await page.getByRole("button", { name: /USD on Free.*Pro adds currencies/ }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Lifetime Pro / currencies");
+  await expect(dialog).toContainText("Existing currency data remains visible and editable");
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+
+  const reminderGroup = page.getByRole("group", { name: "Alert lead times" });
+  await expect(reminderGroup.getByRole("checkbox").nth(3)).toBeChecked();
+  await reminderGroup.getByRole("checkbox").nth(1).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toContainText("Lifetime Pro / alert timing");
+  await expect(dialog).toContainText("One device reminder per subscription remains free");
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(reminderGroup.getByRole("checkbox").nth(1)).not.toBeChecked();
+
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(workspace);
 });
 
 test("cancelled checkout return stays Free and never implies a recurring charge", async ({ page }) => {

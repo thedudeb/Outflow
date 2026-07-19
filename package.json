@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:account-prompts": "node --test tests/account-prompt.test.js",
+    "test:feature-access": "node --test tests/feature-access.test.js",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
     "test:account-service": "playwright test --config=playwright.account.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",

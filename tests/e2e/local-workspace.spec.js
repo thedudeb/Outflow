@@ -41,10 +41,9 @@ test("household ledgers isolate totals, records, attribution, and active state",
   await addSubscription(page, {
     name: "Utilities Bundle",
     amount: 120,
-    currency: "CAD",
     category: "Household",
   });
-  await expect(monthlyOutflowCard(page)).toContainText("CA$120.00");
+  await expect(monthlyOutflowCard(page)).toContainText("$120.00");
   const sharedCard = page.getByRole("article").filter({ hasText: "Utilities Bundle" });
   await expect(sharedCard).toHaveCount(1);
   await expect(sharedCard.getByText(/Updated by Local guest/)).toBeVisible();
@@ -52,7 +51,7 @@ test("household ledgers isolate totals, records, attribution, and active state",
   await page.reload();
   await expect(page.getByRole("button", { name: "Open Home ledger controls", exact: true })).toBeVisible();
   await expect(sharedCard).toHaveCount(1);
-  await expect(monthlyOutflowCard(page)).toContainText("CA$120.00");
+  await expect(monthlyOutflowCard(page)).toContainText("$120.00");
 
   dialog = await openLedgerControls(page, "Home");
   await expect(dialog.getByRole("button", { name: /Personal.*5 records.*local only/ })).toBeVisible();
@@ -66,7 +65,7 @@ test("household ledgers isolate totals, records, attribution, and active state",
 
   dialog = await openLedgerControls(page, "Personal");
   await dialog.getByRole("button", { name: /Home.*1 records.*local only/ }).click();
-  await expect(monthlyOutflowCard(page)).toContainText("CA$120.00");
+  await expect(monthlyOutflowCard(page)).toContainText("$120.00");
   await expect(page.getByRole("article")).toHaveCount(1);
 });
 

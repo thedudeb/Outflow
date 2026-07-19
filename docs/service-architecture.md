@@ -51,7 +51,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 
 `src/cloud.js` refuses known `sb_secret_` values and legacy JWTs with the `service_role` claim. Supabase secret/service-role keys, Resend keys, Stripe secret keys, and Stripe webhook secrets belong only in server-function secrets.
 
-When browser configuration is absent, the Supabase client is not downloaded or initialized. The account surface reports `Not configured`, and all local functionality continues unchanged.
+When browser configuration is absent, the Supabase client is not downloaded or initialized. The account surface reports `Not configured`, and all Free-core functionality continues unchanged.
 
 ## Account Lifecycle
 
@@ -66,10 +66,11 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 9. A Pro owner can invite an editor or viewer through the authenticated `send-ledger-invite` Edge Function. Acceptance is transactional and restricted to the invited account email. A stateful desktop/mobile browser contract verifies role changes, invitation creation and revocation, member removal after entitlement loss, and private recipient acceptance without local-data mutation.
 10. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro. Browser coverage proves a pending success remains Free and no client entitlement write occurs.
 11. Signing in on another browser restores Pro by reading the durable entitlement without creating checkout. A full Stripe refund revokes only its matching purchase.
-12. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim. The configured browser contract verifies persistence, local device-channel isolation, visible suspension after refund, and an always-available opt-out.
-13. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately. Browser coverage verifies one-time plaintext disclosure, token-free metadata reloads, suspension, and revocation without local-workspace mutation.
-14. Signing out closes the cloud ledger and returns to the untouched local workspace.
-15. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, hosted calendar feeds, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. The configured browser contract verifies two-step deletion from an active cloud ledger, local session removal, and exact local-workspace restoration. De-identified provider event and purchase identifiers remain for payment reconciliation.
+12. The same verified entitlement controls reviewed CSV import, new non-USD records, and multiple reminder lead times. Free gates are contextual and do not mutate local data; a downgrade retains existing advanced values but prevents expanding them.
+13. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim. The configured browser contract verifies persistence, local device-channel isolation, visible suspension after refund, and an always-available opt-out.
+14. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately. Browser coverage verifies one-time plaintext disclosure, token-free metadata reloads, suspension, and revocation without local-workspace mutation.
+15. Signing out closes the cloud ledger and returns to the untouched local workspace.
+16. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, hosted calendar feeds, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. The configured browser contract verifies two-step deletion from an active cloud ledger, local session removal, and exact local-workspace restoration. De-identified provider event and purchase identifiers remain for payment reconciliation.
 
 ## Authorization Model
 

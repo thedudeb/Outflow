@@ -1,6 +1,6 @@
 # Outflow CSV Format
 
-Outflow exports UTF-8 CSV with one subscription per row. The first row contains field names. Imports may map differently named source columns before confirmation, but using the canonical names below makes files reusable without manual mapping.
+Outflow exports UTF-8 CSV with one subscription per row. Export remains part of Free core for data ownership. Reviewed CSV import requires a verified lifetime Pro entitlement. Imports may map differently named source columns before confirmation, but using the canonical names below makes files reusable without manual mapping.
 
 | Field | Required | Format |
 | --- | --- | --- |
@@ -37,9 +37,10 @@ Outflow exports UTF-8 CSV with one subscription per row. The first row contains 
 
 ## Automated Portability Contract
 
-Run `npm run test:e2e` to verify the complete CSV workflow in desktop and mobile Chromium profiles. The browser suite proves:
+Run `npm run test:e2e` and `npm run test:account-service` to verify the complete CSV workflow in desktop and mobile Chromium profiles. The browser suites prove:
 
 - Common source-column aliases map into the canonical Outflow fields.
 - Preview counts and row states respond to mapping changes, validation failures, existing-ledger duplicates, and duplicates within the source file.
 - Only ready rows are imported after the explicit confirmation command, and confirmed subscriptions survive a reload.
 - Exports use every canonical column listed above, retain user-visible values and attribution, and escape spreadsheet-formula prefixes.
+- Free attempts open a contextual Pro explanation without parsing a file or changing local storage; a verified account entitlement unlocks the import dialog and its WCAG gate.

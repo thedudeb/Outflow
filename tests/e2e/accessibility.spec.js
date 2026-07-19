@@ -29,12 +29,6 @@ const dialogs = [
     title: "Alert controls",
     close: "Close alert controls",
   },
-  {
-    name: "CSV import",
-    trigger: "Import CSV",
-    title: "Import subscriptions",
-    close: "Close import",
-  },
 ];
 
 function violationSummary(violations) {

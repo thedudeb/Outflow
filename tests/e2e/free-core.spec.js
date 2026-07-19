@@ -43,7 +43,7 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
 
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Gym Membership");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("18.50");
-  await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("CAD");
+  await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("USD");
   await page.getByRole("button", { name: "Weekly", exact: true }).click();
   await page.getByLabel("Next billing date", { exact: true }).fill("2026-07-01");
   await page.getByRole("textbox", { name: "Category", exact: true }).fill("Wellness");
@@ -53,7 +53,7 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
 
   let card = page.getByRole("article").filter({ hasText: "Gym Membership" });
   await expect(card).toHaveCount(1);
-  await expect(card).toContainText("CA$18.50");
+  await expect(card).toContainText("$18.50");
   await expect(card).toContainText("Wellness");
   await expect(card).toContainText("health");
   await expect(card).toContainText("recurring");

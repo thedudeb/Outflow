@@ -52,8 +52,27 @@ async function setReminderLeadDays(page, selectedDays) {
   const group = page.getByRole("group", { name: "Alert lead times" });
   const checkboxes = group.getByRole("checkbox");
   for (let index = 0; index < leadDays.length; index += 1) {
-    await checkboxes.nth(index).setChecked(selectedDays.includes(leadDays[index]));
+    if (!selectedDays.includes(leadDays[index]) && await checkboxes.nth(index).isChecked()) {
+      await checkboxes.nth(index).uncheck();
+    }
   }
+  for (let index = 0; index < leadDays.length; index += 1) {
+    if (selectedDays.includes(leadDays[index]) && !await checkboxes.nth(index).isChecked()) {
+      await checkboxes.nth(index).check();
+    }
+  }
+}
+
+async function seedExistingLeadDays(page, name, reminderLeadDays) {
+  await page.evaluate(({ subscriptionName, days }) => {
+    const workspace = JSON.parse(localStorage.getItem("outflow:workspace"));
+    const active = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId);
+    const subscription = active.subscriptions.find((entry) => entry.name === subscriptionName);
+    subscription.reminderLeadDays = days;
+    localStorage.setItem("outflow:workspace", JSON.stringify(workspace));
+  }, { subscriptionName: name, days: reminderLeadDays });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
 }
 
 async function addSubscription(page, {
@@ -98,8 +117,9 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
     amount: 12.5,
     date: "2026-07-22",
     trialDate: "2026-07-26",
-    selectedLeadDays: [3, 7],
+    selectedLeadDays: [3],
   });
+  await seedExistingLeadDays(page, "Renewal Monitor", [3, 7]);
   await page.evaluate(() => localStorage.setItem("outflow:notified-alerts", "{broken"));
 
   const dialog = await openAlertControls(page);
@@ -183,8 +203,9 @@ test("multiple per-subscription lead times can be reduced to one or disabled", a
     amount: 21,
     date: "2026-07-22",
     trialDate: "2026-07-26",
-    selectedLeadDays: [3, 7],
+    selectedLeadDays: [3],
   });
+  await seedExistingLeadDays(page, "Reminder Matrix", [3, 7]);
 
   let alerts = panel(page, "Alerts");
   let card = page.getByRole("article").filter({ hasText: "Reminder Matrix" });

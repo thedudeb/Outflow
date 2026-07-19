@@ -24,7 +24,7 @@ Outflow Pro is a lifetime account entitlement purchased once through Stripe-host
 
 ## Upgrade Surface
 
-The Account / Pro dialog always shows a service-independent comparison before any purchase action. Free core covers local tracking, forecasts, the billing calendar, device and trial alerts, portable downloads, and mixed-currency records without conversion. Lifetime Pro covers cross-device synchronization, household and team invitations, member roles, durable email reminders, and hosted calendar subscriptions.
+The Account / Pro dialog always shows a service-independent comparison before any purchase action. Free core covers local tracking, forecasts, the billing calendar, one device or trial lead time per record, and CSV, backup, and calendar exports. Free users create new records in USD, while every existing currency and advanced reminder value remains visible and editable after an entitlement or account change. Lifetime Pro adds reviewed CSV import, new non-USD records, multiple lead times, cross-device synchronization, household and team access, durable email reminders, and hosted calendar subscriptions.
 
 An unconfigured build says **Paid once** instead of inventing a price and does not render sign-in, checkout, or restore actions. A verified one-time Stripe Price is shown only after sign-in, and only then can the user open hosted Checkout. Cancelled returns preserve the Free entitlement and explicitly state that no product subscription or recurring charge was created.
 
@@ -36,7 +36,10 @@ An unconfigured build says **Paid once** instead of inventing a price and does n
 - Checkout receives a fresh version-4 operation UUID and hands off to an HTTPS Stripe-hosted URL without writing or activating an entitlement in the browser.
 - A `pro=success` return with no server entitlement remains Free through all confirmation attempts, clears the transient URL parameter, and explains that fulfillment is pending.
 - **Restore access** adopts an active durable account entitlement without creating a checkout request and recovers it again after reload.
-- The signed-in offer and checkout state passes the automated WCAG A/AA ruleset in both viewport profiles.
+- Free guests receive contextual gates for CSV import, new non-USD records, and a second reminder lead time without changing the serialized local workspace.
+- A verified entitlement unlocks the reviewed CSV import, multiple currencies, and multiple lead times without creating another checkout request.
+- Entitlement loss keeps existing Pro-shaped records editable but prevents expanding their currency or reminder rules.
+- The signed-in offer, checkout, and Pro-only CSV state pass the automated WCAG A/AA ruleset in both viewport profiles.
 
 The PostgreSQL contract independently verifies checkout reservation idempotency and limits, service-only fulfillment, duplicate and out-of-order webhook handling, refund revocation, repurchase, and de-identified post-deletion reconciliation.
 
@@ -65,6 +68,6 @@ The shared function configuration also requires the Supabase server values, `OUT
 
 The schema, functions, browser flow, and isolated database tests are implemented. No Stripe or Supabase project is provisioned in the repository, so the default build cannot sell or restore Pro yet.
 
-The service-independent comparison, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`. The configured offer, checkout, pending-success, and restore states are enforced by `npm run test:account-service`.
+The service-independent comparison, contextual Free gates, guest behavior, and cancelled-return behavior are enforced at desktop and mobile widths by `npm run test:e2e`. The configured feature unlocks, entitlement-loss data preservation, offer, checkout, pending-success, and restore states are enforced by `npm run test:account-service`. Pure policy invariants are covered by `npm run test:feature-access`.
 
 References: [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment), [Stripe webhook signatures](https://docs.stripe.com/webhooks/signature), [Stripe refund events](https://docs.stripe.com/refunds), and [Supabase signed webhook functions](https://supabase.com/docs/guides/functions/examples/stripe-webhooks).

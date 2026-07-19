@@ -1,6 +1,6 @@
 # Outflow Free-Core Contract
 
-Outflow's free local tracker must remain fully usable without an account. Subscription records are stored in the active browser ledger and support weekly, monthly, and yearly schedules, metadata, reminders, pausing, and local persistence.
+Outflow's free local tracker must remain fully usable without an account. Subscription records are stored in the active browser ledger and support weekly, monthly, and yearly schedules, metadata, one device or trial reminder lead time, pausing, and local persistence. New Free records use USD; records that already contain another supported currency or multiple reminder rules are retained rather than downgraded or rewritten.
 
 ## Recurrence Rules
 
@@ -18,9 +18,10 @@ These rules prevent native JavaScript date overflow from skipping short months. 
 `npm run test:e2e` verifies the free-core behavior in desktop and mobile Chromium. The contract proves that:
 
 - A user can add, edit, pause, resume, and delete a subscription without creating an account.
-- Amount, currency, cycle, next date, category, tags, and trial date remain visible and survive reloads.
+- Amount, existing currency, cycle, next date, category, tags, trial date, and existing reminder rules remain visible and survive reloads.
 - An overdue weekly date rolls forward to the first current or future occurrence.
 - A trial reminder appears at its configured lead time, is suppressed while paused, and returns after resuming.
 - Weekly, monthly, and yearly schedules produce exact event counts and totals at 30, 60, and 90 days.
 - Monthly month-end and yearly leap-day dates clamp to valid calendar dates instead of skipping a billing period.
 - CRUD, recurrence, reminder, forecast, and persistence behavior is equivalent at desktop and mobile viewports.
+- Contextual Pro gates never mutate the serialized local workspace, while CSV, backup, and calendar exports remain available for data ownership.

@@ -39,6 +39,13 @@ import {
   recordAccountNudgeActivity,
   sanitizeAccountNudge,
 } from "./accountPrompt";
+import {
+  canToggleReminderLeadDay,
+  canUseCsvImport,
+  canUseCurrency,
+  hasLifetimePro,
+  restrictedDraftFeature,
+} from "./featureAccess";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -1985,6 +1992,10 @@ function Tracker({ onExit, pwa }) {
   const workspaceRecordCount = workspace.ledgers.reduce((total, entry) => total + entry.subscriptions.length, 0);
   const sharedWorkspaceCount = workspace.ledgers.filter((entry) => entry.ledger.kind !== "personal").length;
   const cloudUploadRequiresPro = sharedWorkspaceCount > 0 && accountEntitlement?.status !== "active";
+  const hasProAccess = hasLifetimePro(accountEntitlement);
+  const editingSubscription = editingId
+    ? subscriptions.find((subscription) => subscription.id === editingId) || null
+    : null;
   const managedCloudLedger = cloudLedgers.find((ledger) => ledger.id === managedCloudLedgerId) || null;
   const canInviteToManagedLedger = Boolean(
     managedCloudLedger?.currentRole === "owner"
@@ -2012,12 +2023,27 @@ function Tracker({ onExit, pwa }) {
       title: "This install still uses browser-local data.",
       detail: "An optional account adds identity for recovery and multi-device access only when you choose to upload.",
     },
+    "pro-csv": {
+      code: "Lifetime Pro / CSV import",
+      title: "Review imported records with Pro.",
+      detail: "CSV export remains free for data ownership. The mapped preview and confirmed bulk import require a verified lifetime entitlement.",
+    },
+    "pro-currency": {
+      code: "Lifetime Pro / currencies",
+      title: "Track new non-USD charges with Pro.",
+      detail: "Free ledgers use USD for new records. Existing currency data remains visible and editable after account or entitlement changes.",
+    },
+    "pro-reminders": {
+      code: "Lifetime Pro / alert timing",
+      title: "Add multiple lead times with Pro.",
+      detail: "One device reminder per subscription remains free. Existing advanced rules are retained and can always be reduced or disabled.",
+    },
   }[accountPromptContext || accountEntryContext] || null;
 
   useEffect(() => {
     if (accountSession) {
       setAccountPromptContext("");
-      setAccountEntryContext("");
+      setAccountEntryContext((current) => current.startsWith("pro-") ? current : "");
       return;
     }
     if (!cloudConfigured || accountLoading || accountOpen || accountPromptContext) return;
@@ -2082,15 +2108,25 @@ function Tracker({ onExit, pwa }) {
 
   function openAccountControls(context = "") {
     const resolvedContext = context || accountPromptContext;
-    if (resolvedContext) {
+    if (["activity", "backup", "shared", "install"].includes(resolvedContext)) {
       setAccountNudge((current) => advanceAccountNudge(current, ACCOUNT_NUDGE_OPEN_DAYS));
       setAccountPromptContext("");
     }
+    if (resolvedContext.startsWith("pro-")) setAccountPromptContext("");
     setAccountEntryContext(resolvedContext);
     setAccountOpen(true);
   }
 
   function toggleReminderLeadDay(days) {
+    if (!canToggleReminderLeadDay({
+      days,
+      selectedLeadDays: form.reminderLeadDays,
+      entitlement: accountEntitlement,
+      originalLeadDays: editingSubscription?.reminderLeadDays,
+    })) {
+      openAccountControls("pro-reminders");
+      return;
+    }
     setForm((current) => ({
       ...current,
       reminderLeadDays: current.reminderLeadDays.includes(days)
@@ -2108,6 +2144,17 @@ function Tracker({ onExit, pwa }) {
     event.preventDefault();
     if (cloudLedgerWriteDisabled) return;
     const existingSubscription = editingId ? subscriptions.find((subscription) => subscription.id === editingId) : null;
+    const restrictedFeature = restrictedDraftFeature({
+      currency: form.currency,
+      reminderLeadDays: form.reminderLeadDays,
+      entitlement: accountEntitlement,
+      originalCurrency: existingSubscription?.currency,
+      originalLeadDays: existingSubscription?.reminderLeadDays,
+    });
+    if (restrictedFeature) {
+      openAccountControls(restrictedFeature === "currency" ? "pro-currency" : "pro-reminders");
+      return;
+    }
     const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
 
     const payload = sanitizeSubscription({
@@ -2956,7 +3003,21 @@ function Tracker({ onExit, pwa }) {
     setCsvLoading(false);
   }
 
+  function openCsvImport() {
+    if (!canUseCsvImport(accountEntitlement)) {
+      openAccountControls("pro-csv");
+      return;
+    }
+    if (!cloudLedgerWriteDisabled) setImportOpen(true);
+  }
+
   function selectCsvFile(event) {
+    if (!canUseCsvImport(accountEntitlement)) {
+      event.target.value = "";
+      closeCsvImport();
+      openAccountControls("pro-csv");
+      return;
+    }
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -3002,6 +3063,11 @@ function Tracker({ onExit, pwa }) {
   }
 
   function confirmCsvImport() {
+    if (!canUseCsvImport(accountEntitlement)) {
+      closeCsvImport();
+      openAccountControls("pro-csv");
+      return;
+    }
     const imported = importableCandidates
       .slice(0, availableImportSlots)
       .map((candidate) => normalizeBillingDate(candidate.subscription));
@@ -3099,10 +3165,28 @@ function Tracker({ onExit, pwa }) {
                   onChange={(event) => updateField("currency", event.target.value)}
                   className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
                 >
-                  {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                  {currencies.map((currency) => (
+                    <option
+                      key={currency}
+                      value={currency}
+                      disabled={!canUseCurrency(currency, accountEntitlement, editingSubscription?.currency)}
+                    >
+                      {currency}{!canUseCurrency(currency, accountEntitlement, editingSubscription?.currency) ? " / Pro" : ""}
+                    </option>
+                  ))}
                 </select>
               </Field>
             </div>
+
+            {!hasProAccess && (
+              <button
+                type="button"
+                onClick={() => openAccountControls("pro-currency")}
+                className="text-left font-mono text-[9px] uppercase leading-4 text-zinc-600 hover:text-amber-300"
+              >
+                USD on Free / existing currencies retained / Pro adds currencies
+              </button>
+            )}
 
             <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
               Cycle
@@ -3169,13 +3253,29 @@ function Tracker({ onExit, pwa }) {
             <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
               <div className="flex items-center justify-between gap-3">
                 <span>Alert lead times</span>
-                <span className={form.reminderLeadDays.length ? "font-mono text-amber-300" : "font-mono text-zinc-700"}>
-                  {form.reminderLeadDays.length ? `${form.reminderLeadDays.length} armed` : "Off"}
-                </span>
+                {hasProAccess ? (
+                  <span className={`font-mono ${form.reminderLeadDays.length ? "text-amber-300" : "text-zinc-700"}`}>
+                    {form.reminderLeadDays.length ? `${form.reminderLeadDays.length} armed` : "Off"} / Pro
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openAccountControls("pro-reminders")}
+                    className={`font-mono hover:text-amber-200 ${form.reminderLeadDays.length ? "text-amber-300" : "text-zinc-700"}`}
+                  >
+                    {form.reminderLeadDays.length ? `${form.reminderLeadDays.length} armed` : "Off"} / Free 1
+                  </button>
+                )}
               </div>
               <div className="grid grid-cols-3 border border-zinc-700 bg-zinc-950" role="group" aria-label="Alert lead times">
                 {reminderLeadOptions.map((option, index) => {
                   const selected = form.reminderLeadDays.includes(option.value);
+                  const available = canToggleReminderLeadDay({
+                    days: option.value,
+                    selectedLeadDays: form.reminderLeadDays,
+                    entitlement: accountEntitlement,
+                    originalLeadDays: editingSubscription?.reminderLeadDays,
+                  });
                   return (
                     <label
                       key={option.value}
@@ -3183,13 +3283,18 @@ function Tracker({ onExit, pwa }) {
                       className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 border-zinc-800 font-mono text-[10px] tracking-normal ${
                         index < 3 ? "border-b" : ""
                       } ${index % 3 < 2 ? "border-r" : ""} ${
-                        selected ? "bg-zinc-800 text-amber-300" : "bg-black text-zinc-500 hover:text-zinc-200"
+                        selected
+                          ? "bg-zinc-800 text-amber-300"
+                          : available
+                            ? "bg-black text-zinc-500 hover:text-zinc-200"
+                            : "bg-black text-zinc-700 hover:text-amber-300"
                       }`}
                     >
                       <input
                         type="checkbox"
                         checked={selected}
                         onChange={() => toggleReminderLeadDay(option.value)}
+                        aria-label={`${option.label}${available ? "" : " / requires Pro while another lead time is selected"}`}
                         className="h-3 w-3 accent-amber-400"
                       />
                       {option.value === 0 ? "DAY" : `${option.value}D`}
@@ -3353,11 +3458,11 @@ function Tracker({ onExit, pwa }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setImportOpen(true)}
-                  disabled={cloudLedgerWriteDisabled}
+                  onClick={openCsvImport}
+                  disabled={hasProAccess && cloudLedgerWriteDisabled}
                   className="border border-zinc-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-900 disabled:text-zinc-700"
                 >
-                  Import CSV
+                  Import CSV / {hasProAccess ? "Pro" : "Locked"}
                 </button>
                 <button
                   type="button"
@@ -3883,12 +3988,16 @@ function Tracker({ onExit, pwa }) {
                 </div>
               </div>
 
-              {accountEntryContext && accountPromptDetails && !accountSession && (
+              {accountEntryContext && accountPromptDetails && (
                 <section className="border-b border-amber-900 bg-amber-950/15 px-4 py-3">
                   <div className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">{accountPromptDetails.code}</div>
                   <div className="mt-1 text-sm font-black uppercase tracking-[0.06em] text-zinc-100">{accountPromptDetails.title}</div>
                   <div className="mt-1 text-xs leading-5 text-zinc-500">{accountPromptDetails.detail}</div>
-                  <div className="mt-2 font-mono text-[9px] uppercase text-zinc-700">No upload occurs until Create cloud copy is selected after sign-in.</div>
+                  <div className="mt-2 font-mono text-[9px] uppercase text-zinc-700">
+                    {accountEntryContext.startsWith("pro-")
+                      ? "Access changes only after the account entitlement is verified. Existing local records are not rewritten."
+                      : "No upload occurs until Create cloud copy is selected after sign-in."}
+                  </div>
                 </section>
               )}
 
@@ -3906,9 +4015,9 @@ function Tracker({ onExit, pwa }) {
                     <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
                       <li className="py-1.5">Local subscription tracking</li>
                       <li className="py-1.5">Forecasts and billing calendar</li>
-                      <li className="py-1.5">Device alerts and trial reminders</li>
-                      <li className="py-1.5">CSV, backup, and calendar downloads</li>
-                      <li className="py-1.5">Multiple currencies / no conversion</li>
+                      <li className="py-1.5">One device or trial reminder per record</li>
+                      <li className="py-1.5">CSV, backup, and calendar exports</li>
+                      <li className="py-1.5">USD entry / existing data retained</li>
                     </ul>
                   </div>
                   <div className="p-4">
@@ -3923,9 +4032,10 @@ function Tracker({ onExit, pwa }) {
                       </span>
                     </div>
                     <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
-                      <li className="py-1.5">Cross-device cloud sync</li>
-                      <li className="py-1.5">Household and team invitations</li>
-                      <li className="py-1.5">Owner, editor, and viewer access</li>
+                      <li className="py-1.5">Cross-device sync and shared access</li>
+                      <li className="py-1.5">Reviewed CSV import</li>
+                      <li className="py-1.5">Multiple currencies / no conversion</li>
+                      <li className="py-1.5">Multiple reminder lead times</li>
                       <li className="py-1.5">Durable email reminders</li>
                       <li className="py-1.5">Hosted calendar subscription</li>
                     </ul>
@@ -3941,7 +4051,7 @@ function Tracker({ onExit, pwa }) {
                 <section className="border-b border-zinc-800 px-4 py-5">
                   <div className="text-sm font-black uppercase tracking-[0.08em] text-zinc-200">Cloud service setup pending</div>
                   <div className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
-                    This build remains guest-only. All {workspaceRecordCount} records stay in this browser and every local workflow remains available without an account.
+                    This build remains guest-only. All {workspaceRecordCount} records stay in this browser and every Free-core workflow remains available without an account.
                   </div>
                 </section>
               )}

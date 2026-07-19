@@ -1,10 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import Papa from "papaparse";
 import { expect, test } from "@playwright/test";
 import { openTracker } from "./helpers";
 
-const importFixture = fileURLToPath(new URL("../fixtures/subscriptions-import.csv", import.meta.url));
 const canonicalColumns = [
   "name",
   "amount",
@@ -21,39 +19,6 @@ const canonicalColumns = [
   "updatedBy",
   "updatedAt",
 ];
-
-test("CSV import previews mapping, validation, duplicates, and persists confirmation", async ({ page }) => {
-  await openTracker(page);
-  await page.getByRole("button", { name: "Import CSV", exact: true }).click();
-
-  const dialog = page.getByRole("dialog", { name: "Import subscriptions" });
-  await dialog.locator('input[type="file"]').setInputFiles(importFixture);
-
-  await expect(dialog.getByText(/Ready\s+2/)).toBeVisible();
-  await expect(dialog.getByText(/Duplicate\s+2/)).toBeVisible();
-  await expect(dialog.getByText(/Invalid\s+1/)).toBeVisible();
-  await expect(dialog.getByText("Invalid amount", { exact: true })).toBeVisible();
-
-  const nameMapping = dialog.locator("label").filter({ hasText: "Name *" }).locator("select");
-  await expect(nameMapping).toHaveValue("Service");
-  await nameMapping.selectOption("");
-  await expect(dialog.getByText(/Ready\s+0/)).toBeVisible();
-  await expect(dialog.getByText(/Invalid\s+5/)).toBeVisible();
-  await nameMapping.selectOption("Service");
-
-  const confirm = dialog.getByRole("button", { name: "Import 2 subscriptions", exact: true });
-  await expect(confirm).toBeEnabled();
-  await confirm.click();
-  await expect(dialog).toBeHidden();
-
-  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
-  await expect(page.getByRole("article").filter({ hasText: "Figma" })).toHaveCount(1);
-  await page.reload();
-  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
-  const figmaCard = page.getByRole("article").filter({ hasText: "Figma" });
-  await expect(figmaCard).toHaveCount(1);
-  await expect(figmaCard.getByText("Trial ends Tue, Aug 18", { exact: true })).toBeVisible();
-});
 
 test("CSV export is canonical, complete, and spreadsheet-formula safe", async ({ page }) => {
   await openTracker(page);

@@ -1,8 +1,10 @@
+import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { openTracker } from "../e2e/helpers";
 
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
+const importFixture = fileURLToPath(new URL("../fixtures/subscriptions-import.csv", import.meta.url));
 const authStorageKey = "sb-127-auth-token";
 const editorUserId = "22222222-2222-4222-8222-222222222222";
 const invitedUserId = "33333333-3333-4333-8333-333333333333";
@@ -825,6 +827,93 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
     token: secondToken,
   });
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminders", async ({ page }) => {
+  const cloudState = createCloudState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+
+  const importButton = page.getByRole("button", { name: "Import CSV / Pro", exact: true });
+  await expect(importButton).toBeVisible();
+  await importButton.click();
+  const dialog = page.getByRole("dialog", { name: "Import subscriptions" });
+  await dialog.locator('input[type="file"]').setInputFiles(importFixture);
+
+  await expect(dialog.getByText(/Ready\s+2/)).toBeVisible();
+  await expect(dialog.getByText(/Duplicate\s+2/)).toBeVisible();
+  await expect(dialog.getByText(/Invalid\s+1/)).toBeVisible();
+  await expect(dialog.getByText("Invalid amount", { exact: true })).toBeVisible();
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+
+  const nameMapping = dialog.locator("label").filter({ hasText: "Name *" }).locator("select");
+  await expect(nameMapping).toHaveValue("Service");
+  await nameMapping.selectOption("");
+  await expect(dialog.getByText(/Ready\s+0/)).toBeVisible();
+  await expect(dialog.getByText(/Invalid\s+5/)).toBeVisible();
+  await nameMapping.selectOption("Service");
+  await dialog.getByRole("button", { name: "Import 2 subscriptions", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
+
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Pro Matrix");
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("18.50");
+  await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("CAD");
+  const leadTimes = page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox");
+  await leadTimes.nth(2).check();
+  await page.getByRole("button", { name: "Add subscription", exact: true }).click();
+
+  const card = page.getByRole("article").filter({ hasText: "Pro Matrix" });
+  await expect(card).toContainText("CA$18.50");
+  await expect(card).toContainText("Alert 7d / 3d");
+  expect(cloudState.checkoutRequests).toHaveLength(0);
+
+  await page.reload();
+  await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
+  await expect(page.getByRole("article").filter({ hasText: "Pro Matrix" })).toContainText("CA$18.50");
+});
+
+test("entitlement loss preserves existing currency and reminder data without allowing expansion", async ({ page }) => {
+  const cloudState = createCloudState({ entitlementStatus: "refunded", canSync: false });
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  await page.evaluate(() => {
+    const workspace = JSON.parse(localStorage.getItem("outflow:workspace"));
+    const active = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId);
+    const netflix = active.subscriptions.find((subscription) => subscription.name === "Netflix");
+    netflix.currency = "CAD";
+    netflix.reminderLeadDays = [7, 1];
+    localStorage.setItem("outflow:workspace", JSON.stringify(workspace));
+  });
+  await page.reload();
+
+  let card = page.getByRole("article").filter({ hasText: "Netflix" });
+  await expect(card).toContainText("CA$15.49");
+  await expect(card).toContainText("Alert 7d / 1d");
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  const currency = page.getByRole("combobox", { name: "Currency", exact: true });
+  await expect(currency.locator('option[value="CAD"]')).not.toHaveAttribute("disabled", "");
+  await expect(currency.locator('option[value="EUR"]')).toHaveAttribute("disabled", "");
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("16");
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Account / Pro" })).toHaveCount(0);
+  card = page.getByRole("article").filter({ hasText: "Netflix" });
+  await expect(card).toContainText("CA$16.00");
+  await expect(card).toContainText("Alert 7d / 1d");
+
+  await card.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox").nth(2).click();
+  const accountDialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(accountDialog).toContainText("Lifetime Pro / alert timing");
+  await expect(accountDialog).toContainText("Existing advanced rules are retained");
+  await accountDialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox").nth(2)).not.toBeChecked();
 });
 
 test("verified one-time offer hands off to hosted checkout without granting Pro", async ({ page }) => {
