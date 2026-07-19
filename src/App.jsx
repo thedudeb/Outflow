@@ -286,7 +286,160 @@ function Field({ label, children }) {
   );
 }
 
-function App() {
+function LandingPage({ onOpen }) {
+  const previewSubscriptions = seedSubscriptions.filter((subscription) => !subscription.paused).slice(0, 4);
+
+  return (
+    <main className="min-h-screen bg-[#08090a] text-zinc-100">
+      <nav className="relative z-20 border-b border-zinc-800 bg-black">
+        <div className="mx-auto flex h-14 max-w-[1560px] items-center justify-between px-4 sm:px-6">
+          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="text-lg font-black uppercase text-white">
+            Outflow
+          </button>
+          <div className="flex items-center gap-5 text-xs font-bold uppercase text-zinc-500">
+            <a href="#system" className="hidden hover:text-zinc-100 sm:block">System</a>
+            <a href="#principles" className="hidden hover:text-zinc-100 sm:block">Principles</a>
+            <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-3 py-2 text-black hover:bg-amber-300">
+              Open tracker
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <section className="relative min-h-[620px] overflow-hidden border-b border-zinc-800 sm:min-h-[calc(100svh-96px)] sm:max-h-[780px]">
+        <div className="absolute inset-0 grid content-center gap-5 px-3 opacity-25 sm:px-8" aria-hidden="true">
+          {previewSubscriptions.map((subscription) => (
+            <div key={subscription.id} className="grid min-h-28 gap-3 sm:grid-cols-[220px_minmax(0,1fr)_280px]">
+              <div className="border border-violet-400 bg-violet-950 p-4">
+                <div className="font-mono text-2xl font-black text-violet-100">{money(subscription.amount)}</div>
+                <div className="mt-6 text-xs uppercase text-violet-300">{initials(subscription.name)} / {subscription.cycle}</div>
+              </div>
+              <div className="hidden border border-red-400 bg-red-950 p-4 sm:block">
+                <div className="text-xl font-black uppercase text-red-50">{subscription.name}</div>
+                <div className="mt-8 text-xs uppercase text-red-300">{subscription.category}</div>
+              </div>
+              <div className="hidden border border-emerald-400 bg-emerald-950 p-4 sm:block">
+                <div className="font-mono text-2xl font-black text-emerald-100">{money(subscription.amount)}</div>
+                <div className="mt-6 text-xs uppercase text-emerald-300">{shortDate(subscription.nextBillingDate)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="absolute inset-0 bg-black/75" aria-hidden="true" />
+
+        <div className="relative z-10 mx-auto flex min-h-[620px] max-w-[1560px] items-center px-4 py-8 sm:min-h-[calc(100svh-96px)] sm:max-h-[780px] sm:px-6 sm:py-10">
+          <div className="max-w-3xl">
+            <div className="mb-4 flex items-center gap-3 font-mono text-xs uppercase text-amber-300">
+              <span className="h-3 w-1 bg-amber-400" />
+              Personal recurring debit monitor
+            </div>
+            <h1 className="text-6xl font-black uppercase leading-[0.9] text-white sm:text-8xl lg:text-9xl">Outflow</h1>
+            <p className="mt-6 max-w-2xl text-lg leading-7 text-zinc-300 sm:text-xl">
+              Know what is leaving your account, how much it costs, and exactly when it lands. One clear ledger for every recurring charge.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-5 py-3 text-sm font-black uppercase text-black hover:bg-amber-300">
+                Open your ledger
+              </button>
+              <a href="#system" className="border border-zinc-600 bg-black/70 px-5 py-3 text-sm font-black uppercase text-zinc-200 hover:border-zinc-300">
+                See the system
+              </a>
+            </div>
+            <div className="mt-9 flex flex-wrap gap-x-8 gap-y-3 border-t border-zinc-700 pt-4 font-mono text-xs uppercase text-zinc-500">
+              <span><b className="text-zinc-200">Local</b> by default</span>
+              <span><b className="text-zinc-200">Zero</b> accounts</span>
+              <span><b className="text-zinc-200">One</b> honest number</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-b border-zinc-800 bg-amber-400 text-black">
+        <div className="mx-auto grid max-w-[1560px] gap-1 px-4 py-4 font-mono text-xs uppercase sm:grid-cols-3 sm:px-6">
+          <div><span className="font-black">01</span> See the monthly total</div>
+          <div><span className="font-black">02</span> Read the next withdrawal</div>
+          <div><span className="font-black">03</span> Control every subscription</div>
+        </div>
+      </section>
+
+      <section id="system" className="border-b border-zinc-800 bg-[#0c0d0e] py-16 sm:py-24">
+        <div className="mx-auto max-w-[1560px] px-4 sm:px-6">
+          <div className="grid gap-8 lg:grid-cols-[320px_minmax(0,1fr)]">
+            <div>
+              <div className="font-mono text-xs uppercase text-amber-300">The system</div>
+              <h2 className="mt-3 text-3xl font-black uppercase leading-tight text-white sm:text-4xl">Every charge, read left to right.</h2>
+              <p className="mt-4 leading-7 text-zinc-500">Identity. Subscription. Withdrawal. Nothing hidden behind menus or charts.</p>
+            </div>
+
+            <div className="grid gap-3">
+              {previewSubscriptions.slice(0, 3).map((subscription) => (
+                <div key={subscription.id} className="grid gap-2 border border-zinc-800 bg-black p-2 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3">
+                  <div className="border border-violet-500/60 bg-violet-950/50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="grid h-10 w-10 place-items-center border border-violet-300 bg-black font-mono font-black text-violet-100">{initials(subscription.name)}</span>
+                      <span className="font-mono text-xl font-black text-violet-100">{money(subscription.amount)}</span>
+                    </div>
+                  </div>
+                  <div className="border border-red-500/60 bg-red-950/50 p-4">
+                    <div className="text-lg font-black uppercase text-red-50">{subscription.name}</div>
+                    <div className="mt-2 text-xs uppercase text-red-300/70">{subscription.category} / {subscription.cycle}</div>
+                  </div>
+                  <div className="border border-emerald-500/60 bg-emerald-950/50 p-4">
+                    <div className="font-mono text-xl font-black text-emerald-100">{money(subscription.amount)}</div>
+                    <div className="mt-2 text-xs uppercase text-emerald-300/70">Pulls {shortDate(subscription.nextBillingDate)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="principles" className="border-b border-zinc-800 bg-black py-16 sm:py-24">
+        <div className="mx-auto max-w-[1560px] px-4 sm:px-6">
+          <div className="max-w-2xl">
+            <div className="font-mono text-xs uppercase text-amber-300">Built for clarity</div>
+            <h2 className="mt-3 text-3xl font-black uppercase text-white sm:text-4xl">A finance tool that stays out of your way.</h2>
+          </div>
+          <div className="mt-10 grid border border-zinc-800 md:grid-cols-3">
+            {[
+              ["Local first", "Your subscription data stays in this browser. No account or external service required."],
+              ["Date aware", "Weekly, monthly, and yearly charges roll forward automatically when billing dates pass."],
+              ["Action ready", "Pause, edit, or remove a subscription directly from the ledger whenever plans change."],
+            ].map(([title, copy], index) => (
+              <div key={title} className="border-b border-zinc-800 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
+                <div className="font-mono text-xs text-zinc-600">0{index + 1}</div>
+                <h3 className="mt-8 text-lg font-black uppercase text-zinc-100">{title}</h3>
+                <p className="mt-3 text-sm leading-6 text-zinc-500">{copy}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-amber-400 py-14 text-black">
+        <div className="mx-auto flex max-w-[1560px] flex-col items-start justify-between gap-6 px-4 sm:flex-row sm:items-center sm:px-6">
+          <div>
+            <div className="font-mono text-xs uppercase">Your money is already moving.</div>
+            <h2 className="mt-2 text-3xl font-black uppercase">See where it goes.</h2>
+          </div>
+          <button type="button" onClick={onOpen} className="border border-black bg-black px-5 py-3 text-sm font-black uppercase text-white hover:bg-zinc-900">
+            Open Outflow
+          </button>
+        </div>
+      </section>
+
+      <footer className="border-t border-zinc-800 bg-black">
+        <div className="mx-auto flex max-w-[1560px] items-center justify-between px-4 py-5 text-xs uppercase text-zinc-600 sm:px-6">
+          <span className="font-black text-zinc-300">Outflow</span>
+          <span>Recurring debit monitor</span>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+function Tracker({ onExit }) {
   const [subscriptions, setSubscriptions] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -402,8 +555,17 @@ function App() {
                 <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-300">cashflow console</div>
                 <h1 className="mt-1 text-3xl font-black uppercase leading-none tracking-[0.14em] text-zinc-50">Outflow</h1>
               </div>
-              <div className="border border-amber-500 bg-amber-400 px-2 py-1 font-mono text-[10px] font-black text-black">
-                LIVE
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="border border-zinc-700 bg-black px-2 py-1 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-zinc-100"
+                >
+                  Home
+                </button>
+                <div className="border border-amber-500 bg-amber-400 px-2 py-1 font-mono text-[10px] font-black text-black">
+                  LIVE
+                </div>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-3 border border-zinc-800 font-mono text-[11px]">
@@ -728,6 +890,34 @@ function App() {
       </div>
     </main>
   );
+}
+
+function App() {
+  const [trackerOpen, setTrackerOpen] = useState(() => window.location.hash === "#app");
+
+  useEffect(() => {
+    const syncView = () => setTrackerOpen(window.location.hash === "#app");
+    window.addEventListener("popstate", syncView);
+    window.addEventListener("hashchange", syncView);
+    return () => {
+      window.removeEventListener("popstate", syncView);
+      window.removeEventListener("hashchange", syncView);
+    };
+  }, []);
+
+  function navigateToTracker() {
+    window.history.pushState(null, "", "#app");
+    setTrackerOpen(true);
+    window.scrollTo(0, 0);
+  }
+
+  function navigateHome() {
+    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
+    setTrackerOpen(false);
+    window.scrollTo(0, 0);
+  }
+
+  return trackerOpen ? <Tracker onExit={navigateHome} /> : <LandingPage onOpen={navigateToTracker} />;
 }
 
 export default App;
