@@ -831,6 +831,213 @@ begin
 end;
 $$;
 
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+do $$
+begin
+  begin
+    perform count(*) from public.calendar_feeds;
+    raise exception 'browser read calendar feed token hashes';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.resolve_calendar_feed(repeat('a', 64));
+    raise exception 'browser resolved a private calendar token';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+create temporary table first_calendar_feed as
+select public.create_or_rotate_calendar_feed('personal-ledger', false) as payload;
+
+do $$
+declare
+  metadata jsonb;
+  plain_token text := (select payload ->> 'token' from first_calendar_feed);
+begin
+  metadata := public.get_calendar_feed('personal-ledger');
+  if char_length(plain_token) <> 43 or plain_token !~ '^[a-zA-Z0-9_-]{43}$' then
+    raise exception 'calendar feed token has invalid entropy encoding';
+  end if;
+  if metadata ->> 'ledgerName' <> 'Personal' or metadata ? 'token' then
+    raise exception 'calendar feed metadata is invalid or exposed its token';
+  end if;
+end;
+$$;
+
+reset role;
+do $$
+declare
+  plain_token text := (select payload ->> 'token' from first_calendar_feed);
+  stored_hash text;
+begin
+  select token_hash into stored_hash from public.calendar_feeds where ledger_id = 'personal-ledger';
+  if stored_hash = plain_token or stored_hash <> encode(extensions.digest(convert_to(plain_token, 'UTF8'), 'sha256'), 'hex') then
+    raise exception 'calendar feed secret was not stored as a one-way hash';
+  end if;
+end;
+$$;
+
+create temporary table calendar_hash_state (name text primary key, hash text not null);
+insert into calendar_hash_state (name, hash)
+select 'first', encode(extensions.digest(convert_to(payload ->> 'token', 'UTF8'), 'sha256'), 'hex')
+from first_calendar_feed;
+grant select on calendar_hash_state to service_role;
+
+set role service_role;
+create temporary table first_calendar_resolution as
+select public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'first')) as payload;
+
+do $$
+begin
+  if (select payload -> 'ledger' ->> 'name' from first_calendar_resolution) <> 'Personal' then
+    raise exception 'calendar feed did not resolve its ledger';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements((select payload -> 'subscriptions' from first_calendar_resolution)) as subscription
+    where (subscription ->> 'paused')::boolean
+  ) then raise exception 'calendar feed included paused schedules without opt-in'; end if;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.set_calendar_feed_options('personal-ledger', true) as included_paused_calendar_feed;
+
+reset role;
+set role service_role;
+do $$
+declare
+  resolved jsonb;
+begin
+  resolved := public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'first'));
+  if not exists (
+    select 1 from jsonb_array_elements(resolved -> 'subscriptions') as subscription
+    where (subscription ->> 'paused')::boolean
+  ) then raise exception 'calendar feed paused-schedule opt-in was ignored'; end if;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+create temporary table rotated_calendar_feed as
+select public.create_or_rotate_calendar_feed('personal-ledger', true) as payload;
+
+reset role;
+insert into calendar_hash_state (name, hash)
+select 'rotated', encode(extensions.digest(convert_to(payload ->> 'token', 'UTF8'), 'sha256'), 'hex')
+from rotated_calendar_feed;
+set role service_role;
+do $$
+declare
+  old_hash text := (select hash from calendar_hash_state where name = 'first');
+  new_hash text := (select hash from calendar_hash_state where name = 'rotated');
+begin
+  if old_hash = new_hash then raise exception 'calendar feed rotation reused its secret'; end if;
+  if public.resolve_calendar_feed(old_hash) is not null then raise exception 'calendar feed rotation left the old URL active'; end if;
+  if public.resolve_calendar_feed(new_hash) is null then raise exception 'rotated calendar feed URL did not resolve'; end if;
+end;
+$$;
+
+reset role;
+update public.entitlements
+set status = 'revoked', revoked_at = now()
+where user_id = '11111111-1111-4111-8111-111111111111';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+begin
+  perform public.create_or_rotate_calendar_feed('personal-ledger', false);
+  raise exception 'account without active Pro rotated a calendar feed';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+reset role;
+set role service_role;
+do $$
+begin
+  if public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'rotated')) is not null then
+    raise exception 'calendar feed survived Pro revocation';
+  end if;
+end;
+$$;
+
+reset role;
+update public.entitlements
+set status = 'active', revoked_at = null
+where user_id = '11111111-1111-4111-8111-111111111111';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.revoke_calendar_feed('personal-ledger') as revoked_calendar_feed;
+
+reset role;
+set role service_role;
+do $$
+begin
+  if public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'rotated')) is not null then
+    raise exception 'revoked calendar feed URL still resolved';
+  end if;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.create_or_rotate_calendar_feed('personal-ledger', false) as final_calendar_feed;
+
+reset role;
+insert into public.ledger_members (ledger_id, user_id, role)
+values ('team-ledger', '22222222-2222-4222-8222-222222222222', 'viewer');
+insert into public.entitlements (user_id, product, status, provider, provider_reference, purchased_at)
+values (
+  '22222222-2222-4222-8222-222222222222', 'outflow_pro_lifetime', 'active', 'manual', 'test-calendar-member', now()
+);
+set role authenticated;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+create temporary table member_calendar_feed as
+select public.create_or_rotate_calendar_feed('team-ledger', false) as payload;
+
+reset role;
+insert into calendar_hash_state (name, hash)
+select 'member', encode(extensions.digest(convert_to(payload ->> 'token', 'UTF8'), 'sha256'), 'hex')
+from member_calendar_feed;
+set role service_role;
+do $$
+begin
+  if public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'member')) is null then
+    raise exception 'Pro shared-ledger member calendar feed did not resolve';
+  end if;
+end;
+$$;
+
+reset role;
+delete from public.ledger_members
+where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222';
+insert into public.ledger_members (ledger_id, user_id, role)
+values ('team-ledger', '22222222-2222-4222-8222-222222222222', 'viewer');
+set role service_role;
+do $$
+begin
+  if public.resolve_calendar_feed((select hash from calendar_hash_state where name = 'member')) is not null then
+    raise exception 'membership removal left a calendar URL able to reactivate';
+  end if;
+end;
+$$;
+
+reset role;
+delete from public.ledger_members
+where ledger_id = 'team-ledger' and user_id = '22222222-2222-4222-8222-222222222222';
+delete from public.entitlements
+where user_id = '22222222-2222-4222-8222-222222222222' and provider_reference = 'test-calendar-member';
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;
@@ -852,6 +1059,7 @@ begin
   if (select count(*) from public.billing_checkout_requests) <> 0 then raise exception 'account deletion did not remove checkout reservations'; end if;
   if (select count(*) from public.notification_preferences) <> 1 then raise exception 'account deletion did not remove its notification preference'; end if;
   if (select count(*) from public.notification_deliveries) <> 0 then raise exception 'account deletion did not remove email delivery history'; end if;
+  if (select count(*) from public.calendar_feeds) <> 0 then raise exception 'account deletion did not remove hosted calendar feeds'; end if;
   if (select status from public.stripe_purchases where checkout_session_id = 'cs_test_outflowtwo') <> 'refunded' then raise exception 'post-deletion refund was not reconciled'; end if;
   if (select count(*) from public.billing_events) <> 5 then raise exception 'account deletion removed provider event tombstones'; end if;
 end;

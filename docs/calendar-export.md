@@ -28,7 +28,7 @@ The event UID is stable for the life of a subscription and includes both its sub
 
 Editing a subscription, changing its pause state, or automatically advancing a passed billing date increments its revision and updates its modification timestamp. A new export therefore carries the same UID with a higher sequence and the changed start date. Calendar clients that apply standard UID/sequence update semantics can update the existing recurring event rather than create a second identity.
 
-A downloaded file is not a hosted subscription feed. Users must import the newer file for changes to reach an external calendar, and individual calendar products may handle repeated file imports differently. Automatic publishing and provider-side updates require the future account service.
+A downloaded file is not a hosted subscription feed. Users must import the newer file for changes to reach an external calendar, and individual calendar products may handle repeated file imports differently. Pro accounts can instead publish a revocable account-backed feed for a synchronized cloud ledger; see [Hosted Calendar Feeds](hosted-calendar-feeds.md).
 
 ## Paused Schedules
 

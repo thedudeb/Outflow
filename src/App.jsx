@@ -8,8 +8,11 @@ import {
   createProCheckout,
   deleteCloudAccount,
   getCloud,
+  hostedCalendarFeedUrl,
+  publishHostedCalendarFeed,
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
+  readHostedCalendarFeed,
   readNotificationPreferences,
   readProEntitlement,
   readProOffer,
@@ -18,6 +21,8 @@ import {
   replaceCloudLedgerSnapshot,
   requestAccountLink,
   revokeCloudLedgerInvitation,
+  revokeHostedCalendarFeed,
+  saveHostedCalendarFeedOptions,
   sendCloudLedgerInvitation,
   saveNotificationPreferences,
   subscribeToCloudLedger,
@@ -1361,6 +1366,13 @@ function Tracker({ onExit, pwa }) {
   const [calendarExportOpen, setCalendarExportOpen] = useState(false);
   const [includePausedCalendar, setIncludePausedCalendar] = useState(false);
   const [calendarExportError, setCalendarExportError] = useState("");
+  const [calendarFeed, setCalendarFeed] = useState(null);
+  const [calendarFeedLoading, setCalendarFeedLoading] = useState(false);
+  const [calendarFeedBusy, setCalendarFeedBusy] = useState("");
+  const [calendarFeedIncludePaused, setCalendarFeedIncludePaused] = useState(false);
+  const [calendarFeedSecretUrl, setCalendarFeedSecretUrl] = useState("");
+  const [calendarFeedMessage, setCalendarFeedMessage] = useState("");
+  const [calendarFeedRevokeArmed, setCalendarFeedRevokeArmed] = useState(false);
   const [calendarCursor, setCalendarCursor] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -1695,14 +1707,52 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     if (!calendarExportOpen) return undefined;
     const closeOnEscape = (event) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !calendarFeedBusy) {
         setCalendarExportOpen(false);
         setCalendarExportError("");
+        setCalendarFeedSecretUrl("");
+        setCalendarFeedMessage("");
+        setCalendarFeedRevokeArmed(false);
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [calendarExportOpen]);
+  }, [calendarExportOpen, calendarFeedBusy]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!calendarExportOpen || !usingCloudLedger || !userId) {
+      setCalendarFeed(null);
+      setCalendarFeedLoading(false);
+      setCalendarFeedIncludePaused(false);
+      setCalendarFeedSecretUrl("");
+      setCalendarFeedMessage("");
+      setCalendarFeedRevokeArmed(false);
+      return undefined;
+    }
+    let active = true;
+    setCalendarFeed(null);
+    setCalendarFeedSecretUrl("");
+    setCalendarFeedMessage("");
+    setCalendarFeedRevokeArmed(false);
+    setCalendarFeedLoading(true);
+    setCalendarExportError("");
+    readHostedCalendarFeed(ledgerMeta.id)
+      .then((feed) => {
+        if (!active) return;
+        setCalendarFeed(feed || null);
+        setCalendarFeedIncludePaused(feed?.includePaused === true);
+      })
+      .catch((error) => {
+        if (active) setCalendarExportError(error instanceof Error ? error.message : "Outflow could not read the hosted calendar feed.");
+      })
+      .finally(() => {
+        if (active) setCalendarFeedLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [calendarExportOpen, usingCloudLedger, accountSession?.user?.id, ledgerMeta.id]);
 
   const activeSubscriptions = useMemo(
     () => subscriptions.filter((subscription) => !subscription.paused),
@@ -1944,8 +1994,12 @@ function Tracker({ onExit, pwa }) {
   }
 
   function closeCalendarExport() {
+    if (calendarFeedBusy) return;
     setCalendarExportOpen(false);
     setCalendarExportError("");
+    setCalendarFeedSecretUrl("");
+    setCalendarFeedMessage("");
+    setCalendarFeedRevokeArmed(false);
   }
 
   function exportCalendarFile() {
@@ -1966,6 +2020,74 @@ function Tracker({ onExit, pwa }) {
       closeCalendarExport();
     } catch (error) {
       setCalendarExportError(error instanceof Error ? error.message : "Outflow could not generate this calendar.");
+    }
+  }
+
+  async function publishCalendarFeed() {
+    if (!usingCloudLedger || accountEntitlement?.status !== "active" || calendarFeedBusy) return;
+    setCalendarFeedBusy("publish");
+    setCalendarExportError("");
+    setCalendarFeedMessage("");
+    setCalendarFeedRevokeArmed(false);
+    try {
+      const feed = await publishHostedCalendarFeed(ledgerMeta.id, calendarFeedIncludePaused);
+      setCalendarFeed(feed);
+      setCalendarFeedSecretUrl(hostedCalendarFeedUrl(feed.token));
+      setCalendarFeedMessage(calendarFeed ? "Feed URL rotated. The previous URL is inactive." : "Hosted feed published. This secret URL is shown once.");
+    } catch (error) {
+      setCalendarExportError(error instanceof Error ? error.message : "Outflow could not publish the calendar feed.");
+    } finally {
+      setCalendarFeedBusy("");
+    }
+  }
+
+  async function saveCalendarFeedScope() {
+    if (!calendarFeed || accountEntitlement?.status !== "active" || calendarFeedBusy) return;
+    setCalendarFeedBusy("scope");
+    setCalendarExportError("");
+    setCalendarFeedMessage("");
+    try {
+      const feed = await saveHostedCalendarFeedOptions(ledgerMeta.id, calendarFeedIncludePaused);
+      setCalendarFeed(feed);
+      setCalendarFeedMessage("Hosted feed scope updated.");
+    } catch (error) {
+      setCalendarExportError(error instanceof Error ? error.message : "Outflow could not update the calendar feed.");
+    } finally {
+      setCalendarFeedBusy("");
+    }
+  }
+
+  async function copyCalendarFeedUrl() {
+    if (!calendarFeedSecretUrl) return;
+    try {
+      await navigator.clipboard.writeText(calendarFeedSecretUrl);
+      setCalendarFeedMessage("Secret feed URL copied.");
+      setCalendarExportError("");
+    } catch {
+      setCalendarExportError("The feed URL could not be copied. Select it manually.");
+    }
+  }
+
+  async function revokeCalendarFeed() {
+    if (!calendarFeed || calendarFeedBusy) return;
+    if (!calendarFeedRevokeArmed) {
+      setCalendarFeedRevokeArmed(true);
+      setCalendarFeedMessage("Confirm revocation to disable the hosted URL.");
+      return;
+    }
+    setCalendarFeedBusy("revoke");
+    setCalendarExportError("");
+    try {
+      await revokeHostedCalendarFeed(ledgerMeta.id);
+      setCalendarFeed(null);
+      setCalendarFeedSecretUrl("");
+      setCalendarFeedIncludePaused(false);
+      setCalendarFeedRevokeArmed(false);
+      setCalendarFeedMessage("Hosted calendar feed revoked.");
+    } catch (error) {
+      setCalendarExportError(error instanceof Error ? error.message : "Outflow could not revoke the calendar feed.");
+    } finally {
+      setCalendarFeedBusy("");
     }
   }
 
@@ -3958,7 +4080,8 @@ function Tracker({ onExit, pwa }) {
                 onClick={closeCalendarExport}
                 aria-label="Close calendar export"
                 autoFocus
-                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+                disabled={Boolean(calendarFeedBusy)}
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
               >
                 Close
               </button>
@@ -3980,9 +4103,116 @@ function Tracker({ onExit, pwa }) {
                 </div>
               </div>
 
+              {usingCloudLedger && accountSession && (
+                <section className="border-b border-zinc-800">
+                  <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Hosted subscription / Pro</span>
+                    <span className={`font-mono text-[9px] font-black uppercase ${
+                      calendarFeed && accountEntitlement?.status === "active" ? "text-emerald-300" : "text-zinc-600"
+                    }`}>
+                      {calendarFeedLoading
+                        ? "Checking"
+                        : calendarFeed
+                          ? accountEntitlement?.status === "active" ? "Published" : "Suspended"
+                          : "Not published"}
+                    </span>
+                  </header>
+
+                  {!calendarFeedLoading && (
+                    <>
+                      <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-900 px-4 py-3">
+                        <span className="min-w-0">
+                          <span className="block text-xs font-black uppercase tracking-[0.1em] text-zinc-200">Feed paused schedules</span>
+                          <span className="mt-1 block font-mono text-[9px] uppercase text-zinc-600">
+                            Scope / {calendarFeedIncludePaused ? "included" : "excluded"}
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={calendarFeedIncludePaused}
+                          disabled={accountEntitlement?.status !== "active" || Boolean(calendarFeedBusy)}
+                          onChange={(event) => setCalendarFeedIncludePaused(event.target.checked)}
+                          className="h-5 w-5 accent-amber-400 disabled:opacity-30"
+                        />
+                      </label>
+
+                      {calendarFeedSecretUrl && (
+                        <div className="grid gap-2 border-b border-amber-900/60 bg-amber-950/10 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                          <Field label="Secret feed URL / shown once">
+                            <input
+                              readOnly
+                              value={calendarFeedSecretUrl}
+                              aria-label="Secret hosted calendar feed URL"
+                              onFocus={(event) => event.currentTarget.select()}
+                              className="h-10 min-w-0 border border-amber-800 bg-black px-3 font-mono text-[10px] text-amber-200 outline-none focus:border-amber-400"
+                            />
+                          </Field>
+                          <button
+                            type="button"
+                            onClick={copyCalendarFeedUrl}
+                            className="h-10 border border-amber-500 px-4 font-mono text-[10px] font-black uppercase text-amber-200 hover:bg-amber-950/30"
+                          >
+                            Copy URL
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 font-mono text-[9px] uppercase leading-4 text-zinc-600">
+                          {calendarFeed
+                            ? `Rotated ${calendarFeed.rotatedAt ? shortDate(calendarFeed.rotatedAt.slice(0, 10)) : "previously"} / ${calendarFeed.lastAccessAt ? `last fetched ${shortDate(calendarFeed.lastAccessAt.slice(0, 10))}` : "not fetched"}`
+                            : accountEntitlement?.status === "active"
+                              ? "Private recurring feed / live cloud revisions"
+                              : "One-time Pro unlock required"}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {calendarFeed && accountEntitlement?.status === "active" && (
+                            <button
+                              type="button"
+                              onClick={saveCalendarFeedScope}
+                              disabled={Boolean(calendarFeedBusy) || calendarFeed.includePaused === calendarFeedIncludePaused}
+                              className="h-9 border border-zinc-700 px-3 font-mono text-[9px] font-black uppercase text-zinc-300 hover:border-zinc-400 disabled:opacity-30"
+                            >
+                              {calendarFeedBusy === "scope" ? "Saving..." : "Save scope"}
+                            </button>
+                          )}
+                          {accountEntitlement?.status === "active" && (
+                            <button
+                              type="button"
+                              onClick={publishCalendarFeed}
+                              disabled={Boolean(calendarFeedBusy)}
+                              className="h-9 border border-cyan-700 px-3 font-mono text-[9px] font-black uppercase text-cyan-300 hover:border-cyan-400 disabled:opacity-40"
+                            >
+                              {calendarFeedBusy === "publish" ? "Publishing..." : calendarFeed ? "Rotate URL" : "Publish feed"}
+                            </button>
+                          )}
+                          {calendarFeed && (
+                            <button
+                              type="button"
+                              onClick={revokeCalendarFeed}
+                              disabled={Boolean(calendarFeedBusy)}
+                              className={`h-9 border px-3 font-mono text-[9px] font-black uppercase disabled:opacity-40 ${
+                                calendarFeedRevokeArmed
+                                  ? "border-red-500 bg-red-950/30 text-red-100"
+                                  : "border-red-950 text-red-400 hover:border-red-700"
+                              }`}
+                            >
+                              {calendarFeedBusy === "revoke" ? "Revoking..." : calendarFeedRevokeArmed ? "Confirm revoke" : "Revoke"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {calendarFeedMessage && (
+                        <div className="border-t border-emerald-950 bg-emerald-950/10 px-4 py-2 text-xs text-emerald-200">{calendarFeedMessage}</div>
+                      )}
+                    </>
+                  )}
+                </section>
+              )}
+
               <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-800 px-4 py-3 hover:bg-zinc-950">
                 <span className="min-w-0">
-                  <span className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Paused schedules</span>
+                  <span className="block text-xs font-black uppercase tracking-[0.14em] text-zinc-200">Download paused schedules</span>
                   <span className="mt-1 block font-mono text-[10px] uppercase text-zinc-600">
                     Scope / {includePausedCalendar ? "included" : "excluded"}
                   </span>

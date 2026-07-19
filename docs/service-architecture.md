@@ -18,6 +18,7 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 - Realtime observes active ledger, membership, and subscription changes and defers refresh while a local edit is open.
 - Account deletion runs in an authenticated Edge Function because deleting an Auth user requires a server-only secret.
 - Direct-web Pro uses an authenticated Checkout function and a separate signature-verified Stripe webhook. The browser cannot write billing entitlements; direct-web access is fulfilled only by the webhook.
+- Hosted calendars use database-generated one-time secrets, hashed token storage, service-only resolution, and live Pro/membership checks on every fetch. The public feed endpoint never trusts a ledger identifier from the URL.
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend data security](https://supabase.com/docs/guides/database/secure-data), [Row Level Security](https://supabase.com/features/row-level-security), [database functions](https://supabase.com/docs/guides/database/functions), [Realtime Postgres changes](https://supabase.com/docs/guides/realtime/postgres-changes), and [server-only user deletion](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
 
@@ -63,8 +64,9 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 8. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro.
 9. Signing in on another browser restores Pro by reading the durable entitlement. A full Stripe refund revokes only its matching purchase.
 10. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim.
-11. Signing out closes the cloud ledger and returns to the untouched local workspace.
-12. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
+11. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately.
+12. Signing out closes the cloud ledger and returns to the untouched local workspace.
+13. Account deletion invokes the authenticated `delete-account` Edge Function. Deleting the Auth user cascades through profiles, memberships, owned ledgers, subscriptions, invitations, entitlements, notification preferences and delivery history, hosted calendar feeds, checkout reservations, purchase-to-user links, sync operations, and migration receipts while leaving browser-local data untouched. De-identified provider event and purchase identifiers remain for payment reconciliation.
 
 ## Authorization Model
 
@@ -82,7 +84,7 @@ Before enabling accounts in a public build:
 
 1. Provision Supabase and apply the migration under `supabase/migrations`.
 2. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
-3. Deploy `stripe-webhook` and `send-due-reminders` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature and the reminder worker verifies its dedicated cron bearer secret.
+3. Deploy `stripe-webhook`, `send-due-reminders`, and `calendar-feed` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature, the reminder worker verifies its dedicated cron bearer secret, and the calendar endpoint verifies a database-generated private URL token.
 4. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, and an active fixed one-time Stripe Price.
 5. Connect a verified Resend sending domain to Supabase Auth.
 6. Configure permitted Auth redirect URLs for production and local development.
@@ -90,3 +92,4 @@ Before enabling accounts in a public build:
 8. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
 9. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
 10. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).
+11. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.

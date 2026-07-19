@@ -120,6 +120,56 @@ export async function saveNotificationPreferences({ emailEnabled, pausedSchedule
   return data;
 }
 
+export async function readHostedCalendarFeed(ledgerId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("get_calendar_feed", { target_ledger_id: ledgerId });
+  if (error) throw error;
+  return data;
+}
+
+export async function publishHostedCalendarFeed(ledgerId, includePaused) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("create_or_rotate_calendar_feed", {
+    target_ledger_id: ledgerId,
+    requested_include_paused: includePaused === true,
+  });
+  if (error) throw error;
+  if (!data || typeof data.token !== "string" || !/^[a-zA-Z0-9_-]{43}$/.test(data.token)) {
+    throw new Error("Outflow did not return a valid calendar feed secret.");
+  }
+  return data;
+}
+
+export async function saveHostedCalendarFeedOptions(ledgerId, includePaused) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("set_calendar_feed_options", {
+    target_ledger_id: ledgerId,
+    requested_include_paused: includePaused === true,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function revokeHostedCalendarFeed(ledgerId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("revoke_calendar_feed", { target_ledger_id: ledgerId });
+  if (error) throw error;
+  return data === true;
+}
+
+export function hostedCalendarFeedUrl(token) {
+  if (!cloudConfigured || !/^[a-zA-Z0-9_-]{43}$/.test(token || "")) {
+    throw new Error("Calendar feed URL is unavailable.");
+  }
+  const url = new URL(`${projectUrl.replace(/\/$/, "")}/functions/v1/calendar-feed`);
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
 export async function readProOffer() {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");
