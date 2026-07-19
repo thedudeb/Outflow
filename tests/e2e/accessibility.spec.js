@@ -47,6 +47,34 @@ async function expectNoWcagViolations(page, scope = null) {
   expect(violations.length, violationSummary(violations)).toBe(0);
 }
 
+async function expectDocumentToReflow(page) {
+  const dimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+  }));
+
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+}
+
+async function expectDialogInsideViewport(page, dialog) {
+  const geometry = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      bottom: bounds.bottom,
+      left: bounds.left,
+      right: bounds.right,
+      top: bounds.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+}
+
 test("landing page meets the automated WCAG A and AA gate", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
@@ -71,3 +99,56 @@ for (const dialogCase of dialogs) {
     await expect(dialog).toBeHidden();
   });
 }
+
+test("landing page and tracker reflow without document overflow at 320 CSS pixels", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
+  await expectDocumentToReflow(page);
+
+  await page.getByRole("button", { name: "Open tracker", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expectDocumentToReflow(page);
+});
+
+test("core dialogs remain contained and reflow at 320 CSS pixels", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await openTracker(page);
+
+  for (const dialogCase of dialogs) {
+    await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: dialogCase.title });
+    await expect(dialog).toBeVisible();
+    await expectDialogInsideViewport(page, dialog);
+    await expectDocumentToReflow(page);
+
+    await page.getByRole("button", { name: dialogCase.close, exact: true }).click();
+    await expect(dialog).toBeHidden();
+  }
+});
+
+test("keyboard focus stays visible when forced colors are active", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
+  await page.keyboard.press("Tab");
+
+  const focusIndicator = await page.evaluate(() => {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) return null;
+    const style = window.getComputedStyle(activeElement);
+    return {
+      forcedColorsActive: window.matchMedia("(forced-colors: active)").matches,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+      tagName: activeElement.tagName,
+    };
+  });
+
+  expect(focusIndicator).not.toBeNull();
+  expect(focusIndicator.forcedColorsActive).toBe(true);
+  expect(["A", "BUTTON", "INPUT", "SELECT", "TEXTAREA"]).toContain(focusIndicator.tagName);
+  expect(focusIndicator.outlineStyle).not.toBe("none");
+  expect(focusIndicator.outlineWidth).toBeGreaterThanOrEqual(2);
+});

@@ -36,7 +36,9 @@ Outflow exposes changes that do not move focus through shared live-region semant
 
 Run `npm run test:a11y` to start an isolated Vite server and execute axe-core through Playwright. The gate checks WCAG 2.0, 2.1, and 2.2 A/AA rules in Chromium using desktop and mobile device profiles.
 
-Coverage includes the landing page, the complete tracker dashboard, and the account, calendar export, ledger controls, and alert controls at both viewport sizes. The configured-service suite additionally scans the Pro-only CSV import dialog, authenticated shared-collaboration panel, published hosted-calendar state, signed-in one-time offer, and armed account-deletion state. Any reported violation fails the command with its rule, impact, and affected selectors. GitHub Actions includes both suites on pull requests and pushes to `main` after the production build and unit tests.
+Coverage includes the landing page, the complete tracker dashboard, and the account, calendar export, ledger controls, and alert controls at both viewport sizes. The same command verifies document reflow and dialog containment at 320 CSS pixels, then emulates forced colors plus reduced motion and requires a computed keyboard-focus outline. The configured-service suite additionally scans the Pro-only CSV import dialog, authenticated shared-collaboration panel, published hosted-calendar state, signed-in one-time offer, and armed account-deletion state. Any reported violation fails the command with its rule, impact, and affected selectors. GitHub Actions includes both suites on pull requests and pushes to `main` after the production build and unit tests.
+
+The 320 CSS-pixel checks are an automated reflow proxy for magnified desktop layouts. They do not replace manual browser-zoom verification because browser chrome, text rendering, and assistive-technology combinations are outside the test fixture.
 
 Automated checks cannot prove reading order quality, announcement timing, understandable control labels, or assistive-technology behavior. They are a regression floor, not a substitute for the manual release audit.
 
@@ -49,9 +51,11 @@ Browser QA covers:
 3. Literal `inert` and `aria-hidden` application and cleanup.
 4. A visible computed focus outline.
 5. CSV dialog geometry at a 390 by 844 viewport with no horizontal overflow.
-6. A clean console after desktop and mobile interaction checks.
-7. Live-region roles, priorities, atomic announcements, busy states, and file-error relationships in the rendered dialogs.
-8. Twenty-two automated WCAG A/AA scans across desktop and mobile profiles: twelve guest/local surfaces and ten configured account-service surfaces, with no axe-core violations.
+6. Landing, dashboard, and all four guest dialogs at 320 CSS pixels with no document overflow or viewport clipping.
+7. A computed two-pixel keyboard focus indicator while Chromium emulates forced colors and reduced motion.
+8. A clean console after desktop and mobile interaction checks.
+9. Live-region roles, priorities, atomic announcements, busy states, and file-error relationships in the rendered dialogs.
+10. Twenty-two automated WCAG A/AA scans across desktop and mobile profiles: twelve guest/local surfaces and ten configured account-service surfaces, plus six reflow and forced-colors checks, with no violations.
 
 ## Remaining Release Work
 
