@@ -14,6 +14,8 @@ Outflow's free dashboard includes a billing calendar and a date-ordered 30-day u
 - The month header reports the selected month's total and number of scheduled debit events.
 - Previous, next, and today controls update the visible month and selected date.
 - Every date button identifies its full date, event count, and currency-separated total to assistive technology.
+- The date-button group uses one sequential tab stop. Arrow Left/Right move one day, Arrow Up/Down move one week, Home/End move to the start/end of the current week, and Page Up/Page Down move one month while clamping short months.
+- Keyboard navigation updates the visible month, selected-day details, pressed state, and focus together. The current date is additionally exposed with `aria-current="date"`.
 - Selecting a day reveals each subscription name, category, cycle, amount, and currency scheduled for that date.
 - Days without events expose an explicit zero-debit state.
 
@@ -33,5 +35,6 @@ Outflow's free dashboard includes a billing calendar and a date-ordered 30-day u
 - Weekly, monthly, and yearly subscriptions produce exact current/next-month totals and date order.
 - Calendar date selection exposes the matching debit details.
 - Month navigation and the today control update month and selected-day state consistently.
+- Roving keyboard navigation retains one date tab stop, moves focus across week and month boundaries, and clamps January 31 to February 28.
 - Paused subscriptions are absent from both calendar and timeline schedules.
 - January 31 recurrence remains visible on February 28 and returns to March 31 instead of skipping or drifting within the calculation.

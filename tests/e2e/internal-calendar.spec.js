@@ -109,6 +109,53 @@ test("calendar navigation, selected days, and the 30-day timeline share one acti
   await expect(selectedDayPane(calendar)).toContainText("Weekly Service");
 });
 
+test("calendar dates provide one tab stop and predictable keyboard navigation", async ({ page }) => {
+  await openTracker(page);
+  await createEmptyHouseholdLedger(page, "Keyboard Calendar");
+
+  const calendar = panel(page, "Billing calendar");
+  const dateGroup = calendar.getByRole("group", { name: "Billing calendar dates", exact: true });
+  const july19 = dateGroup.getByRole("button", { name: "Sun, Jul 19, no charges", exact: true });
+
+  await expect(dateGroup.locator('button[tabindex="0"]')).toHaveCount(1);
+  await expect(july19).toHaveAttribute("aria-current", "date");
+  await expect(july19).toHaveAttribute("aria-pressed", "true");
+  await july19.focus();
+
+  await july19.press("ArrowRight");
+  const july20 = dateGroup.getByRole("button", { name: "Mon, Jul 20, no charges", exact: true });
+  await expect(july20).toBeFocused();
+  await expect(july20).toHaveAttribute("aria-pressed", "true");
+  await expect(july19).toHaveAttribute("tabindex", "-1");
+  await expect(selectedDayPane(calendar)).toContainText("Mon, Jul 20");
+
+  await july20.press("ArrowDown");
+  const july27 = dateGroup.getByRole("button", { name: "Mon, Jul 27, no charges", exact: true });
+  await expect(july27).toBeFocused();
+
+  await july27.press("Home");
+  const july26 = dateGroup.getByRole("button", { name: "Sun, Jul 26, no charges", exact: true });
+  await expect(july26).toBeFocused();
+
+  await july26.press("End");
+  const august1 = dateGroup.getByRole("button", { name: "Sat, Aug 01, no charges", exact: true });
+  await expect(august1).toBeFocused();
+  await expect(calendar).toContainText("August 2026");
+
+  await august1.press("PageDown");
+  const september1 = dateGroup.getByRole("button", { name: "Tue, Sep 01, no charges", exact: true });
+  await expect(september1).toBeFocused();
+  await expect(calendar).toContainText("September 2026");
+
+  await september1.press("PageUp");
+  await expect(august1).toBeFocused();
+  await august1.press("ArrowLeft");
+  const july31 = dateGroup.getByRole("button", { name: "Fri, Jul 31, no charges", exact: true });
+  await expect(july31).toBeFocused();
+  await expect(calendar).toContainText("July 2026");
+  await expect(dateGroup.locator('button[tabindex="0"]')).toHaveCount(1);
+});
+
 test("month-end recurrences remain visible in the internal calendar and timeline", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-01-31T12:00:00-04:00"));
   await openTracker(page);
@@ -128,10 +175,13 @@ test("month-end recurrences remain visible in the internal calendar and timeline
   await expect(upcoming.getByRole("listitem").nth(0)).toContainText("Jan 31");
   await expect(upcoming.getByRole("listitem").nth(1)).toContainText("Feb 28");
 
-  await calendar.getByRole("button", { name: "Next", exact: true }).click();
+  const january31 = calendar.getByRole("button", { name: "Sat, Jan 31, 1 charge totaling $31.00", exact: true });
+  await january31.focus();
+  await january31.press("PageDown");
   await expect(calendar).toContainText("February 2026");
   await expect(calendar.locator(":scope > header")).toContainText("$31.00 / 1");
-  await calendar.getByRole("button", { name: "Sat, Feb 28, 1 charge totaling $31.00", exact: true }).click();
+  const february28 = calendar.getByRole("button", { name: "Sat, Feb 28, 1 charge totaling $31.00", exact: true });
+  await expect(february28).toBeFocused();
   await expect(selectedDayPane(calendar)).toContainText("Month End Service");
 
   await calendar.getByRole("button", { name: "Next", exact: true }).click();

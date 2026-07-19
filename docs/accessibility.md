@@ -20,6 +20,8 @@ Account, calendar export, ledger controls, alert controls, and CSV import share 
 
 Keyboard focus uses a consistent two-pixel amber `:focus-visible` outline with an offset from the control boundary. Inputs that replace their default outline with border styling still receive this global indicator.
 
+The billing calendar exposes one date in the sequential tab order. Arrow keys, Home/End, and Page Up/Page Down move selection and focus predictably across day, week, and month boundaries; the selected date uses pressed state and today uses `aria-current="date"`.
+
 When `prefers-reduced-motion: reduce` is active, CSS transitions and animations are reduced to effectively immediate durations. The landing-page return-to-top command also switches from smooth to immediate scrolling.
 
 ## Dynamic Status Contract
@@ -56,6 +58,7 @@ Browser QA covers:
 8. A clean console after desktop and mobile interaction checks.
 9. Live-region roles, priorities, atomic announcements, busy states, and file-error relationships in the rendered dialogs.
 10. Twenty-two automated WCAG A/AA scans across desktop and mobile profiles: twelve guest/local surfaces and ten configured account-service surfaces, plus six reflow and forced-colors checks, with no violations.
+11. Billing-calendar roving focus, day/week/month keyboard movement, cross-month focus retention, current-date semantics, and short-month clamping at desktop and mobile sizes.
 
 ## Remaining Release Work
 

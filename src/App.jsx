@@ -733,6 +733,12 @@ function calendarDays(date) {
   });
 }
 
+function addCalendarMonths(date, months) {
+  const targetMonth = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const lastDay = new Date(targetMonth.getFullYear(), targetMonth.getMonth() + 1, 0).getDate();
+  return new Date(targetMonth.getFullYear(), targetMonth.getMonth(), Math.min(date.getDate(), lastDay));
+}
+
 function weeklyForecast(events, days) {
   const today = parseDate(toDateInput(new Date()));
   const bucketCount = Math.ceil((days + 1) / 7);
@@ -1541,6 +1547,8 @@ function Tracker({ onExit, pwa }) {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(() => toDateInput(new Date()));
+  const calendarDayRefs = useRef(new Map());
+  const pendingCalendarFocusRef = useRef("");
   const [importOpen, setImportOpen] = useState(false);
   const [csvSession, setCsvSession] = useState(null);
   const [csvMapping, setCsvMapping] = useState({});
@@ -1946,6 +1954,16 @@ function Tracker({ onExit, pwa }) {
 
   const calendarBounds = useMemo(() => monthBounds(calendarCursor), [calendarCursor]);
   const calendarGrid = useMemo(() => calendarDays(calendarCursor), [calendarCursor]);
+  useEffect(() => {
+    const pendingDate = pendingCalendarFocusRef.current;
+    if (!pendingDate) return;
+
+    const dayButton = calendarDayRefs.current.get(pendingDate);
+    if (!dayButton) return;
+
+    pendingCalendarFocusRef.current = "";
+    dayButton.focus();
+  }, [calendarCursor, selectedDate]);
   const calendarEvents = useMemo(
     () => buildSchedule(subscriptions, calendarBounds.start, calendarBounds.end),
     [subscriptions, calendarBounds],
@@ -2295,6 +2313,45 @@ function Tracker({ onExit, pwa }) {
     const today = new Date();
     setCalendarCursor(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(toDateInput(today));
+  }
+
+  function handleCalendarKeyDown(event, date) {
+    const nextDate = new Date(date);
+
+    switch (event.key) {
+      case "ArrowLeft":
+        nextDate.setDate(nextDate.getDate() - 1);
+        break;
+      case "ArrowRight":
+        nextDate.setDate(nextDate.getDate() + 1);
+        break;
+      case "ArrowUp":
+        nextDate.setDate(nextDate.getDate() - 7);
+        break;
+      case "ArrowDown":
+        nextDate.setDate(nextDate.getDate() + 7);
+        break;
+      case "Home":
+        nextDate.setDate(nextDate.getDate() - nextDate.getDay());
+        break;
+      case "End":
+        nextDate.setDate(nextDate.getDate() + (6 - nextDate.getDay()));
+        break;
+      case "PageUp":
+        nextDate.setTime(addCalendarMonths(nextDate, -1).getTime());
+        break;
+      case "PageDown":
+        nextDate.setTime(addCalendarMonths(nextDate, 1).getTime());
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const value = toDateInput(nextDate);
+    pendingCalendarFocusRef.current = value;
+    setSelectedDate(value);
+    setCalendarCursor(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1));
   }
 
   function closeCalendarExport() {
@@ -3794,7 +3851,7 @@ function Tracker({ onExit, pwa }) {
             </div>
 
             <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_300px]">
-              <div className="min-w-0">
+              <div className="min-w-0" role="group" aria-label="Billing calendar dates">
                 <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-950 font-mono text-[9px] uppercase text-zinc-600 sm:text-[10px]">
                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
                     <div key={day} className="border-r border-zinc-800 px-1 py-2 text-center last:border-r-0">
@@ -3818,6 +3875,13 @@ function Tracker({ onExit, pwa }) {
                         type="button"
                         aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${formatCurrencyTotals(dayTotals)}` : ", no charges"}`}
                         aria-pressed={selected}
+                        aria-current={today ? "date" : undefined}
+                        tabIndex={selected ? 0 : -1}
+                        ref={(node) => {
+                          if (node) calendarDayRefs.current.set(value, node);
+                          else calendarDayRefs.current.delete(value);
+                        }}
+                        onKeyDown={(event) => handleCalendarKeyDown(event, date)}
                         onClick={() => {
                           setSelectedDate(value);
                           if (!currentMonth) setCalendarCursor(new Date(date.getFullYear(), date.getMonth(), 1));
