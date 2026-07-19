@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { createEvents } from "ics";
+import {
+  cloudConfigured,
+  cloudConfigError,
+  deleteCloudAccount,
+  getCloud,
+  readProEntitlement,
+  requestAccountLink,
+  uploadGuestWorkspace,
+} from "./cloud";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -1172,6 +1181,17 @@ function Tracker({ onExit, pwa }) {
   const [deleteLedgerId, setDeleteLedgerId] = useState(null);
   const [backupSession, setBackupSession] = useState(null);
   const [backupError, setBackupError] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountSession, setAccountSession] = useState(null);
+  const [accountEntitlement, setAccountEntitlement] = useState(null);
+  const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [cloudClient, setCloudClient] = useState(null);
+  const [accountLoading, setAccountLoading] = useState(cloudConfigured);
+  const [accountBusy, setAccountBusy] = useState("");
+  const [accountMessage, setAccountMessage] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
@@ -1207,6 +1227,74 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
   }, [alertSettings]);
+
+  useEffect(() => {
+    if (!cloudConfigured) {
+      setAccountLoading(false);
+      return undefined;
+    }
+    let active = true;
+    let authSubscription;
+    getCloud().then(async (client) => {
+      if (!active || !client) return;
+      setCloudClient(client);
+      const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+        if (!active) return;
+        setAccountSession(session);
+        setAccountLoading(false);
+        if (session?.user?.email) setAccountEmail(session.user.email);
+      });
+      authSubscription = authListener.subscription;
+      const { data, error } = await client.auth.getSession();
+      if (!active) return;
+      setAccountSession(data.session || null);
+      setAccountError(error?.message || "");
+      setAccountLoading(false);
+    }).catch((error) => {
+      if (!active) return;
+      setAccountError(error instanceof Error ? error.message : "Outflow cloud could not initialize.");
+      setAccountLoading(false);
+    });
+    return () => {
+      active = false;
+      authSubscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accountOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape" && !accountBusy) {
+        setAccountOpen(false);
+        setDeleteAccountArmed(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [accountOpen, accountBusy]);
+
+  useEffect(() => {
+    if (!accountSession?.user?.id) {
+      setAccountEntitlement(null);
+      setAccountEntitlementLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setAccountEntitlementLoading(true);
+    readProEntitlement(accountSession.user.id)
+      .then((entitlement) => {
+        if (active) setAccountEntitlement(entitlement);
+      })
+      .catch((error) => {
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read the Pro entitlement.");
+      })
+      .finally(() => {
+        if (active) setAccountEntitlementLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountSession?.user?.id]);
 
   useEffect(() => {
     if (!alertSettingsOpen) return undefined;
@@ -1340,6 +1428,9 @@ function Tracker({ onExit, pwa }) {
   const backupMergeCount = Math.min(backupMergeCandidates.length, availableImportSlots);
   const backupCapacityOmittedCount = backupMergeCandidates.length - backupMergeCount;
   const importConfirmCount = Math.min(importableCandidates.length, availableImportSlots);
+  const workspaceRecordCount = workspace.ledgers.reduce((total, entry) => total + entry.subscriptions.length, 0);
+  const sharedWorkspaceCount = workspace.ledgers.filter((entry) => entry.ledger.kind !== "personal").length;
+  const cloudUploadRequiresPro = sharedWorkspaceCount > 0 && accountEntitlement?.status !== "active";
 
   useEffect(() => {
     if (!alertSettings.deviceEnabled || notificationPermission !== "granted" || alerts.length === 0) return;
@@ -1524,6 +1615,90 @@ function Tracker({ onExit, pwa }) {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function closeAccountControls() {
+    if (accountBusy) return;
+    setAccountOpen(false);
+    setDeleteAccountArmed(false);
+    setAccountError("");
+    setAccountMessage("");
+  }
+
+  async function sendAccountLink(event) {
+    event.preventDefault();
+    const email = accountEmail.trim().toLowerCase();
+    if (!email || !cloudConfigured) return;
+    setAccountBusy("link");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await requestAccountLink(email);
+      setAccountEmail(email);
+      setAccountMessage("Sign-in link sent. Your local workspace has not been uploaded.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not send the sign-in link.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function uploadLocalWorkspace() {
+    if (!accountSession || accountBusy || accountEntitlementLoading || cloudUploadRequiresPro) return;
+    setAccountBusy("upload");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const receipt = await uploadGuestWorkspace(workspace);
+      const ledgerCount = Number(receipt?.ledgerCount ?? receipt?.ledger_count ?? workspace.ledgers.length);
+      const recordCount = Number(receipt?.subscriptionCount ?? receipt?.subscription_count ?? workspaceRecordCount);
+      setAccountMessage(`Cloud copy confirmed / ${ledgerCount} ledgers / ${recordCount} records. Local data remains available.`);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not upload this workspace.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function signOutAccount() {
+    if (!cloudClient || accountBusy) return;
+    setAccountBusy("signout");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const { error } = await cloudClient.auth.signOut();
+      if (error) throw error;
+      setAccountSession(null);
+      setAccountEntitlement(null);
+      setAccountMessage("Signed out. Local ledgers remain on this browser.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not sign out.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function removeCloudAccount() {
+    if (!accountSession || accountBusy) return;
+    if (!deleteAccountArmed) {
+      setDeleteAccountArmed(true);
+      return;
+    }
+    setAccountBusy("delete");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      await deleteCloudAccount();
+      await cloudClient?.auth.signOut({ scope: "local" });
+      setAccountSession(null);
+      setAccountEntitlement(null);
+      setDeleteAccountArmed(false);
+      setAccountMessage("Cloud account deleted. Local ledgers were not removed.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not delete this cloud account.");
+    } finally {
+      setAccountBusy("");
+    }
   }
 
   function closeLedgerControls() {
@@ -1992,6 +2167,18 @@ function Tracker({ onExit, pwa }) {
                 )}
                 <button
                   type="button"
+                  onClick={() => setAccountOpen(true)}
+                  aria-label={accountSession?.user?.email ? `Open account controls for ${accountSession.user.email}` : "Open optional account controls"}
+                  className={`border bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
+                    accountSession
+                      ? "border-cyan-700 text-cyan-300 hover:border-cyan-400"
+                      : "border-zinc-700 text-zinc-400 hover:border-amber-400 hover:text-amber-300"
+                  }`}
+                >
+                  Account / {accountLoading ? "Check" : accountSession ? "Signed in" : "Guest"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setAlertSettingsOpen(true)}
                   className={`border bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase ${
                     alertSettings.deviceEnabled && notificationPermission === "granted"
@@ -2433,6 +2620,189 @@ function Tracker({ onExit, pwa }) {
           </div>
         </section>
       </div>
+
+      {accountOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="account-controls-title"
+            className="flex max-h-[calc(100vh-24px)] w-full max-w-2xl flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)]"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Optional identity</div>
+                <h2 id="account-controls-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Account / Pro</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeAccountControls}
+                disabled={Boolean(accountBusy)}
+                aria-label="Close account controls"
+                autoFocus
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-auto">
+              <div className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
+                <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
+                  Identity <span className={`ml-1 ${accountSession ? "text-cyan-300" : "text-zinc-400"}`}>{accountSession ? "Signed in" : "Guest"}</span>
+                </div>
+                <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
+                  Cloud <span className={`ml-1 ${cloudConfigured ? "text-emerald-300" : "text-zinc-500"}`}>{cloudConfigured ? "Ready" : "Not configured"}</span>
+                </div>
+                <div className="border-r border-zinc-800 px-3 py-2">
+                  Ledgers <span className="ml-1 text-zinc-200">{workspace.ledgers.length}</span>
+                </div>
+                <div className="px-3 py-2">
+                  Entitlement <span className={`ml-1 ${accountEntitlement?.status === "active" ? "text-amber-300" : "text-zinc-400"}`}>
+                    {accountEntitlementLoading ? "Check" : accountEntitlement?.status === "active" ? "Pro" : "Free"}
+                  </span>
+                </div>
+              </div>
+
+              {cloudConfigError && (
+                <div className="border-b border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-200">{cloudConfigError}</div>
+              )}
+
+              {!cloudConfigured && (
+                <section className="border-b border-zinc-800 px-4 py-5">
+                  <div className="text-sm font-black uppercase tracking-[0.08em] text-zinc-200">Cloud service setup pending</div>
+                  <div className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
+                    This build remains guest-only. All {workspaceRecordCount} records stay in this browser and every local workflow remains available without an account.
+                  </div>
+                </section>
+              )}
+
+              {cloudConfigured && accountLoading && (
+                <div className="border-b border-zinc-800 px-4 py-6 font-mono text-xs uppercase text-zinc-500">Checking account session...</div>
+              )}
+
+              {cloudConfigured && !accountLoading && !accountSession && (
+                <form onSubmit={sendAccountLink} className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <Field label="Email address">
+                    <input
+                      type="email"
+                      value={accountEmail}
+                      required
+                      maxLength={254}
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      onChange={(event) => setAccountEmail(event.target.value.slice(0, 254))}
+                      className="h-10 min-w-0 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                    />
+                  </Field>
+                  <button
+                    type="submit"
+                    disabled={accountBusy === "link" || !accountEmail.trim()}
+                    className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                  >
+                    {accountBusy === "link" ? "Sending..." : "Email sign-in link"}
+                  </button>
+                  <div className="font-mono text-[9px] uppercase text-zinc-700 sm:col-span-2">
+                    Creating an account does not upload or remove local ledger data.
+                  </div>
+                </form>
+              )}
+
+              {accountSession && (
+                <>
+                  <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Authenticated identity</div>
+                      <div className="mt-1 truncate text-sm font-bold text-zinc-200">{accountSession.user.email || "Email unavailable"}</div>
+                      <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">Local workspace remains authoritative</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={signOutAccount}
+                      disabled={Boolean(accountBusy)}
+                      className="h-9 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:opacity-40"
+                    >
+                      {accountBusy === "signout" ? "Signing out..." : "Sign out"}
+                    </button>
+                  </section>
+
+                  <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-[0.12em] text-zinc-200">Upload local copy</div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-600">
+                        {accountEntitlementLoading
+                          ? "Checking entitlement"
+                          : cloudUploadRequiresPro
+                            ? `${sharedWorkspaceCount} shared local ${sharedWorkspaceCount === 1 ? "ledger requires" : "ledgers require"} Pro`
+                            : `${workspace.ledgers.length} ledgers / ${workspaceRecordCount} records / transactional`}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={uploadLocalWorkspace}
+                      disabled={Boolean(accountBusy) || accountEntitlementLoading || cloudUploadRequiresPro}
+                      className="h-10 border border-cyan-700 bg-black px-4 text-xs font-black uppercase tracking-[0.1em] text-cyan-300 hover:border-cyan-400 disabled:opacity-40"
+                    >
+                      {accountBusy === "upload" ? "Uploading..." : "Create cloud copy"}
+                    </button>
+                  </section>
+
+                  <section className="grid gap-3 border-b border-red-950 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-[0.12em] text-red-200">Delete cloud account</div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-700">Local browser ledgers are retained</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={removeCloudAccount}
+                      disabled={Boolean(accountBusy)}
+                      className={`h-10 border px-4 text-xs font-black uppercase tracking-[0.1em] disabled:opacity-40 ${
+                        deleteAccountArmed
+                          ? "border-red-500 bg-red-950/40 text-red-100"
+                          : "border-red-950 bg-black text-red-400 hover:border-red-700"
+                      }`}
+                    >
+                      {accountBusy === "delete" ? "Deleting..." : deleteAccountArmed ? "Confirm cloud delete" : "Delete account data"}
+                    </button>
+                  </section>
+                </>
+              )}
+
+              {(accountMessage || accountError) && (
+                <div className={`border-b px-4 py-3 text-sm ${
+                  accountError ? "border-red-900 bg-red-950/40 text-red-200" : "border-emerald-900 bg-emerald-950/20 text-emerald-200"
+                }`}>
+                  {accountError || accountMessage}
+                </div>
+              )}
+
+              <section>
+                <header className="border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Access model</header>
+                <div className="grid sm:grid-cols-2">
+                  <div className="border-b border-zinc-800 p-4 sm:border-b-0 sm:border-r">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Free</span>
+                      <span className="font-mono text-xs text-emerald-300">$0</span>
+                    </div>
+                    <div className="mt-3 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                      Local tracking / forecasts / device alerts / portable exports
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-black uppercase tracking-[0.1em] text-zinc-200">Pro</span>
+                      <span className="font-mono text-xs text-amber-300">Paid once</span>
+                    </div>
+                    <div className="mt-3 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                      Cross-device sync / member invitations / email automation / connected calendars
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      )}
 
       {calendarExportOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-3 sm:p-6">

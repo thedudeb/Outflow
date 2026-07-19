@@ -22,7 +22,9 @@ function outflowServiceWorker() {
         "/apple-touch-icon.png",
         "/og.png",
       ];
-      const generatedAssets = Object.values(bundle).map((entry) => `/${entry.fileName}`);
+      const generatedAssets = Object.values(bundle)
+        .filter((entry) => entry.type === "asset" || entry.isEntry)
+        .map((entry) => `/${entry.fileName}`);
       const precache = [...new Set([...publicAssets, ...generatedAssets])].sort();
       const cacheName = `outflow-${cacheVersion(precache)}`;
       const source = `const CACHE_NAME = ${JSON.stringify(cacheName)};

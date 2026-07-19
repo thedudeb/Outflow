@@ -46,4 +46,4 @@ If a stored workspace cannot be validated, Outflow attempts the legacy migration
 
 ## Account Migration Boundary
 
-A future account service should upload each ledger as a separate transaction using its stable ledger and subscription IDs. Server acknowledgement must identify every accepted ledger and revision before any local ledger is marked synchronized. Personal, household, and team membership must remain separate server-side, and remote totals must never be merged merely because the same account can access multiple ledgers.
+The selected account service uploads the complete workspace through one transactional migration function using stable ledger and subscription IDs. Server acknowledgement must identify every accepted ledger and revision before any local ledger is marked synchronized. Personal, household, and team membership must remain separate server-side, and remote totals must never be merged merely because the same account can access multiple ledgers. See [service-architecture.md](service-architecture.md).

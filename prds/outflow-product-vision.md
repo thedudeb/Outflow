@@ -22,9 +22,9 @@ The product will remain deliberately narrower than a general personal-finance pl
 ## Current Delivery State
 
 - **Shipped locally:** Guest ledger, subscription CRUD, pause/resume, forecasts, billing calendar, trials, categories, tags, multiple currencies without implied conversion, CSV import/export, configurable device-alert lead times, paused-alert opt-in, versioned active-ledger backup/restore, isolated personal/household/team ledger switching, local change attribution, recurring iCalendar export, installable web metadata, update handling, and verified offline relaunch.
-- **Partially delivered:** Ledger status language, local personal/household/team separation, local attribution, device alerts, and downloadable calendar updates are present, but optional identity, remote members, email delivery, durable background notification delivery, hosted calendar publishing, and Pro entitlements still require service architecture.
-- **Not yet delivered:** Account creation and deletion, one-time purchase and restore, cross-device sync, account-backed shared ledgers, invitations and permissions, member attribution, connected calendar feeds, native mobile, and native desktop.
-- **Next architecture gate:** Select the identity, data, email, and payment services together so guest-ledger migration, deletion, entitlement restore, and privacy boundaries are designed as one system.
+- **Partially delivered:** Ledger status language, local personal/household/team separation, local attribution, device alerts, downloadable calendar updates, environment-gated passwordless account onboarding, transactional guest-migration schema, RLS policies, and account-deletion infrastructure are present. The selected Supabase, Resend, and Stripe services are not yet provisioned, so remote identity, members, email delivery, durable background notifications, hosted calendar publishing, and Pro entitlements remain unavailable in the default build.
+- **Not yet delivered:** A deployed account service, one-time purchase and restore, cross-device sync, account-backed shared ledgers, invitations and permissions, remote member attribution, connected calendar feeds, native mobile, and native desktop.
+- **Next architecture gate:** Provision a non-production Supabase/Resend environment, apply the migration and deletion function, then prove cross-user RLS isolation and guest-migration/deletion behavior before enabling accounts publicly or adding Stripe fulfillment.
 
 ## Problem And Target Users
 

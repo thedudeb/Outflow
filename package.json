@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:account-foundation": "sh scripts/test-account-foundation.sh",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.75.0",
     "ics": "^3.12.0",
     "papaparse": "^5.5.3",
     "react": "^19.0.0",
