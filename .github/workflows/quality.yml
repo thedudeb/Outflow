@@ -58,7 +58,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:account-prompts
       - run: npm run test:feature-access
       - run: npm run test:service-readiness

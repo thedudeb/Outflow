@@ -44,7 +44,7 @@ The visible runtime states are:
 
 ## Automated Browser Contract
 
-`npm run test:account-service` runs stateful PostgREST- and Phoenix-compatible fixtures at desktop and narrow mobile widths. It verifies that:
+`npm run test:account-service` runs stateful PostgREST- and Phoenix-compatible fixtures in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit. It verifies that:
 
 - Opening a cloud team ledger replaces, rather than combines with, the active local totals while leaving the serialized local workspace unchanged.
 - Shared records display distinct server-resolved creator and updater identities.
@@ -55,7 +55,7 @@ The visible runtime states are:
 - A dropped Realtime socket becomes visibly offline and an automatic resubscription refreshes changes that occurred during the disconnect.
 - Signing out closes the cloud session and restores the untouched local ledger and totals.
 
-The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration. These fixtures are a deterministic preflight; the two-browser matrix must still pass against provisioned Supabase Realtime before public synchronization is enabled.
+The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration. These fixtures are a deterministic preflight; the multi-engine two-browser matrix must still pass against provisioned Supabase Realtime before public synchronization is enabled. See [Browser Compatibility Contract](browser-compatibility.md) for engine-specific evidence boundaries.
 
 ## Protected Hosted Contract
 
@@ -63,7 +63,7 @@ The database half of the same contract runs through `npm run test:account-founda
 
 The fixed workflow report records only named checks and deployment metadata. It does not record account IDs, row payloads, operation IDs, session credentials, or Realtime messages. This proves the hosted authorization, revision, catch-up, and transport sequence through two service clients.
 
-`npm run test:staging-browser-sync` validates the protected browser harness without network access. After the account plane passes, manually dispatch **Staging Browser Sync** from `main`. It creates a fresh owner/editor pair and shared ledger, recovers each real session inside an isolated browser context, and runs the deployed UI at desktop and mobile widths. The sequence proves hosted refresh, unfinished-form preservation with visible `stale`, explicit recovery, server-rejected `conflict`, visible `offline` after closing the browser Realtime transport, missed-write catch-up after automatic resubscription, and a final `synced` state. The harness disables browser artifacts and writes only a fixed, identity-free summary. No passing external staging run is recorded in the repository yet.
+`npm run test:staging-browser-sync` validates the protected browser harness without network access. After the account plane passes, manually dispatch **Staging Browser Sync** from `main`. It creates a fresh owner/editor pair and shared ledger per profile, recovers each real session inside an isolated browser context, and runs the deployed UI in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit. The sequence proves hosted refresh, unfinished-form preservation with visible `stale`, explicit recovery, server-rejected `conflict`, visible `offline` after closing the browser Realtime transport, missed-write catch-up after automatic resubscription, and a final `synced` state. The harness disables browser artifacts and writes only a fixed, identity-free summary. No passing external staging run is recorded in the repository yet, and Playwright WebKit does not replace a branded Safari release pass.
 
 ## Offline Boundary
 

@@ -205,7 +205,7 @@ export function buildBrowserSyncReport({
     "complete ordered browser-sync inventory",
   );
   const projectHost = new URL(projectUrl).hostname;
-  const safeViewport = safeMetadata(viewport, /^(desktop|mobile)-chromium$/);
+  const safeViewport = safeMetadata(viewport, /^(?:desktop-(?:chromium|firefox|webkit)|mobile-chromium)$/);
   const safeCommit = safeMetadata(commit, /^[a-f0-9]{7,40}$/i);
   const safeActor = safeMetadata(actor, /^[A-Za-z0-9_.-]{1,80}$/);
   const safeRunUrl = safeMetadata(runUrl, /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/[0-9]+$/);
@@ -225,9 +225,9 @@ export function buildBrowserSyncReport({
     "",
     checks,
     "",
-    "Scope: two isolated Chromium contexts used real deployed UI, authenticated hosted data, and hosted Realtime. The harness suppressed one incoming database event to exercise server conflict rejection, and closed only the tested browser's Realtime WebSocket to exercise visible disconnect and authoritative reconnect catch-up.",
+    "Scope: two isolated browser contexts used real deployed UI, authenticated hosted data, and hosted Realtime. The harness suppressed one incoming database event to exercise server conflict rejection, and closed only the tested browser's Realtime WebSocket to exercise visible disconnect and authoritative reconnect catch-up.",
     "",
-    "Excluded: session credentials, identities, row identifiers, operation identifiers, database payloads, Realtime frames, screenshots, traces, and videos. This pass does not prove general network outage recovery, non-Chromium behavior, or production availability.",
+    "Excluded: session credentials, identities, row identifiers, operation identifiers, database payloads, Realtime frames, screenshots, traces, and videos. This pass does not prove general network outage recovery, branded Safari behavior, assistive-technology compatibility, or production availability.",
     "",
   ].join("\n");
 }

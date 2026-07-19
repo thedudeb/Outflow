@@ -166,23 +166,29 @@ test("browser-sync fixture removes a partially created identity when setup fails
 });
 
 test("browser-sync report records only fixed viewport evidence", () => {
-  const report = buildBrowserSyncReport({
+  const reportFor = (viewport) => buildBrowserSyncReport({
     projectUrl,
     appOrigin: "https://staging.outflow.example",
     completed: [...browserSyncCheckNames],
-    viewport: "desktop-chromium",
+    viewport,
     commit: "abcdef1234567890",
     actor: "outflow-ci",
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
     recordedAt: "2026-07-19T12:00:00.000Z",
   });
+  const report = reportFor("desktop-chromium");
 
   assert.match(report, /PASS\*\* \(10 browser-visible checks\)/);
   assert.match(report, /PASS \/ browser conflict rejection/);
   assert.match(report, /PASS \/ Realtime disconnect visibility/);
   assert.match(report, /PASS \/ synchronized final state/);
+  assert.match(report, /branded Safari behavior/);
   assert.match(report, /screenshots, traces, and videos/);
   assert.doesNotMatch(report, /sb_(?:publishable|secret)_|@example\.com|Bearer\s|refresh-|access-/i);
+  for (const viewport of ["mobile-chromium", "desktop-firefox", "desktop-webkit"]) {
+    assert.match(reportFor(viewport), new RegExp(`Staging Browser Sync / ${viewport}`));
+  }
+  assert.match(reportFor("mobile-firefox"), /Staging Browser Sync \/ not recorded/);
   assert.throws(() => buildBrowserSyncReport({
     projectUrl,
     appOrigin: "https://staging.outflow.example",
@@ -216,10 +222,13 @@ test("browser-sync workflow is manual, protected, main-only, and artifact-free",
 
   assert.match(config, /name: "desktop-chromium"/);
   assert.match(config, /name: "mobile-chromium"/);
+  assert.match(config, /name: "desktop-firefox"/);
+  assert.match(config, /name: "desktop-webkit"/);
   assert.match(config, /workers: 1/);
   assert.match(config, /trace: "off"/);
   assert.match(config, /screenshot: "off"/);
   assert.match(config, /video: "off"/);
+  assert.match(workflow, /playwright install --with-deps chromium firefox webkit/);
 
   assert.match(spec, /browser\.newContext/);
   assert.match(spec, /localStorage\.setItem\(storageKey/);
@@ -234,4 +243,15 @@ test("browser-sync workflow is manual, protected, main-only, and artifact-free",
   assert.match(spec, /await fixture\.cleanup\(\)/);
   assert.doesNotMatch(spec, /console\.(?:log|info|debug)/);
   assert.match(quality, /npm run test:staging-browser-sync/);
+  assert.match(quality, /playwright install --with-deps chromium firefox webkit/);
+});
+
+test("configured-service sync matrix includes Chromium mobile plus three desktop engines", async () => {
+  const source = await readFile(new URL("../playwright.account.config.js", import.meta.url), "utf8");
+  assert.match(source, /name: "desktop-chromium"/);
+  assert.match(source, /name: "mobile-chromium"/);
+  assert.match(source, /name: "desktop-firefox"/);
+  assert.match(source, /name: "desktop-webkit"/);
+  assert.match(source, /devices\["Desktop Firefox"\]/);
+  assert.match(source, /devices\["Desktop Safari"\]/);
 });

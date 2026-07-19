@@ -28,8 +28,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium firefox webkit
       - name: Verify browser-sync harness contract
         run: npm run test:staging-browser-sync
       - name: Run browser-visible hosted sync acceptance

@@ -19,7 +19,7 @@ Outflow uses three fixed shared-ledger roles. Database Row Level Security and tr
 - The owner's membership row must retain the `owner` role. Other members can only be `editor` or `viewer`.
 - Creating shared ledgers, sending invitations, and changing collaborator roles require the owner's active lifetime Pro entitlement.
 - Existing members retain read access if Pro is later refunded or revoked. The owner can still remove members so data control is never gated.
-- Shared subscription cards show both the member who originally added the record and the member who last updated it. The configured-service browser contract resolves two distinct member profiles and verifies this attribution at desktop and mobile widths.
+- Shared subscription cards show both the member who originally added the record and the member who last updated it. The configured-service browser contract resolves two distinct member profiles and verifies this attribution in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit.
 
 ## Invitation Lifecycle
 
