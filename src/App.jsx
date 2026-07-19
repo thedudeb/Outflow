@@ -306,7 +306,7 @@ function LandingPage({ onOpen }) {
         </div>
       </nav>
 
-      <section className="relative min-h-[620px] overflow-hidden border-b border-zinc-800 sm:min-h-[calc(100svh-96px)] sm:max-h-[780px]">
+      <section className="relative min-h-[480px] overflow-hidden border-b border-zinc-800 min-[360px]:min-h-[560px] sm:min-h-[calc(100svh-96px)] sm:max-h-[780px]">
         <div className="absolute inset-0 grid content-center gap-5 px-3 opacity-25 sm:px-8" aria-hidden="true">
           {previewSubscriptions.map((subscription) => (
             <div key={subscription.id} className="grid min-h-28 gap-3 sm:grid-cols-[220px_minmax(0,1fr)_280px]">
@@ -327,25 +327,25 @@ function LandingPage({ onOpen }) {
         </div>
         <div className="absolute inset-0 bg-black/75" aria-hidden="true" />
 
-        <div className="relative z-10 mx-auto flex min-h-[620px] max-w-[1560px] items-center px-4 py-8 sm:min-h-[calc(100svh-96px)] sm:max-h-[780px] sm:px-6 sm:py-10">
-          <div className="max-w-3xl">
-            <div className="mb-4 flex items-center gap-3 font-mono text-xs uppercase text-amber-300">
+        <div className="relative z-10 mx-auto flex min-h-[480px] max-w-[1560px] items-center px-4 py-5 min-[360px]:min-h-[560px] sm:min-h-[calc(100svh-96px)] sm:max-h-[780px] sm:px-6 sm:py-10">
+          <div className="min-w-0 max-w-3xl">
+            <div className="mb-3 flex items-center gap-3 font-mono text-[10px] uppercase text-amber-300 sm:mb-4 sm:text-xs">
               <span className="h-3 w-1 bg-amber-400" />
               Personal recurring debit monitor
             </div>
-            <h1 className="text-6xl font-black uppercase leading-[0.9] text-white sm:text-8xl lg:text-9xl">Outflow</h1>
-            <p className="mt-6 max-w-2xl text-lg leading-7 text-zinc-300 sm:text-xl">
+            <h1 className="text-[48px] font-black uppercase leading-[0.9] text-white min-[360px]:text-6xl sm:text-8xl lg:text-9xl">Outflow</h1>
+            <p className="mt-4 max-w-2xl text-base leading-6 text-zinc-300 sm:mt-6 sm:text-xl sm:leading-7">
               Know what is leaving your account, how much it costs, and exactly when it lands. One clear ledger for every recurring charge.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-5 py-3 text-sm font-black uppercase text-black hover:bg-amber-300">
+            <div className="mt-5 grid grid-cols-2 gap-2 sm:mt-8 sm:flex sm:flex-wrap sm:gap-3">
+              <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-2 py-3 text-[11px] font-black uppercase text-black hover:bg-amber-300 sm:px-5 sm:text-sm">
                 Open your ledger
               </button>
-              <a href="#system" className="border border-zinc-600 bg-black/70 px-5 py-3 text-sm font-black uppercase text-zinc-200 hover:border-zinc-300">
+              <a href="#system" className="border border-zinc-600 bg-black/70 px-2 py-3 text-center text-[11px] font-black uppercase text-zinc-200 hover:border-zinc-300 sm:px-5 sm:text-sm">
                 See the system
               </a>
             </div>
-            <div className="mt-9 flex flex-wrap gap-x-8 gap-y-3 border-t border-zinc-700 pt-4 font-mono text-xs uppercase text-zinc-500">
+            <div className="mt-5 grid grid-cols-3 gap-2 border-t border-zinc-700 pt-3 font-mono text-[10px] uppercase text-zinc-500 sm:mt-9 sm:flex sm:flex-wrap sm:gap-x-8 sm:gap-y-3 sm:pt-4 sm:text-xs">
               <span><b className="text-zinc-200">Local</b> by default</span>
               <span><b className="text-zinc-200">Zero</b> accounts</span>
               <span><b className="text-zinc-200">One</b> honest number</span>
