@@ -1,0 +1,42 @@
+name: Staging Boundary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-staging-boundary
+  cancel-in-progress: false
+
+jobs:
+  public-boundary:
+    name: Public boundary probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: staging
+    env:
+      SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+      VITE_SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.OUTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+      OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+      OUTFLOW_ALLOWED_ORIGINS: ${{ vars.OUTFLOW_ALLOWED_ORIGINS }}
+      OUTFLOW_STAGING_ENVIRONMENT: staging
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify repository service contract
+        run: npm run test:service-readiness
+      - name: Verify boundary probe contract
+        run: npm run test:staging-boundaries
+      - name: Probe deployed public boundaries
+        run: npm run check:staging-boundaries -- --summary-file "$GITHUB_STEP_SUMMARY"

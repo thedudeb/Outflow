@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnvFile } from "./check-service-readiness.mjs";
@@ -76,6 +76,7 @@ export function resolvePublicStagingConfig(env) {
     errors.push("OUTFLOW_APP_URL: expected the staging application's HTTPS URL.");
   }
   const allowedOrigins = String(env.OUTFLOW_ALLOWED_ORIGINS || "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (!allowedOrigins.length) errors.push("OUTFLOW_ALLOWED_ORIGINS: expected at least one exact HTTPS origin.");
   if (allowedOrigins.includes("*")) errors.push("OUTFLOW_ALLOWED_ORIGINS: wildcard origins are forbidden.");
   for (const origin of allowedOrigins) {
     try {
@@ -177,16 +178,76 @@ export async function probeStagingBoundaries({ projectUrl, publishableKey, appOr
   return completed;
 }
 
+export function buildStagingBoundaryReport({
+  projectUrl,
+  appOrigin,
+  completed,
+  migrations,
+  environmentName = "staging",
+  commit = "unknown",
+  actor = "unknown",
+  recordedAt = new Date().toISOString(),
+  runUrl = "",
+}) {
+  const projectHost = new URL(projectUrl).hostname;
+  const safeCommit = /^[0-9a-f]{7,40}$/i.test(commit) ? commit : "unknown";
+  const safeActor = /^[A-Za-z0-9-]{1,80}$/.test(actor) ? actor : "unknown";
+  const safeEnvironment = /^[A-Za-z0-9_-]{1,40}$/.test(environmentName) ? environmentName : "staging";
+  const safeRunUrl = (() => {
+    try {
+      const url = new URL(runUrl);
+      return url.protocol === "https:" && url.hostname === "github.com" ? url.href : "";
+    } catch {
+      return "";
+    }
+  })();
+  const validMigrations = migrations
+    .filter((name) => /^\d{14}_[a-z0-9_]+\.sql$/.test(name))
+    .sort();
+  const migrationList = validMigrations
+    .map((name) => `- \`${name}\``)
+    .join("\n");
+
+  return [
+    "## Outflow Staging Boundary",
+    "",
+    `- Result: **PASS** (${completed.length} non-destructive checks across 6 functions)`,
+    `- Environment: \`${safeEnvironment}\``,
+    `- Supabase project: \`${projectHost}\``,
+    `- App origin: \`${appOrigin}\``,
+    `- Commit: \`${safeCommit}\``,
+    `- Tester: \`${safeActor}\``,
+    `- Recorded: \`${recordedAt}\``,
+    ...(safeRunUrl ? [`- Workflow: [GitHub Actions run](${safeRunUrl})`] : []),
+    "",
+    `### Migration Inventory (${validMigrations.length})`,
+    "",
+    migrationList,
+    "",
+    "> Scope: public CORS and rejection boundaries only. This does not replace the synthetic-account, provider-delivery, RLS, Realtime, or payment acceptance matrix.",
+    "",
+  ].join("\n");
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const envFileIndex = args.indexOf("--env-file");
+  const summaryFileIndex = args.indexOf("--summary-file");
   const file = envFileIndex >= 0 ? args[envFileIndex + 1] : "";
-  if (!file) {
-    console.error("- --env-file: expected a path to an ignored staging environment file.");
+  const summaryFile = summaryFileIndex >= 0 ? args[summaryFileIndex + 1] : "";
+  if (envFileIndex >= 0 && !file) {
+    console.error("- --env-file: expected a path.");
     process.exitCode = 1;
     return;
   }
-  const env = parseEnvFile(await readFile(resolve(process.cwd(), file), "utf8"));
+  if (summaryFileIndex >= 0 && !summaryFile) {
+    console.error("- --summary-file: expected a path.");
+    process.exitCode = 1;
+    return;
+  }
+  const env = file
+    ? parseEnvFile(await readFile(resolve(process.cwd(), file), "utf8"))
+    : process.env;
   const config = resolvePublicStagingConfig(env);
   if (config.errors.length) {
     for (const error of config.errors) console.error(`- ${error}`);
@@ -195,6 +256,23 @@ async function main() {
   }
   try {
     const completed = await probeStagingBoundaries(config);
+    if (summaryFile) {
+      const migrations = (await readdir(resolve(process.cwd(), "supabase/migrations")))
+        .filter((name) => name.endsWith(".sql"));
+      const runUrl = env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID
+        ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}`
+        : "";
+      await appendFile(summaryFile, buildStagingBoundaryReport({
+        projectUrl: config.projectUrl,
+        appOrigin: config.appOrigin,
+        completed,
+        migrations,
+        environmentName: env.OUTFLOW_STAGING_ENVIRONMENT,
+        commit: env.GITHUB_SHA,
+        actor: env.GITHUB_ACTOR,
+        runUrl,
+      }));
+    }
     console.log(`Staging boundary probe passed: ${completed.length} non-destructive checks across 6 functions.`);
   } catch (error) {
     console.error(`- ${error instanceof Error ? error.message : "Staging boundary probe failed."}`);

@@ -77,6 +77,17 @@ npm run test:staging-boundaries
 node scripts/check-staging-boundaries.mjs --env-file /absolute/path/to/outflow-stage.env
 ```
 
+For a durable repository-side record, configure the protected GitHub `staging` environment with these boundary-only values and manually dispatch the **Staging Boundary** workflow:
+
+| GitHub environment entry | Kind | Value |
+| --- | --- | --- |
+| `OUTFLOW_SUPABASE_URL` | Variable | Exact hosted Supabase project origin |
+| `OUTFLOW_APP_URL` | Variable | Staging application HTTPS URL |
+| `OUTFLOW_ALLOWED_ORIGINS` | Variable | Comma-separated exact HTTPS origins |
+| `OUTFLOW_SUPABASE_PUBLISHABLE_KEY` | Secret | Browser-safe Supabase publishable key |
+
+The workflow has read-only repository permissions, does not receive Supabase secret/service-role, Resend, Stripe, webhook, or cron credentials, and runs only by manual dispatch against the protected environment. A successful run writes the commit, actor, project host, app origin, timestamp, and ordered migration inventory to its GitHub summary. That summary is evidence for the public boundary step only; it deliberately does not mark the full staging acceptance matrix complete.
+
 The first command tests the probe itself without network access. The second uses only the project URL, publishable key, application URL, and allowed origins. It sends CORS preflights plus deliberately invalid JWT, Stripe signature, cron-secret, and calendar-token requests. A pass proves:
 
 - All three account-facing functions return exact-origin CORS headers and reject an invalid user JWT at the gateway.

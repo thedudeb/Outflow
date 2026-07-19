@@ -10,6 +10,7 @@
     "test:feature-access": "node --test tests/feature-access.test.js",
     "test:service-readiness": "node --test tests/service-readiness.test.js",
     "test:staging-boundaries": "node --test tests/staging-boundaries.test.js",
+    "check:staging-boundaries": "node scripts/check-staging-boundaries.mjs",
     "test:function-types": "deno check --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/delete-account/index.ts supabase/functions/send-ledger-invite/index.ts supabase/functions/create-pro-checkout/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/send-due-reminders/index.ts supabase/functions/calendar-feed/index.ts",
     "test:function-runtime": "deno test --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
