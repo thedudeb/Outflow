@@ -1,6 +1,6 @@
 # Shared Ledger Access
 
-**Status:** Implemented contract, service deployment pending
+**Status:** Implemented contract and protected provider acceptance; external staging deployment pending
 
 Outflow uses three fixed shared-ledger roles. Database Row Level Security and transactional functions enforce the same contract shown by the account UI.
 
@@ -43,6 +43,8 @@ Owners can view invitation metadata but cannot select token hashes. Browsers can
 
 The database contract independently verifies owner/editor/viewer RLS, owner invariants, entitlement checks, hashed-token acceptance, recipient-email matching, expiry, one-time use, and deletion behavior through `npm run test:account-foundation`.
 
+`npm run test:staging-messaging-plane` verifies the protected provider harness without network access. Once the staging environment is provisioned, **Staging Messaging Plane** creates two randomized accounts using Resend's labeled delivered test-address contract, calls the deployed invitation function through the owner's real session, retrieves the exact delivered message, checks its bounded content, extracts the private application link, and accepts it as the invited account. Both identities and all database rows are then cascade-deleted. The workflow summary never records an address, account ID, link, token, message body, provider ID, or credential.
+
 ## Current Boundary
 
-The browser can list cloud ledger access, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime is implemented but the services are not deployed, and the default build remains fully local. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.
+The browser can list cloud ledger access, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime and protected provider acceptance are implemented, but no passing external staging run is recorded and the default build remains fully local. A test-address pass proves the deployed invitation path and one-use acceptance; delivery to human mailbox providers remains a release check. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.

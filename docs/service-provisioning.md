@@ -15,6 +15,7 @@ npm run test:function-types
 npm run test:function-runtime
 npm run test:account-foundation
 npm run test:staging-billing-plane
+npm run test:staging-messaging-plane
 ```
 
 `test:service-readiness` enforces the six-function inventory, explicit JWT policy, hosted/local/legacy Supabase key modes, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values. `test:function-runtime` proves named-key precedence, fallback behavior, and opaque-secret header handling without contacting Supabase.
@@ -91,6 +92,8 @@ For durable repository-side records, configure the protected GitHub `staging` en
 | `OUTFLOW_SUPABASE_SECRET_KEY` | Secret | Server-only key used only by authenticated acceptance setup and cleanup |
 | `OUTFLOW_STRIPE_SECRET_KEY` | Secret | Stripe test-mode secret used only by billing acceptance |
 | `OUTFLOW_STRIPE_WEBHOOK_SECRET` | Secret | Signing secret for the deployed staging webhook endpoint |
+| `OUTFLOW_RESEND_API_KEY` | Secret | Resend key used only to inspect synthetic test-address delivery receipts |
+| `OUTFLOW_CRON_SECRET` | Secret | Dedicated reminder-worker bearer used only by messaging acceptance |
 
 The **Staging Boundary** workflow has read-only repository permissions, does not receive the Supabase secret/service-role, Resend, Stripe, webhook, or cron credentials, and runs only by manual dispatch against the protected environment. A successful run writes the commit, actor, project host, app origin, timestamp, and ordered migration inventory to its GitHub summary. That summary is evidence for the public boundary step only; it deliberately does not mark the full staging acceptance matrix complete.
 
@@ -119,14 +122,23 @@ The same run creates an unconfirmed test PaymentIntent solely as a resolvable pr
 
 The billing summary contains fixed check names and deployment metadata only. It excludes identities, credentials, Checkout URLs, Stripe object IDs, signed event bodies, and response bodies. A pass proves the deployed functions share the expected staging Price and signing secret; it does not prove Stripe's outbound endpoint registration or actual Checkout payment delivery.
 
+After the account plane passes, manually dispatch **Staging Messaging Plane** from `main`. It binds itself to the same protected project and literal `staging` mode, creates two confirmed synthetic accounts using unique labels on Resend's delivered test address, grants one manual test entitlement, and migrates one personal plus one household ledger. It then:
+
+- Calls the deployed invitation function through the owner's authenticated session, locates the exact provider message, requires a delivered receipt and bounded content, extracts the private link, and accepts it as the invited account.
+- Sends an active reminder through the deployed worker and verifies the exact provider receipt and privacy-limited content while proving a paused schedule is excluded.
+- Injects one service-side failure into a newly claimed delivery, verifies failed status and backoff, releases it, and requires the deployed worker to deliver attempt two.
+- Replays the exact accepted reminder with its deployed provider idempotency key, requires the original provider ID, then proves a worker replay claims nothing; it also covers explicit paused inclusion, email opt-out, refund suspension, and cascade cleanup.
+
+The first retry failure is injected at Outflow's durable completion boundary; no provider outage is claimed. The workflow uses only Resend's documented test recipients, never an arbitrary or human address. Its summary contains fixed check names and deployment metadata and excludes recipients, credentials, links, content, provider identifiers, database rows, and response bodies. A pass does not prove Cron/Vault registration, delivery to a human inbox, actual provider failure, bounce handling, or mailbox-provider breadth.
+
 The local account-service suite performs the same Realtime refresh, stale-edit, and reconnect flow through two isolated browser contexts and a Phoenix-protocol fixture. Repeat it against the provisioned project because the fixture cannot prove publication configuration, network behavior, or hosted authorization.
 
 Complete these tests with synthetic accounts and Stripe test mode:
 
 - Cross-user RLS isolation, guest migration replay, sign-out restoration, and account deletion.
-- Owner/editor/viewer invitation, acceptance, revocation, removal, and Pro downgrade behavior.
+- Owner/editor/viewer invitation revocation, removal, and Pro downgrade behavior beyond the messaging-plane provider delivery and recipient-acceptance path.
 - Two-browser stale-edit protection and Realtime disconnect/reconnect behavior beyond the account-plane delivery probe.
-- Reminder opt-in/out, timezone boundaries, retry/idempotency, pause scope, and refund suspension.
+- Reminder timezone boundaries, concurrent-worker behavior, actual provider failure, bounce handling, and Cron/Vault scheduling beyond the messaging-plane delivery, retry, idempotency, pause-scope, opt-out, and refund checks.
 - Actual Stripe-hosted Checkout payment and cancellation, delayed-payment success, and Stripe-originated webhook delivery; the repository billing-plane workflow separately proves signed fulfillment, duplicate handling, restore, and full-refund revocation without making a card charge.
 - Hosted calendar import and refresh behavior in Apple Calendar, Google Calendar, Outlook, and a standards-focused iCalendar client; repeat paused scope and refund suspension against the hosted project.
 

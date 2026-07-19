@@ -1,0 +1,45 @@
+name: Staging Messaging Plane
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-staging-messaging-plane
+  cancel-in-progress: false
+
+jobs:
+  messaging-plane:
+    name: Provider-backed messaging acceptance
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify service contract
+        run: npm run test:service-readiness
+      - name: Verify messaging-plane harness contract
+        run: npm run test:staging-messaging-plane
+      - name: Run provider-backed messaging acceptance
+        run: npm run check:staging-messaging-plane -- --summary-file "$GITHUB_STEP_SUMMARY"
+        env:
+          SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.OUTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.OUTFLOW_SUPABASE_SECRET_KEY }}
+          OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          OUTFLOW_ACCEPTANCE_MODE: staging
+          RESEND_API_KEY: ${{ secrets.OUTFLOW_RESEND_API_KEY }}
+          OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}

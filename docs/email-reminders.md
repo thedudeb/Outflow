@@ -30,6 +30,14 @@ The isolated database contract verifies leap and non-leap month ends, consecutiv
 
 The same contract simulates a refund while email remains opted in. The channel becomes visibly **Suspended**, unavailable sub-rules are locked, and the master email control remains available so the user can opt out. Saving that opt-out succeeds without Pro and still leaves local device alerts untouched.
 
+## Protected Provider Contract
+
+`npm run test:staging-messaging-plane` validates the provider-acceptance harness without network access. After the protected staging project, deployed functions, verified sender, and Resend test key are configured, manually dispatch **Staging Messaging Plane** from `main`.
+
+The live step creates randomized, confirmed synthetic accounts whose addresses use Resend's labeled `delivered@resend.dev` contract. It invokes the deployed worker, retrieves each exact provider receipt, and requires a delivered event plus the expected subscription, amount, date, ledger, and application link. It replays the exact accepted payload with the deployed delivery's idempotency key and requires the original provider ID, then requires a second worker invocation to claim nothing. It also proves active delivery, paused exclusion and explicit inclusion, opt-out, and refund suspension, and injects one failure through the service-only `complete_email_notification` boundary before requiring the deployed worker to deliver attempt two.
+
+The injected failure is deterministic evidence for Outflow's retry state machine; it is not a simulated Resend outage. A pass also does not prove Supabase Cron registration, delivery to a human inbox, bounce processing, or behavior across mailbox providers. The workflow summary contains fixed check names and deployment metadata only, never recipients, content, delivery rows, invitation links, provider IDs, or credentials.
+
 ## Deployment
 
 Deploy `send-due-reminders` with JWT verification disabled only after setting all values in `supabase/functions/.env.example`. The function performs its own constant-time bearer-secret check.
@@ -56,5 +64,7 @@ Before production:
 4. Run two workers concurrently and confirm each delivery ID appears in at most one claim response.
 5. Force a Resend failure, confirm bounded retry, and verify the same delivery ID is reused.
 6. Alert on repeated worker failures, exhausted attempts, and completion errors without logging recipient addresses or message content.
+
+The protected workflow automates the active, pause-scope, idempotency, opt-out, refund, provider-delivery, and deterministic retry portions of this matrix. Timezone-provider breadth, concurrent workers, actual provider failure, scheduler registration, bounce handling, and operational alerting remain manual release checks.
 
 References: [Supabase scheduled Edge Functions](https://supabase.com/docs/guides/functions/schedule-functions), [Supabase Edge Function authentication](https://supabase.com/docs/guides/functions/auth), and [Resend idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys).
