@@ -1,3 +1,12 @@
+[functions.delete-account]
+verify_jwt = true
+
+[functions.send-ledger-invite]
+verify_jwt = true
+
+[functions.create-pro-checkout]
+verify_jwt = true
+
 [functions.stripe-webhook]
 verify_jwt = false
 

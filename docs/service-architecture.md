@@ -1,6 +1,6 @@
 # Outflow Service Architecture
 
-**Status:** Selected, not provisioned
+**Status:** Implemented and deployment-checked; external services not provisioned
 **Decision date:** July 19, 2026
 
 Outflow's account layer uses Supabase for identity, Postgres data, row-level authorization, transactional functions, Realtime, and Edge Functions; Resend for authentication and reminder email; and Stripe Checkout for the direct-web one-time Pro purchase. Guest mode remains fully local and none of these services are required to use the tracker.
@@ -86,14 +86,15 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 
 Before enabling accounts in a public build:
 
-1. Provision Supabase and apply the migration under `supabase/migrations`.
-2. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
-3. Deploy `stripe-webhook`, `send-due-reminders`, and `calendar-feed` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature, the reminder worker verifies its dedicated cron bearer secret, and the calendar endpoint verifies a database-generated private URL token.
-4. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, and an active fixed one-time Stripe Price.
-5. Connect a verified Resend sending domain to Supabase Auth.
-6. Configure permitted Auth redirect URLs for production and local development.
-7. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
-8. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
-9. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
-10. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).
-11. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.
+1. Complete the ordered, secret-safe [Service Provisioning Runbook](service-provisioning.md).
+2. Provision Supabase and apply every migration under `supabase/migrations`.
+3. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
+4. Deploy `stripe-webhook`, `send-due-reminders`, and `calendar-feed` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature, the reminder worker verifies its dedicated cron bearer secret, and the calendar endpoint verifies a database-generated private URL token.
+5. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, and an active fixed one-time Stripe Price.
+6. Connect a verified Resend sending domain to Supabase Auth.
+7. Configure permitted Auth redirect URLs for production and local development.
+8. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
+9. Run two-browser revision conflict, idempotent replay, Realtime refresh, stale-edit, and reconnect tests before describing synchronization as available publicly.
+10. Complete the Stripe test-mode matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
+11. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).
+12. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.

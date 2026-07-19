@@ -9,6 +9,17 @@ permissions:
   contents: read
 
 jobs:
+  functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.8.1
+      - run: npm run test:function-types
+
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,6 +60,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:account-prompts
       - run: npm run test:feature-access
+      - run: npm run test:service-readiness
       - run: npm run test:account-service
       - run: npm run test:pwa-cache
       - run: npm run test:pwa
