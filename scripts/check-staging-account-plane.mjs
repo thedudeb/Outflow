@@ -22,6 +22,8 @@ const expectedCheckNames = Object.freeze([
   "calendar feed revocation",
   "idempotent write replay",
   "stale revision conflict",
+  "authoritative reconnect catch-up",
+  "post-reconnect Realtime delivery",
   "member access revocation",
   "account deletion function",
   "cascade cleanup",
@@ -213,18 +215,19 @@ function deferredTimeout(label, timeoutMs) {
   };
 }
 
-export function openRealtimeProbe(client, ledgerId, expectedSubscriptionId, timeoutMs = 15_000) {
+export function openRealtimeProbe(client, ledgerId, expectedSubscriptionId, timeoutMs = 15_000, event = "INSERT") {
+  assert(["INSERT", "UPDATE"].includes(event), "Realtime probe event");
   const subscribed = deferredTimeout("Realtime subscription", timeoutMs);
   const delivered = deferredTimeout("Realtime delivery", timeoutMs);
   const channel = client
     .channel(`outflow-acceptance-${randomUUID()}`)
     .on("postgres_changes", {
-      event: "INSERT",
+      event,
       schema: "public",
       table: "subscriptions",
       filter: `ledger_id=eq.${ledgerId}`,
     }, (payload) => {
-      if (payload?.new?.ledger_id === ledgerId && payload?.new?.id === expectedSubscriptionId) {
+      if (payload?.eventType === event && payload?.new?.ledger_id === ledgerId && payload?.new?.id === expectedSubscriptionId) {
         delivered.resolve({ eventType: payload.eventType, schema: payload.schema, table: payload.table });
       }
     })
@@ -245,6 +248,118 @@ export function openRealtimeProbe(client, ledgerId, expectedSubscriptionId, time
       return client.removeChannel(channel);
     },
   };
+}
+
+async function readAcceptanceLedger(client, ledgerId) {
+  const ledgers = remoteResult(await client.from("ledgers")
+    .select("id, revision")
+    .eq("id", ledgerId), "authoritative reconnect ledger read");
+  const subscriptions = remoteResult(await client.from("subscriptions")
+    .select("id, amount, revision, updated_by")
+    .eq("ledger_id", ledgerId), "authoritative reconnect subscription read");
+  assert(ledgers?.length === 1 && Array.isArray(subscriptions), "authoritative reconnect read");
+  return { revision: Number(ledgers[0].revision), subscriptions };
+}
+
+export async function probeHostedRealtimeReconnect({
+  ownerClient,
+  editorClient,
+  ledgerId,
+  subscriptionId,
+  editorUserId,
+  initialSnapshot,
+  disconnectedSnapshot,
+  reconnectedSnapshot,
+  readState = readAcceptanceLedger,
+  openProbe = openRealtimeProbe,
+}) {
+  assert(
+    [initialSnapshot, disconnectedSnapshot, reconnectedSnapshot].every((snapshot) =>
+      Array.isArray(snapshot) && snapshot.length === 1 && snapshot[0]?.id === subscriptionId),
+    "Realtime reconnect snapshots",
+  );
+  const disconnectedWrite = remoteResult(await editorClient.rpc("replace_ledger_snapshot", {
+    target_ledger_id: ledgerId,
+    expected_revision: 1,
+    client_operation_id: randomUUID(),
+    subscriptions_payload: disconnectedSnapshot,
+  }), "disconnected editor write");
+  assert(
+    disconnectedWrite?.status === "applied"
+      && disconnectedWrite?.baseRevision === 1
+      && disconnectedWrite?.currentRevision === 2,
+    "disconnected editor write",
+  );
+
+  const conflict = remoteResult(await ownerClient.rpc("replace_ledger_snapshot", {
+    target_ledger_id: ledgerId,
+    expected_revision: 1,
+    client_operation_id: randomUUID(),
+    subscriptions_payload: initialSnapshot,
+  }), "stale revision conflict");
+  assert(
+    conflict?.status === "conflict"
+      && conflict?.baseRevision === 1
+      && conflict?.currentRevision === 2,
+    "stale revision conflict",
+  );
+
+  const caughtUp = await readState(ownerClient, ledgerId);
+  assert(Array.isArray(caughtUp?.subscriptions), "authoritative reconnect catch-up");
+  const caughtUpSubscription = caughtUp.subscriptions.find((row) => row.id === subscriptionId);
+  assert(
+    caughtUp.revision === 2
+      && caughtUp.subscriptions.length === 1
+      && Number(caughtUpSubscription?.amount) === Number(disconnectedSnapshot[0].amount)
+      && Number(caughtUpSubscription?.revision) === 1
+      && caughtUpSubscription?.updated_by === editorUserId,
+    "authoritative reconnect catch-up",
+  );
+
+  const realtime = openProbe(ownerClient, ledgerId, subscriptionId, 15_000, "UPDATE");
+  let closeResult;
+  try {
+    assert(await realtime.subscribed === "SUBSCRIBED", "post-reconnect Realtime delivery");
+    const reconnectedWrite = remoteResult(await editorClient.rpc("replace_ledger_snapshot", {
+      target_ledger_id: ledgerId,
+      expected_revision: 2,
+      client_operation_id: randomUUID(),
+      subscriptions_payload: reconnectedSnapshot,
+    }), "reconnected editor write");
+    assert(
+      reconnectedWrite?.status === "applied"
+        && reconnectedWrite?.baseRevision === 2
+        && reconnectedWrite?.currentRevision === 3,
+      "post-reconnect Realtime delivery",
+    );
+    const event = await realtime.delivered;
+    assert(
+      event?.eventType === "UPDATE"
+        && event?.schema === "public"
+        && event?.table === "subscriptions",
+      "post-reconnect Realtime delivery",
+    );
+    const synchronized = await readState(ownerClient, ledgerId);
+    assert(Array.isArray(synchronized?.subscriptions), "post-reconnect Realtime delivery");
+    const synchronizedSubscription = synchronized.subscriptions.find((row) => row.id === subscriptionId);
+    assert(
+      synchronized.revision === 3
+        && synchronized.subscriptions.length === 1
+        && Number(synchronizedSubscription?.amount) === Number(reconnectedSnapshot[0].amount)
+        && Number(synchronizedSubscription?.revision) === 2
+        && synchronizedSubscription?.updated_by === editorUserId,
+      "post-reconnect Realtime delivery",
+    );
+  } finally {
+    closeResult = await realtime.close();
+  }
+  assert(closeResult === "ok", "post-reconnect Realtime delivery");
+
+  return [
+    "stale revision conflict",
+    "authoritative reconnect catch-up",
+    "post-reconnect Realtime delivery",
+  ];
 }
 
 async function cleanupAcceptance(admin, userIds, closeRealtime) {
@@ -579,14 +694,16 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     assert(JSON.stringify(replay) === JSON.stringify(applied), "idempotent write replay");
     completed.push("idempotent write replay");
 
-    const conflict = remoteResult(await owner.client.rpc("replace_ledger_snapshot", {
-      target_ledger_id: fixture.teamId,
-      expected_revision: 0,
-      client_operation_id: randomUUID(),
-      subscriptions_payload: editorSnapshot,
-    }), "stale revision conflict");
-    assert(conflict?.status === "conflict" && conflict?.baseRevision === 0 && conflict?.currentRevision === 1, "stale revision conflict");
-    completed.push("stale revision conflict");
+    completed.push(...await probeHostedRealtimeReconnect({
+      ownerClient: owner.client,
+      editorClient: member.client,
+      ledgerId: fixture.teamId,
+      subscriptionId: editorSubscriptionId,
+      editorUserId: memberUser.id,
+      initialSnapshot: editorSnapshot,
+      disconnectedSnapshot: [subscription(editorSubscriptionId, "Editor Acceptance", 44)],
+      reconnectedSnapshot: [subscription(editorSubscriptionId, "Editor Acceptance", 55)],
+    }));
 
     const removed = remoteResult(await owner.client.from("ledger_members")
       .delete()
@@ -680,7 +797,7 @@ export function buildAccountPlaneReport({
     "",
     ...validMigrations.map((name) => `- \`${name}\``),
     "",
-    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, two-client Realtime delivery, hosted calendar publication/HTTP lifecycle, member revocation, and account deletion. Provider email, Realtime reconnect behavior, third-party calendar clients, reminders, and Stripe still require their separate staging matrices.",
+    "> Scope: Supabase identity, RLS, migration, invitation acceptance, revision writes, two-client Realtime delivery, explicit disconnect, stale-write rejection, authoritative catch-up, post-reconnect delivery, hosted calendar publication/HTTP lifecycle, member revocation, and account deletion. Browser-visible reconnect behavior, provider email, third-party calendar clients, reminders, and Stripe still require their separate staging matrices.",
     "",
   ].join("\n");
 }

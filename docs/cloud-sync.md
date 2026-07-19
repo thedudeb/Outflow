@@ -1,6 +1,6 @@
 # Cloud Ledger Synchronization
 
-**Status:** Implemented runtime, service deployment pending
+**Status:** Implemented runtime and protected hosted-client acceptance; external staging deployment pending
 
 Outflow keeps browser-local and cloud ledgers as separate data sources. Opening a cloud ledger is explicit, and its totals never merge into the active local ledger. The header always identifies the active storage source, member role, revision, and synchronization state.
 
@@ -56,6 +56,12 @@ The visible runtime states are:
 - Signing out closes the cloud session and restores the untouched local ledger and totals.
 
 The database half of the same contract runs through `npm run test:account-foundation`, covering RLS, roles, idempotent replay, stale revision rejection, attribution storage, and entitlement changes against every migration. These fixtures are a deterministic preflight; the two-browser matrix must still pass against provisioned Supabase Realtime before public synchronization is enabled.
+
+## Protected Hosted Contract
+
+`npm run test:staging-account-plane` validates the hosted acceptance harness without network access. Once the protected Supabase staging project is provisioned, **Staging Account Plane** uses separate authenticated owner and editor clients against the deployed database and Realtime service. After the initial insert reaches the owner, the harness explicitly removes that channel, commits revision 2 through the editor, rejects the owner's revision-1 write without changing server data, and reloads the authoritative revision-2 amount and updater. It then subscribes a fresh filtered channel, commits revision 3, requires the exact `UPDATE` event, reloads the matching revision-3 snapshot, and closes the channel before account teardown.
+
+The fixed workflow report records only named checks and deployment metadata. It does not record account IDs, row payloads, operation IDs, session credentials, or Realtime messages. This proves the hosted authorization, revision, catch-up, and transport sequence through two service clients. It does not prove the browser's visible `offline`, `conflict`, `stale`, and `synced` transitions against the deployed project; that two-browser UI pass remains required before public synchronization claims.
 
 ## Offline Boundary
 

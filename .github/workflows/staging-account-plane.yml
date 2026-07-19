@@ -13,6 +13,7 @@ concurrency:
 jobs:
   account-plane:
     name: Authenticated account-plane acceptance
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: staging

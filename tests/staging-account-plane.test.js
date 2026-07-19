@@ -5,6 +5,7 @@ import {
   buildAccountPlaneReport,
   openRealtimeProbe,
   probeHostedCalendarLifecycle,
+  probeHostedRealtimeReconnect,
   resolveAccountAcceptanceConfig,
 } from "../scripts/check-staging-account-plane.mjs";
 
@@ -64,6 +65,8 @@ test("account-plane report records bounded evidence without synthetic identities
     "calendar feed revocation",
     "idempotent write replay",
     "stale revision conflict",
+    "authoritative reconnect catch-up",
+    "post-reconnect Realtime delivery",
     "member access revocation",
     "account deletion function",
     "cascade cleanup",
@@ -83,11 +86,13 @@ test("account-plane report records bounded evidence without synthetic identities
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /PASS\*\* \(19 authenticated checks\)/);
+  assert.match(report, /PASS\*\* \(21 authenticated checks\)/);
   assert.match(report, /PASS \/ cross-user ledger isolation/);
   assert.match(report, /PASS \/ two-client Realtime delivery/);
+  assert.match(report, /PASS \/ authoritative reconnect catch-up/);
+  assert.match(report, /PASS \/ post-reconnect Realtime delivery/);
   assert.match(report, /Migration Inventory \(2\)/);
-  assert.match(report, /Provider email, Realtime reconnect behavior, third-party calendar clients/);
+  assert.match(report, /Browser-visible reconnect behavior, provider email, third-party calendar clients/);
   assert.doesNotMatch(report, /sb_(?:publishable|secret)_|@example\.com|Bearer\s|password|A{43}|B{43}/i);
   assert.doesNotMatch(report, /not-a-migration/);
   assert.throws(
@@ -155,6 +160,97 @@ test("Realtime probe waits for the exact authenticated insert and removes its ch
   });
   assert.equal(await probe.close(), "ok");
   assert.equal(removedChannel, channel);
+});
+
+test("hosted reconnect probe rejects a missed stale write, catches up, and receives the next update", async () => {
+  const editorUserId = "22222222-2222-4222-8222-222222222222";
+  const subscriptionId = "accept-subscription";
+  const initialSnapshot = [{ id: subscriptionId, amount: 33 }];
+  const disconnectedSnapshot = [{ id: subscriptionId, amount: 44 }];
+  const reconnectedSnapshot = [{ id: subscriptionId, amount: 55 }];
+  const editorCalls = [];
+  const ownerCalls = [];
+  const editorClient = {
+    async rpc(name, body) {
+      editorCalls.push({ name, body });
+      assert.equal(name, "replace_ledger_snapshot");
+      assert.match(body.client_operation_id, /^[0-9a-f-]{36}$/);
+      if (body.expected_revision === 1) {
+        return { data: { status: "applied", baseRevision: 1, currentRevision: 2 }, error: null };
+      }
+      if (body.expected_revision === 2) {
+        return { data: { status: "applied", baseRevision: 2, currentRevision: 3 }, error: null };
+      }
+      return { data: null, error: { code: "unexpected_revision" } };
+    },
+  };
+  const ownerClient = {
+    async rpc(name, body) {
+      ownerCalls.push({ name, body });
+      assert.equal(name, "replace_ledger_snapshot");
+      assert.match(body.client_operation_id, /^[0-9a-f-]{36}$/);
+      return { data: { status: "conflict", baseRevision: 1, currentRevision: 2 }, error: null };
+    },
+  };
+  let readCount = 0;
+  const readState = async (client, ledgerId) => {
+    assert.equal(client, ownerClient);
+    assert.equal(ledgerId, "accept-ledger");
+    readCount += 1;
+    return readCount === 1
+      ? {
+        revision: 2,
+        subscriptions: [{ id: subscriptionId, amount: "44.0000", revision: 1, updated_by: editorUserId }],
+      }
+      : {
+        revision: 3,
+        subscriptions: [{ id: subscriptionId, amount: "55.0000", revision: 2, updated_by: editorUserId }],
+      };
+  };
+  let closeCount = 0;
+  const openProbe = (client, ledgerId, expectedSubscriptionId, timeoutMs, event) => {
+    assert.equal(client, ownerClient);
+    assert.equal(ledgerId, "accept-ledger");
+    assert.equal(expectedSubscriptionId, subscriptionId);
+    assert.equal(timeoutMs, 15_000);
+    assert.equal(event, "UPDATE");
+    return {
+      subscribed: Promise.resolve("SUBSCRIBED"),
+      delivered: Promise.resolve({ eventType: "UPDATE", schema: "public", table: "subscriptions" }),
+      async close() {
+        closeCount += 1;
+        return "ok";
+      },
+    };
+  };
+
+  const completed = await probeHostedRealtimeReconnect({
+    ownerClient,
+    editorClient,
+    ledgerId: "accept-ledger",
+    subscriptionId,
+    editorUserId,
+    initialSnapshot,
+    disconnectedSnapshot,
+    reconnectedSnapshot,
+    readState,
+    openProbe,
+  });
+
+  assert.deepEqual(completed, [
+    "stale revision conflict",
+    "authoritative reconnect catch-up",
+    "post-reconnect Realtime delivery",
+  ]);
+  assert.deepEqual(editorCalls.map(({ body }) => [body.expected_revision, body.subscriptions_payload]), [
+    [1, disconnectedSnapshot],
+    [2, reconnectedSnapshot],
+  ]);
+  assert.equal(ownerCalls.length, 1);
+  assert.equal(ownerCalls[0].body.expected_revision, 1);
+  assert.equal(ownerCalls[0].body.subscriptions_payload, initialSnapshot);
+  assert.equal(readCount, 2);
+  assert.equal(closeCount, 1);
 });
 
 test("hosted calendar probe validates private HTTP lifecycle without returning feed secrets", async () => {
@@ -248,6 +344,7 @@ test("the account-plane workflow is manual, protected, and provider-secret free"
   assert.match(source, /workflow_dispatch:/);
   assert.doesNotMatch(source, /\b(push|pull_request|schedule):/);
   assert.match(source, /environment: staging/);
+  assert.match(source, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(source, /permissions:\n\s+contents: read/);
   assert.match(source, /persist-credentials: false/);
   assert.match(source, /OUTFLOW_ACCEPTANCE_MODE: staging/);
@@ -270,9 +367,16 @@ test("the live harness uses authenticated sessions, fixed assertions, and finall
   assert.match(source, /accept_ledger_invitation/);
   assert.match(source, /replace_ledger_snapshot/);
   assert.match(source, /postgres_changes/);
-  assert.match(source, /event: "INSERT"/);
+  assert.match(source, /event = "INSERT"/);
   assert.match(source, /await realtime\.delivered/);
   assert.match(source, /removeChannel\(channel\)/);
+  assert.match(source, /probeHostedRealtimeReconnect/);
+  assert.match(source, /expected_revision: 2/);
+  assert.match(source, /15_000, "UPDATE"/);
+  assert.ok(
+    source.indexOf('assert(await realtime.close() === "ok"')
+      < source.lastIndexOf("completed.push(...await probeHostedRealtimeReconnect({"),
+  );
   assert.match(source, /probeHostedCalendarLifecycle/);
   assert.match(source, /If-None-Match/);
   assert.match(source, /method: "HEAD"/);
