@@ -37,3 +37,12 @@ Paused subscriptions are excluded by default. Users may explicitly include them 
 ## Privacy Boundary
 
 Calendar exports include only subscription name, amount, currency, cycle, category, next billing date, status, and local ledger identity. They exclude tags, trial dates, reminder rules, account credentials, browser permissions, payment details, and bank information.
+
+## Automated Calendar Contract
+
+Run `npm run test:e2e` to verify downloaded iCalendar artifacts in desktop and mobile Chromium profiles. The browser suite proves:
+
+- Default downloads include active subscriptions only and preserve Outflow, ledger, category, amount, recurrence, privacy, transparency, and free/busy identity.
+- Editing a billing date keeps the event UID stable while incrementing `SEQUENCE`, changing `DTSTART`, and publishing a newer `LAST-MODIFIED` timestamp.
+- Paused schedules remain excluded until explicitly selected, then export with `TENTATIVE` status and a paused-schedule description.
+- Export filenames and calendar names remain ledger-specific and recognizable as Outflow data.

@@ -935,11 +935,6 @@ function calendarDateParts(value) {
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()];
 }
 
-function calendarTimestampParts(value) {
-  const date = new Date(value);
-  return [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes()];
-}
-
 function subscriptionCalendarEvent(subscription, ledger) {
   const endDate = parseDate(subscription.nextBillingDate);
   endDate.setDate(endDate.getDate() + 1);
@@ -965,7 +960,7 @@ function subscriptionCalendarEvent(subscription, ledger) {
     transp: "TRANSPARENT",
     classification: "PRIVATE",
     recurrenceRule,
-    lastModified: calendarTimestampParts(subscription.updatedAt),
+    lastModified: new Date(subscription.updatedAt).getTime(),
   };
 }
 
