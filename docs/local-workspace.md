@@ -44,6 +44,16 @@ If a stored workspace cannot be validated, Outflow attempts the legacy migration
 - Local records attribute user changes to `Local guest`; automatic billing-date advances are attributed to `Outflow`.
 - There are no invitations, remote members, permissions, cloud backups, or synchronization claims in this milestone.
 
+## Automated Isolation Contract
+
+`npm run test:e2e` verifies the local collaboration boundary in desktop and mobile Chromium. The contract proves that:
+
+- A newly created household ledger starts empty and has a zero monthly total.
+- Adding a shared subscription changes only the active shared ledger and attributes the change to `Local guest`.
+- The active ledger, its totals, records, and attribution survive a reload.
+- Switching back to the personal ledger restores its original total and records without shared subscriptions.
+- Team deletion requires a separate confirmation action, persists after reload, and cannot delete the personal ledger.
+
 ## Account Migration Boundary
 
 The selected account service uploads the complete workspace through one transactional migration function using stable ledger and subscription IDs. Server acknowledgement must identify every accepted ledger and revision before any local ledger is marked synchronized. Personal, household, and team membership must remain separate server-side, and remote totals must never be merged merely because the same account can access multiple ledgers. See [service-architecture.md](service-architecture.md).
