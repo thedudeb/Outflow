@@ -1,6 +1,6 @@
 # Durable Email Reminders
 
-Outflow keeps browser device alerts and account email reminders as independent channels. Device alerts stay local and free. Email automation is an optional Pro capability that runs from trusted infrastructure and never exposes the Resend key or delivery history to the browser.
+Outflow keeps browser device alerts and account email reminders as independent channels. Device alerts stay local and free under the [local device-alert contract](device-alerts.md). Email automation is an optional Pro capability that runs from trusted infrastructure and never exposes the Resend key or delivery history to the browser.
 
 ## Delivery Model
 
