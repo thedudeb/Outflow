@@ -23,4 +23,4 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run test:account-prompts
-      - run: npm run test:a11y
+      - run: npm run test:e2e

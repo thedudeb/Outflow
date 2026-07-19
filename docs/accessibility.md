@@ -36,7 +36,7 @@ Outflow exposes changes that do not move focus through shared live-region semant
 
 Run `npm run test:a11y` to start an isolated Vite server and execute axe-core through Playwright. The gate checks WCAG 2.0, 2.1, and 2.2 A/AA rules in Chromium using desktop and mobile device profiles.
 
-Coverage includes the landing page, the complete tracker dashboard, and the account, calendar export, ledger controls, alert controls, and CSV import dialogs. Any reported violation fails the command with its rule, impact, and affected selectors. GitHub Actions runs the same suite on pull requests and pushes to `main` after the production build and unit tests.
+Coverage includes the landing page, the complete tracker dashboard, and the account, calendar export, ledger controls, alert controls, and CSV import dialogs. Any reported violation fails the command with its rule, impact, and affected selectors. GitHub Actions includes the same scans in `npm run test:e2e` on pull requests and pushes to `main` after the production build and unit tests.
 
 Automated checks cannot prove reading order quality, announcement timing, understandable control labels, or assistive-technology behavior. They are a regression floor, not a substitute for the manual release audit.
 

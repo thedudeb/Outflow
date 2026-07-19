@@ -34,3 +34,12 @@ Outflow exports UTF-8 CSV with one subscription per row. The first row contains 
 - Imports require a preview and explicit confirmation.
 - Spreadsheet-formula prefixes are escaped during export.
 - Imports never connect to a bank or transmit ledger data to an external service.
+
+## Automated Portability Contract
+
+Run `npm run test:e2e` to verify the complete CSV workflow in desktop and mobile Chromium profiles. The browser suite proves:
+
+- Common source-column aliases map into the canonical Outflow fields.
+- Preview counts and row states respond to mapping changes, validation failures, existing-ledger duplicates, and duplicates within the source file.
+- Only ready rows are imported after the explicit confirmation command, and confirmed subscriptions survive a reload.
+- Exports use every canonical column listed above, retain user-visible values and attribution, and escape spreadsheet-formula prefixes.

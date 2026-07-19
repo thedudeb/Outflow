@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { openTracker } from "./helpers";
 
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
 
@@ -50,12 +51,6 @@ async function expectNoWcagViolations(page, scope = null) {
   if (scope) scan = scan.include(scope);
   const { violations } = await scan.analyze();
   expect(violations.length, violationSummary(violations)).toBe(0);
-}
-
-async function openTracker(page) {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open tracker", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
 }
 
 test("landing page meets the automated WCAG A and AA gate", async ({ page }) => {

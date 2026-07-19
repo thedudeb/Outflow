@@ -8,7 +8,8 @@
     "build": "vite build",
     "test:account-prompts": "node --test tests/account-prompt.test.js",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
-    "test:a11y": "playwright test",
+    "test:a11y": "playwright test tests/e2e/accessibility.spec.js",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
