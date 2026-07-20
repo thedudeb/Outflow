@@ -123,6 +123,12 @@ test("landing page and tracker reflow without document overflow at 320 CSS pixel
   await page.getByRole("button", { name: "Open tracker", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await expectDocumentToReflow(page);
+
+  const dateGeometry = await page.getByLabel("Next billing date", { exact: true }).evaluate((element) => ({
+    fieldWidth: element.getBoundingClientRect().width,
+    labelWidth: element.parentElement?.getBoundingClientRect().width || 0,
+  }));
+  expect(dateGeometry.fieldWidth, JSON.stringify(dateGeometry)).toBeGreaterThanOrEqual(dateGeometry.labelWidth - 1);
 });
 
 test("core dialogs remain contained and reflow at 320 CSS pixels", async ({ page }) => {

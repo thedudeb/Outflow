@@ -3748,7 +3748,7 @@ function Tracker({ onExit, pwa }) {
                 onInput={(event) => updateField("nextBillingDate", event.currentTarget.value)}
                 min={form.trialEndDate || undefined}
                 required
-                className="h-10 border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
+                className="h-10 w-full border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
               />
             </Field>
 
@@ -3777,7 +3777,7 @@ function Tracker({ onExit, pwa }) {
                 type="date"
                 value={form.trialEndDate}
                 onInput={(event) => updateTrialEndDate(event.currentTarget.value)}
-                className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                className="h-10 w-full min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
               />
             </Field>
 

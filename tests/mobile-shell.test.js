@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import test from "node:test";
 
@@ -82,4 +83,112 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.match(quality, /npm run test:mobile-shell/);
   assert.match(quality, /npm run mobile:ios:build/);
   assert.match(quality, /npm run check:mobile:ios-bundle/);
+});
+
+test("the generated Android target preserves Outflow identity and mobile coverage", () => {
+  const config = JSON.parse(read("src-tauri/tauri.conf.json"));
+  const androidConfig = JSON.parse(read("src-tauri/tauri.android.conf.json"));
+  const gradle = read("src-tauri/gen/android/app/build.gradle.kts");
+  const manifest = read("src-tauri/gen/android/app/src/main/AndroidManifest.xml");
+  const activity = read("src-tauri/gen/android/app/src/main/java/com/thedudeb/outflow/MainActivity.kt");
+  const strings = read("src-tauri/gen/android/app/src/main/res/values/strings.xml");
+  const colors = read("src-tauri/gen/android/app/src/main/res/values/colors.xml");
+  const theme = read("src-tauri/gen/android/app/src/main/res/values/themes.xml");
+  const android12Theme = read("src-tauri/gen/android/app/src/main/res/values-v31/themes.xml");
+
+  assert.equal(config.productName, "Outflow");
+  assert.equal(config.identifier, "com.thedudeb.outflow");
+  assert.equal(config.app.windows[0].url, "index.html#app");
+  assert.equal(androidConfig.bundle.android.minSdkVersion, 24);
+  assert.match(gradle, /compileSdk = 36/);
+  assert.match(gradle, /namespace = "com\.thedudeb\.outflow"/);
+  assert.match(gradle, /applicationId = "com\.thedudeb\.outflow"/);
+  assert.match(gradle, /minSdk = 24/);
+  assert.match(gradle, /targetSdk = 36/);
+  assert.match(gradle, /applicationIdSuffix = "\.debug"/);
+  assert.match(manifest, /android:name="\.MainActivity"/);
+  assert.match(manifest, /android:name="android\.intent\.category\.LAUNCHER"/);
+  assert.doesNotMatch(manifest, /LEANBACK|android\.software\.leanback/);
+  assert.match(activity, /class MainActivity : TauriActivity\(\)/);
+  assert.match(activity, /super\.onCreate\(savedInstanceState\)/);
+  assert.doesNotMatch(activity, /enableEdgeToEdge/);
+  assert.match(strings, /<string name="app_name">"Outflow"<\/string>/);
+  assert.match(colors, /<color name="outflow_background">#FF08090A<\/color>/);
+  assert.doesNotMatch(colors, /purple|teal/i);
+  assert.match(theme, /android:windowBackground">@color\/outflow_background/);
+  assert.match(android12Theme, /android:windowSplashScreenBackground">@color\/outflow_background/);
+  assert.match(android12Theme, /android:windowSplashScreenAnimatedIcon">@mipmap\/ic_launcher_foreground/);
+});
+
+test("the Android launcher catalog is complete and generated from Outflow artwork", () => {
+  const densities = ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"];
+  const variants = ["ic_launcher.png", "ic_launcher_foreground.png", "ic_launcher_round.png"];
+
+  densities.forEach((density) => {
+    variants.forEach((variant) => {
+      const iconUrl = new URL(`src-tauri/gen/android/app/src/main/res/mipmap-${density}/${variant}`, root);
+      assert.equal(existsSync(iconUrl), true, `${density}/${variant} is missing`);
+      assert.ok(statSync(iconUrl).size > 500, `${density}/${variant} is empty`);
+      assert.deepEqual([...readFileSync(iconUrl).subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    });
+  });
+});
+
+test("the Android native boundary is private, immediate-notification-only, and CI built", () => {
+  const packageJson = JSON.parse(read("package.json"));
+  const capability = JSON.parse(read("src-tauri/capabilities/main-notifications.json"));
+  const manifest = read("src-tauri/gen/android/app/src/main/AndroidManifest.xml");
+  const filePaths = read("src-tauri/gen/android/app/src/main/res/xml/file_paths.xml");
+  const mainNetwork = read("src-tauri/gen/android/app/src/main/res/xml/network_security_config.xml");
+  const debugNetwork = read("src-tauri/gen/android/app/src/debug/res/xml/network_security_config.xml");
+  const backend = read("src-tauri/src/lib.rs");
+  const initializer = read("scripts/init-android-project.mjs");
+  const inspector = read("scripts/check-android-bundle.mjs");
+  const wrapperProperties = read("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties");
+  const wrapperJar = readFileSync(new URL("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar", root));
+  const quality = read(".github/workflows/quality.yml");
+
+  assert.equal(packageJson.scripts["mobile:android:init"], "node scripts/init-android-project.mjs");
+  assert.equal(packageJson.scripts["mobile:android:build"], "tauri android build --ci --debug --target aarch64 --apk");
+  assert.equal(packageJson.scripts["check:mobile:android-bundle"], "node scripts/check-android-bundle.mjs");
+  assert.deepEqual(capability.permissions, [
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+  ]);
+  assert.match(manifest, /android:allowBackup="false"/);
+  assert.match(manifest, /android:fullBackupContent="false"/);
+  assert.match(manifest, /android\.permission\.POST_NOTIFICATIONS/);
+  assert.match(manifest, /android\.permission\.RECEIVE_BOOT_COMPLETED" tools:node="remove"/);
+  assert.match(manifest, /android\.permission\.WAKE_LOCK" tools:node="remove"/);
+  assert.match(manifest, /TimedNotificationPublisher" tools:node="remove"/);
+  assert.match(manifest, /LocalNotificationRestoreReceiver" tools:node="remove"/);
+  assert.doesNotMatch(manifest, /READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|ACCESS_FINE_LOCATION|CAMERA|RECORD_AUDIO|READ_CONTACTS/);
+  assert.match(filePaths, /<cache-path name="outflow_cache" path="\." \/>/);
+  assert.doesNotMatch(filePaths, /external-path|external-files-path/);
+  assert.match(mainNetwork, /<base-config cleartextTrafficPermitted="false" \/>/);
+  assert.doesNotMatch(mainNetwork, /domain-config/);
+  assert.match(debugNetwork, /<domain includeSubdomains="false">10\.0\.2\.2<\/domain>/);
+  assert.match(debugNetwork, /<domain includeSubdomains="false">localhost<\/domain>/);
+  assert.doesNotMatch(debugNetwork, /includeSubdomains="true"/);
+  assert.match(backend, /#\[cfg_attr\(mobile, tauri::mobile_entry_point\)\]/);
+  assert.match(backend, /tauri_plugin_notification::init\(\)/);
+  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell|process/);
+  assert.match(initializer, /execFileSync\(tauri, \["android", "init", "--ci"/);
+  assert.match(initializer, /generated Android compile SDK changed/);
+  assert.match(initializer, /Generated the hardened Outflow Android project/);
+  assert.match(inspector, /Signer #1 certificate DN: .*CN=Android Debug/);
+  assert.match(inspector, /"-P", "16"/);
+  assert.match(wrapperProperties, /distributionUrl=https\\:\/\/services\.gradle\.org\/distributions\/gradle-8\.14\.3-bin\.zip/);
+  assert.match(wrapperProperties, /distributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531/);
+  assert.equal(
+    createHash("sha256").update(wrapperJar).digest("hex"),
+    "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172",
+  );
+  assert.match(quality, /android:\n\s+runs-on: ubuntu-latest/);
+  assert.match(quality, /NDK_HOME: \/usr\/local\/lib\/android\/sdk\/ndk\/27\.2\.12479018/);
+  assert.match(quality, /sdkmanager "platforms;android-36" "build-tools;36\.0\.0" "ndk;27\.2\.12479018"/);
+  assert.match(quality, /rustup target add aarch64-linux-android/);
+  assert.match(quality, /npm run mobile:android:build/);
+  assert.match(quality, /npm run check:mobile:android-bundle/);
 });

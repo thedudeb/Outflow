@@ -113,3 +113,29 @@ jobs:
       - run: npm run test:mobile-shell
       - run: npm run mobile:ios:build
       - run: npm run check:mobile:ios-bundle
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NDK_HOME: /usr/local/lib/android/sdk/ndk/27.2.12479018
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm ci
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+      - run: rustup target add aarch64-linux-android
+      - run: npm run test:device-notifications
+      - run: npm run test:mobile-shell
+      - run: npm run mobile:android:build
+      - run: npm run check:mobile:android-bundle
