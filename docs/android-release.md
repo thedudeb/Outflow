@@ -36,7 +36,32 @@ Providing any subset fails Gradle configuration before packaging. Values are not
 
 `npm run test:mobile:android-signing` exercises this boundary with a random password and a temporary self-signed test certificate outside the repository. It proves incomplete configuration is rejected, signs both artifacts, verifies their JAR/APK signatures against the exact certificate SHA-256 fingerprint, and deletes the temporary keystore. The resulting certificate is disposable and is not a production identity.
 
-## Protected Production Build
+## Protected GitHub Workflow
+
+`.github/workflows/android-release.yml` is a manual, `main`-only production upload-key acceptance path. Its `android-production` environment must have deployment-branch protection and required reviewers before credentials are added.
+
+Configure these environment variables:
+
+```text
+OUTFLOW_ANDROID_KEY_ALIAS
+OUTFLOW_ANDROID_UPLOAD_CERT_SHA256
+```
+
+The certificate fingerprint is an independent 32-byte SHA-256 pin recorded through a trusted channel, not calculated from the uploaded keystore secret during workflow configuration.
+
+Configure these environment secrets:
+
+```text
+OUTFLOW_ANDROID_KEYSTORE_BASE64
+OUTFLOW_ANDROID_KEYSTORE_PASSWORD
+OUTFLOW_ANDROID_KEY_PASSWORD
+```
+
+The workflow installs the pinned toolchain, passes release policy tests, and builds plus inspects an unsigned baseline before exposing any signing secret. It then decodes the keystore into a `0600` file in the ephemeral runner directory, validates its private-key entry and independently pinned certificate, builds the signed APK/AAB, removes the keystore, and verifies both artifacts against the same certificate pin. The preflight uses Java 17 `keytool`'s documented [`-storepass:env` modifier](https://docs.oracle.com/en/java/javase/17/docs/specs/man/keytool.html) so the store password is not placed in the process argument list.
+
+Because this repository is public and the R8 mapping file must travel with the eventual store release, the workflow uploads no APK, AAB, mapping file, keystore, or generic Actions artifact. It writes only the exact commit and SHA-256 hashes of the three ephemeral outputs to the bounded job summary. Play Console upload remains a separate protected operation after device and policy acceptance.
+
+## Operator Release Procedure
 
 1. Create and back up the production upload key outside the repository, restrict operator access, and record its SHA-256 certificate fingerprint through a separate trusted channel.
 2. Configure all four signing variables in a protected build environment. Mask the three secret values and limit the keystore file to the release job.

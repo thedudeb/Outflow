@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -48,6 +48,7 @@ try {
     "-validity", "3650",
     "-dname", "CN=Outflow CI Release Path, O=Outflow Test, C=CA",
   ], { stdio: "pipe" });
+  chmodSync(keystorePath, 0o600);
 
   const signingEnvironment = {
     ...cleanEnvironment,
@@ -56,11 +57,6 @@ try {
     OUTFLOW_ANDROID_KEY_ALIAS: alias,
     OUTFLOW_ANDROID_KEY_PASSWORD: password,
   };
-  execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "mobile:android:release"], {
-    env: signingEnvironment,
-    stdio: "inherit",
-  });
-
   const certificate = execFileSync(javaTool("keytool"), [
     "-list",
     "-v",
@@ -70,6 +66,18 @@ try {
   ], { encoding: "utf8" });
   const fingerprint = certificate.match(/SHA256:\s*([A-F0-9:]+)/i)?.[1]?.replaceAll(":", "");
   assert.match(fingerprint || "", /^[A-F0-9]{64}$/i, "temporary signing certificate fingerprint is unavailable");
+
+  execFileSync(process.execPath, ["scripts/check-android-release-environment.mjs"], {
+    env: {
+      ...signingEnvironment,
+      OUTFLOW_ANDROID_EXPECTED_CERT_SHA256: fingerprint,
+    },
+    stdio: "inherit",
+  });
+  execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "mobile:android:release"], {
+    env: signingEnvironment,
+    stdio: "inherit",
+  });
 
   execFileSync(process.execPath, ["scripts/check-android-release.mjs"], {
     env: {

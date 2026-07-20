@@ -196,6 +196,7 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.match(initializer, /replaceAll\(releaseSigningValues, ""\)/);
   assert.match(signingHarness, /partial Android signing configuration must fail closed/);
   assert.match(signingHarness, /mkdtempSync/);
+  assert.match(signingHarness, /check-android-release-environment\.mjs/);
   assert.match(signingHarness, /OUTFLOW_ANDROID_EXPECTED_CERT_SHA256/);
   assert.match(wrapperProperties, /distributionUrl=https\\:\/\/services\.gradle\.org\/distributions\/gradle-8\.14\.3-bin\.zip/);
   assert.match(wrapperProperties, /distributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531/);
@@ -210,6 +211,7 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.match(quality, /"build-tools;36\.0\.0"/);
   assert.match(quality, /"ndk;27\.2\.12479018"/);
   assert.match(quality, /rustup target add aarch64-linux-android/);
+  assert.match(quality, /npm run test:mobile:android-release/);
   assert.match(quality, /npm run mobile:android:build/);
   assert.match(quality, /npm run check:mobile:android-bundle/);
   assert.match(quality, /npm run mobile:android:release/);

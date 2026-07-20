@@ -143,6 +143,7 @@ jobs:
       - run: rustup target add aarch64-linux-android
       - run: npm run test:device-notifications
       - run: npm run test:mobile-shell
+      - run: npm run test:mobile:android-release
       - run: npm run mobile:android:build
       - run: npm run check:mobile:android-bundle
       - run: npm run mobile:android:release

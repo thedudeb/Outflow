@@ -1,0 +1,98 @@
+name: Android Production Signing Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-android-production-signing
+  cancel-in-progress: false
+
+jobs:
+  signing-acceptance:
+    name: Upload-key signed release verification
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: android-production
+    env:
+      NDK_HOME: /usr/local/lib/android/sdk/ndk/27.2.12479018
+      OUTFLOW_ANDROID_KEY_ALIAS: ${{ vars.OUTFLOW_ANDROID_KEY_ALIAS }}
+      OUTFLOW_ANDROID_EXPECTED_CERT_SHA256: ${{ vars.OUTFLOW_ANDROID_UPLOAD_CERT_SHA256 }}
+      OUTFLOW_ANDROID_EXPECTED_COMMIT: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install pinned Android toolchain
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+          rustup target add aarch64-linux-android
+      - name: Verify release contracts before secrets
+        run: |
+          npm run test:device-notifications
+          npm run test:mobile-shell
+          npm run test:mobile:android-release
+      - name: Build and inspect unsigned baseline
+        run: |
+          npm run mobile:android:release
+          npm run check:mobile:android-release
+      - name: Materialize private upload keystore
+        env:
+          OUTFLOW_ANDROID_KEYSTORE_BASE64: ${{ secrets.OUTFLOW_ANDROID_KEYSTORE_BASE64 }}
+          OUTFLOW_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/outflow-upload-keystore.jks
+        run: |
+          umask 077
+          install -m 600 /dev/null "$OUTFLOW_ANDROID_KEYSTORE_PATH"
+          printf '%s' "$OUTFLOW_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$OUTFLOW_ANDROID_KEYSTORE_PATH"
+      - name: Verify protected signing environment
+        run: npm run check:mobile:android-release-environment
+        env:
+          OUTFLOW_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/outflow-upload-keystore.jks
+          OUTFLOW_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OUTFLOW_ANDROID_KEYSTORE_PASSWORD }}
+          OUTFLOW_ANDROID_KEY_PASSWORD: ${{ secrets.OUTFLOW_ANDROID_KEY_PASSWORD }}
+      - name: Build upload-key signed release
+        run: npm run mobile:android:release
+        env:
+          OUTFLOW_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/outflow-upload-keystore.jks
+          OUTFLOW_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.OUTFLOW_ANDROID_KEYSTORE_PASSWORD }}
+          OUTFLOW_ANDROID_KEY_PASSWORD: ${{ secrets.OUTFLOW_ANDROID_KEY_PASSWORD }}
+      - name: Remove upload keystore
+        if: always()
+        run: rm -f "$OUTFLOW_ANDROID_KEYSTORE_PATH"
+        env:
+          OUTFLOW_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/outflow-upload-keystore.jks
+      - name: Inspect fingerprint-pinned signed release
+        run: npm run check:mobile:android-release
+        env:
+          OUTFLOW_ANDROID_EXPECT_SIGNED: "true"
+      - name: Record bounded release evidence
+        run: |
+          {
+            echo "### Android signing acceptance"
+            echo
+            echo '```text'
+            sha256sum \
+              src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk \
+              src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab \
+              src-tauri/gen/android/app/build/outputs/mapping/universalRelease/mapping.txt
+            echo '```'
+            echo
+            echo "Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"

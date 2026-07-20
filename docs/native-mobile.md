@@ -15,6 +15,7 @@ These are build- and emulator-verified guest alphas, not production-signed mobil
 - `npm run check:mobile:android-bundle` inspects the merged manifest, identity, API levels, permissions, native ABI, debug certificate, and 16 KB ZIP alignment of the built APK.
 - `npm run mobile:android:release` creates a minified production-ID APK and AAB. Without a complete signing environment, the release-readiness artifacts intentionally remain unsigned.
 - `npm run check:mobile:android-release` verifies production identity, release manifest policy, permission scope, ARM64 packaging, 16 KB alignment, R8 output, AAB structure, and either the expected unsigned boundary or an explicitly requested pinned signing certificate.
+- `npm run test:mobile:android-release` covers the protected production environment and workflow policy, while `npm run check:mobile:android-release-environment` validates a real upload keystore, private-key alias, independent certificate pin, and exact `main` commit without printing values.
 - `npm run test:mobile:android-signing` rejects partial signing configuration, signs both release artifacts with a disposable external test keystore, pins their certificate fingerprint, and removes the keystore. See [android-release.md](android-release.md).
 
 ## Native Boundary
@@ -34,7 +35,7 @@ The local iOS acceptance build compiled an arm64 Simulator app, installed it as 
 
 The local Android acceptance build compiled an ARM64 APK, installed it as `com.thedudeb.outflow.debug`, and cold-launched it successfully on a clean Pixel 8 emulator running API 35. The live WebView reported a 412 CSS-pixel viewport and document width, full-width 355-pixel date controls, the expected five-record ledger after in-place APK replacement, and restart-safe local storage across process termination. Visual inspection confirmed a complete year in both native date controls, readable system status content, the intended dense layout, and no horizontal clipping. Filtered runtime logs contained no Outflow crash, fatal exception, blocked cleartext request, or WebView load error.
 
-The Quality workflow independently builds and inspects the unsigned iOS simulator bundle on a fresh `macos-latest` runner. On a fresh `ubuntu-latest` runner it verifies the debug-signed Android APK, the unsigned minified release APK/AAB, incomplete-signing rejection, and a disposable-certificate signed build with exact fingerprint matching. CI does not upload or distribute any mobile artifact and does not receive a production signing identity.
+The Quality workflow independently builds and inspects the unsigned iOS simulator bundle on a fresh `macos-latest` runner. On a fresh `ubuntu-latest` runner it verifies the debug-signed Android APK, the unsigned minified release APK/AAB, protected-workflow policy, incomplete-signing rejection, and a disposable-certificate signed build with exact fingerprint matching. CI does not upload or distribute any mobile artifact and does not receive a production signing identity. The separate manual `Android Production Signing Acceptance` workflow can verify an operator key behind the reviewed `android-production` environment, but it retains only bounded hashes and has not established acceptance until configured and run successfully.
 
 ## Release Work
 

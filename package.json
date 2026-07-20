@@ -49,6 +49,8 @@
     "check:mobile:ios-bundle": "node scripts/check-ios-bundle.mjs",
     "check:mobile:android-bundle": "node scripts/check-android-bundle.mjs",
     "check:mobile:android-release": "node scripts/check-android-release.mjs",
+    "check:mobile:android-release-environment": "node scripts/check-android-release-environment.mjs",
+    "test:mobile:android-release": "node --test tests/android-release.test.js",
     "test:mobile:android-signing": "node scripts/check-android-signing-path.mjs",
     "test:web-deployment": "playwright test --config=playwright.deployment.config.js",
     "pretest:pwa": "npm run build",
