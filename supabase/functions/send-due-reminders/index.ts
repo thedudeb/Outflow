@@ -1,4 +1,5 @@
 import { createAdminClient, resolveSupabaseRuntime } from "../_shared/supabase-runtime.ts";
+import { resendFailureCode } from "./reminder.ts";
 
 type Delivery = {
   delivery_id: string;
@@ -146,6 +147,7 @@ Deno.serve(async (request) => {
           Authorization: `Bearer ${resendKey}`,
           "Content-Type": "application/json",
           "Idempotency-Key": `outflow-reminder/${delivery.delivery_id}`,
+          "User-Agent": "outflow-reminder-worker/1.0",
         },
         body: JSON.stringify({
           from: reminderFrom,
@@ -163,7 +165,7 @@ Deno.serve(async (request) => {
         succeeded = Boolean(providerIdentifier);
         errorCode = succeeded ? "" : "resend_invalid_response";
       } else {
-        errorCode = `resend_${resendResponse.status}`;
+        errorCode = await resendFailureCode(resendResponse);
       }
     } catch {
       errorCode = "resend_network_error";

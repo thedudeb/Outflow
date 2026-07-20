@@ -5,6 +5,7 @@ import {
   buildMessagingPlaneReport,
   extractInvitationToken,
   invokeReminderWorker,
+  primeResendProviderConflict,
   replayResendDelivery,
   resolveMessagingAcceptanceConfig,
   schedulerStatusMatches,
@@ -43,6 +44,8 @@ const checks = [
   "paused reminder exclusion",
   "durable reminder retry",
   "retry provider delivery",
+  "provider API failure",
+  "provider failure retry",
   "reminder idempotent replay",
   "paused reminder opt-in",
   "provider bounce event",
@@ -302,6 +305,41 @@ test("provider replay uses the deployed delivery key and requires the original m
   }), /assertion failed/);
 });
 
+test("provider conflict primer uses one synthetic address and the deployed delivery key", async () => {
+  const deliveryId = "22222222-2222-4222-8222-222222222222";
+  let request;
+  const providerId = await primeResendProviderConflict({
+    resendKey,
+    recipient: "delivered+provider-failure@resend.dev",
+    from: "Outflow <reminders@example.test>",
+    deliveryId,
+    fetchImpl: async (input, init) => {
+      request = { input: String(input), init };
+      return Response.json({ id: "33333333-3333-4333-8333-333333333333" });
+    },
+  });
+  assert.equal(providerId, "33333333-3333-4333-8333-333333333333");
+  assert.equal(request.input, "https://api.resend.com/emails");
+  const headers = new Headers(request.init.headers);
+  assert.equal(headers.get("authorization"), `Bearer ${resendKey}`);
+  assert.equal(headers.get("idempotency-key"), `outflow-reminder/${deliveryId}`);
+  assert.equal(headers.get("user-agent"), "outflow-staging-acceptance/1.0");
+  assert.deepEqual(JSON.parse(request.init.body), {
+    from: "Outflow <reminders@example.test>",
+    to: ["delivered+provider-failure@resend.dev"],
+    subject: "Outflow synthetic provider-failure primer",
+    text: "Synthetic provider-failure acceptance. No customer data.",
+    html: "<p>Synthetic provider-failure acceptance. No customer data.</p>",
+  });
+
+  await assert.rejects(() => primeResendProviderConflict({
+    resendKey,
+    recipient: "person@example.com",
+    from: "Outflow <reminders@example.test>",
+    deliveryId,
+  }), /assertion failed/);
+});
+
 test("messaging report is fixed, bounded, and free of recipient and provider data", () => {
   const report = buildMessagingPlaneReport({
     checks,
@@ -315,9 +353,10 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
   assert.match(report, /PASS \/ provider invitation delivery/);
   assert.match(report, /PASS \/ cron scheduler registration/);
   assert.match(report, /PASS \/ durable reminder retry/);
+  assert.match(report, /PASS \/ provider API failure/);
+  assert.match(report, /invalid-idempotent-request 409/);
   assert.match(report, /PASS \/ provider suppression/);
   assert.match(report, /PASS \/ complaint suppression/);
-  assert.match(report, /first retry failure was injected/);
   assert.match(report, /Provider-originated signed bounce and complaint/);
   assert.match(report, /exact hourly Supabase Cron job/);
   assert.match(report, /does not prove delivery to a human inbox/);
@@ -346,6 +385,7 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.match(script, /delivered\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /bounced\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /complained\+outflow-reminder-\$\{suffix\}@resend\.dev/);
+  assert.match(script, /resend_409_invalid_idempotent_request/);
   assert.match(script, /admin\.rpc\("reminder_scheduler_status", \{ expected_project_ref: config\.projectRef \}\)/);
   assert.match(script, /notification_provider_events/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);

@@ -18,6 +18,8 @@ const expectedCheckNames = Object.freeze([
   "paused reminder exclusion",
   "durable reminder retry",
   "retry provider delivery",
+  "provider API failure",
+  "provider failure retry",
   "reminder idempotent replay",
   "paused reminder opt-in",
   "provider bounce event",
@@ -310,6 +312,39 @@ export async function replayResendDelivery({ resendKey, message, deliveryId, fet
   assert(response.status === 200, "Resend idempotency replay");
   const body = await boundedJson(response, "Resend idempotency replay");
   assert(body?.id === message.id, "Resend idempotency replay");
+  return body.id;
+}
+
+export async function primeResendProviderConflict({ resendKey, recipient, from, deliveryId, fetchImpl = fetch }) {
+  assert(/^delivered\+[a-z0-9-]{1,64}@resend\.dev$/.test(recipient), "Resend provider conflict primer");
+  assert(typeof from === "string" && from.length >= 3 && from.length <= 320 && !/[\r\n]/.test(from), "Resend provider conflict primer");
+  assert(/^[A-Fa-f0-9-]{36}$/.test(deliveryId), "Resend provider conflict primer");
+  let response;
+  try {
+    response = await fetchImpl(`${RESEND_API}/emails`, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        Authorization: `Bearer ${resendKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `outflow-reminder/${deliveryId}`,
+        "User-Agent": "outflow-staging-acceptance/1.0",
+      },
+      body: JSON.stringify({
+        from,
+        to: [recipient],
+        subject: "Outflow synthetic provider-failure primer",
+        text: "Synthetic provider-failure acceptance. No customer data.",
+        html: "<p>Synthetic provider-failure acceptance. No customer data.</p>",
+      }),
+    });
+  } catch {
+    throw new Error("Resend provider conflict primer: provider request failed.");
+  }
+  assert(response.status === 200, "Resend provider conflict primer");
+  const body = await boundedJson(response, "Resend provider conflict primer");
+  assert(/^[A-Za-z0-9-]{20,100}$/.test(body?.id || ""), "Resend provider conflict primer");
   return body.id;
 }
 
@@ -778,6 +813,84 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
     ), "retry provider delivery");
     completed.push("retry provider delivery");
 
+    const providerFailureId = `accept-message-provider-failure-${suffix}`;
+    await insertDueSubscription(
+      admin,
+      fixture.ledgerId,
+      ownerUser.id,
+      providerFailureId,
+      "Provider failure acceptance",
+      56.78,
+      billingDate,
+    );
+    const providerFailureClaimToken = randomUUID();
+    const providerFailureClaim = remoteResult(await admin.rpc("claim_due_email_notifications", {
+      requested_batch_size: 100,
+      worker_claim_token: providerFailureClaimToken,
+    }), "provider API failure claim");
+    assert(
+      providerFailureClaim?.length === 1
+        && providerFailureClaim[0].subscription_name === "Provider failure acceptance",
+      "provider API failure",
+    );
+    const providerFailureDeliveryId = providerFailureClaim[0].delivery_id;
+    remoteResult(await admin.from("notification_deliveries").update({
+      status: "pending",
+      attempt_count: 0,
+      next_attempt_at: new Date(Date.now() - 1_000).toISOString(),
+      claim_token: null,
+      claimed_at: null,
+      sent_at: null,
+      provider_message_id: null,
+      last_error_code: null,
+    }).eq("id", providerFailureDeliveryId), "provider API failure release");
+    await primeResendProviderConflict({
+      resendKey: config.resendKey,
+      recipient: ownerEmail,
+      from: activeMessage.from,
+      deliveryId: providerFailureDeliveryId,
+      fetchImpl,
+    });
+
+    const providerFailureWorker = await invokeReminderWorker(config, fetchImpl);
+    assert(workerMatches(providerFailureWorker, 1, 0, 1), "provider API failure");
+    const providerFailureRows = await deliveryRows(admin, ownerUser.id, [providerFailureId]);
+    assert(
+      providerFailureRows.length === 1
+        && providerFailureRows[0].id === providerFailureDeliveryId
+        && providerFailureRows[0].status === "failed"
+        && providerFailureRows[0].attempt_count === 1
+        && providerFailureRows[0].provider_message_id === null
+        && providerFailureRows[0].last_error_code === "resend_409_invalid_idempotent_request"
+        && Date.parse(providerFailureRows[0].next_attempt_at) > Date.now(),
+      "provider API failure",
+    );
+    completed.push("provider API failure");
+
+    const firstProviderBackoff = Date.parse(providerFailureRows[0].next_attempt_at);
+    remoteResult(await admin.from("notification_deliveries")
+      .update({ next_attempt_at: new Date(Date.now() - 1_000).toISOString() })
+      .eq("id", providerFailureDeliveryId), "provider failure retry release");
+    const providerFailureRetryWorker = await invokeReminderWorker(config, fetchImpl);
+    assert(workerMatches(providerFailureRetryWorker, 1, 0, 1), "provider failure retry");
+    const providerFailureRetryRows = await deliveryRows(admin, ownerUser.id, [providerFailureId]);
+    assert(
+      providerFailureRetryRows.length === 1
+        && providerFailureRetryRows[0].id === providerFailureDeliveryId
+        && providerFailureRetryRows[0].status === "failed"
+        && providerFailureRetryRows[0].attempt_count === 2
+        && providerFailureRetryRows[0].provider_message_id === null
+        && providerFailureRetryRows[0].last_error_code === "resend_409_invalid_idempotent_request"
+        && Date.parse(providerFailureRetryRows[0].next_attempt_at) > firstProviderBackoff,
+      "provider failure retry",
+    );
+    completed.push("provider failure retry");
+    const providerFailureParkedUntil = new Date();
+    providerFailureParkedUntil.setUTCFullYear(providerFailureParkedUntil.getUTCFullYear() + 100);
+    remoteResult(await admin.from("notification_deliveries")
+      .update({ next_attempt_at: providerFailureParkedUntil.toISOString() })
+      .eq("id", providerFailureDeliveryId), "provider failure isolation");
+
     const replayedProviderId = await replayResendDelivery({
       resendKey: config.resendKey,
       message: activeMessage,
@@ -943,7 +1056,8 @@ export function buildMessagingPlaneReport({ checks, projectRef, appOrigin, commi
     ...checks.map((check) => `- PASS / ${check}`),
     "",
     "This run required the exact hourly Supabase Cron job, named Vault configuration, a successful scheduler run within two hours, and HTTP 200 from its correlated pg_net request before using Resend's synthetic delivered-, bounced-, and complained-address contracts. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
-    "The first retry failure was injected at Outflow's durable completion boundary, then the deployed worker performed the provider retry. Scheduler evidence contains only fixed configuration checks, timestamps, and the correlated HTTP status; it does not expose a command, URL, request, response body, or secret. This does not prove delivery to a human inbox, actual provider API failure, or provider diversity.",
+    "A Resend test-address request primed one unique delivery key with a harmless synthetic payload. The deployed worker then received Resend's documented invalid-idempotent-request 409 for its different canonical payload, persisted only the bounded error class, and retried the same durable delivery under increasing backoff. Scheduler evidence contains only fixed configuration checks, timestamps, and the correlated HTTP status; no acceptance output exposes a scheduler command/endpoint, request/response body, provider identifier, or secret.",
+    "This does not prove delivery to a human inbox, an unplanned provider outage, provider diversity, or operational alert delivery.",
     "The report excludes identities, credentials, invitation links, message content, provider identifiers, database rows, and response bodies.",
     "",
   ].join("\n");

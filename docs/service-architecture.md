@@ -28,7 +28,7 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend da
 ### Resend
 
 - Resend supplies Supabase authentication email through its managed integration.
-- Charge and trial reminders are claimed from a durable, RLS-protected delivery ledger by the cron-authenticated `send-due-reminders` Edge Function. Resend idempotency keys protect provider retries.
+- Charge and trial reminders are claimed from a durable, RLS-protected delivery ledger by the cron-authenticated `send-due-reminders` Edge Function. Resend idempotency keys protect provider retries, and non-2xx responses retain only a bounded status/error-name class for backoff and operations.
 - A separate raw-body-signature-verified `resend-webhook` records bounded delivery events. Permanent bounces, complaints, and provider suppressions disable the account email channel and refresh the signed-in UI over RLS-filtered Realtime; raw recipients, subjects, and diagnostics are discarded.
 - The browser never receives a Resend API key or webhook signing secret.
 
@@ -103,5 +103,5 @@ Before enabling accounts in a public build:
 9. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
 10. Pass the protected account-plane disconnect, stale-conflict, authoritative catch-up, and post-reconnect delivery sequence, then pass **Staging Browser Sync** in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit before describing synchronization as available publicly; complete the branded-browser checks in [Browser Compatibility Contract](browser-compatibility.md) before broad support claims.
 11. Pass the protected signed-event billing-plane workflow, then complete the actual Stripe-hosted payment and provider-originated delivery matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
-12. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery, retry, signed bounce-suppression, and recovery matrix in [Durable Email Reminders](email-reminders.md).
+12. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery, planned provider-failure/retry, signed bounce/complaint suppression, and recovery matrix in [Durable Email Reminders](email-reminders.md).
 13. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.
