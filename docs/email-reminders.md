@@ -35,11 +35,11 @@ The same contract simulates a refund while email remains opted in. The channel b
 
 ## Protected Provider Contract
 
-`npm run test:staging-messaging-plane` validates the provider-acceptance harness without network access. After the protected staging project, deployed functions, verified sender, and Resend test key are configured, manually dispatch **Staging Messaging Plane** from `main`.
+`npm run test:staging-messaging-plane` validates the provider-acceptance harness without network access. After the protected staging project, deployed functions, verified sender, Resend test key, and hourly scheduler are configured, manually dispatch **Staging Messaging Plane** from `main`.
 
-The live step creates randomized, confirmed synthetic accounts whose addresses use Resend's labeled delivered, bounced, and complained test contracts. It invokes the deployed worker, retrieves each exact provider receipt, and requires a delivered event plus the expected subscription, amount, date, ledger, and application link. It replays the exact accepted payload with the deployed delivery's idempotency key and requires the original provider ID, then requires a second worker invocation to claim nothing. It also sends isolated reminders to labeled bounced and complained test addresses, waits for each exact terminal provider event, then requires the signed webhooks to update distinct durable event rows and suppress only the matching synthetic accounts. The bounce account must also recover through the authenticated resume RPC.
+Before creating data, the live step calls the service-role-only `reminder_scheduler_status` RPC with the protected staging project reference and requires `pg_cron`, `pg_net`, both valid named Vault entries, an endpoint bound to that project, the one active `7 * * * *` job with the repository-owned command, a successful run within two hours, and HTTP 200 for that run's correlated private `pg_net` request. It then creates randomized, confirmed synthetic accounts whose addresses use Resend's labeled delivered, bounced, and complained test contracts. It invokes the deployed worker, retrieves each exact provider receipt, and requires a delivered event plus the expected subscription, amount, date, ledger, and application link. It replays the exact accepted payload with the deployed delivery's idempotency key and requires the original provider ID, then requires a second worker invocation to claim nothing. It also sends isolated reminders to labeled bounced and complained test addresses, waits for each exact terminal provider event, then requires the signed webhooks to update distinct durable event rows and suppress only the matching synthetic accounts. The bounce account must also recover through the authenticated resume RPC.
 
-The separately injected completion failure is deterministic evidence for Outflow's retry state machine; it is not a simulated Resend outage. A pass does not prove Supabase Cron registration, delivery to a human inbox, an actual provider API failure, or behavior across mailbox providers. The workflow summary contains fixed check names and deployment metadata only, never recipients, content, delivery rows, invitation links, provider IDs, or credentials.
+The separately injected completion failure is deterministic evidence for Outflow's retry state machine; it is not a simulated Resend outage. The scheduler function retains only its opaque `pg_net` request ID and queue time for seven days; the health RPC correlates that row with `net._http_response` while the provider response is still retained and returns only the HTTP status and timestamp. A pass does not prove delivery to a human inbox, an actual provider API failure, or behavior across mailbox providers. The workflow summary contains fixed check names and deployment metadata only, never recipients, content, delivery rows, invitation links, provider IDs, scheduler commands, URLs, request/response bodies, or credentials.
 
 ## Deployment
 
@@ -51,17 +51,37 @@ In Resend, register this exact HTTPS endpoint for `email.delivered`, `email.deli
 https://<project-ref>.supabase.co/functions/v1/resend-webhook
 ```
 
-Use Supabase Cron with Vault to invoke it regularly. An hourly schedule gives every timezone a run shortly after the local date changes. Store the project URL and the same high-entropy cron secret in Vault, then POST to:
+Enable the Supabase Cron and `pg_net` modules after applying all migrations. Store the exact worker endpoint and the same high-entropy cron secret in Vault under the names consumed by `invoke_due_reminder_worker`, then register the fixed hourly job:
+
+```sql
+select vault.create_secret(
+  'https://<project-ref>.supabase.co/functions/v1/send-due-reminders',
+  'outflow_reminder_endpoint',
+  'Exact Outflow reminder worker endpoint'
+);
+select vault.create_secret(
+  '<OUTFLOW_CRON_SECRET>',
+  'outflow_cron_secret',
+  'Outflow reminder worker bearer'
+);
+select cron.schedule(
+  'outflow-due-reminders-hourly',
+  '7 * * * *',
+  'select public.invoke_due_reminder_worker();'
+);
+```
+
+The minute-seven offset avoids the top-of-hour spike while still running once per hour. `invoke_due_reminder_worker` validates both Vault values and queues this private request through `pg_net`:
 
 ```text
-https://<project-ref>.supabase.co/functions/v1/send-due-reminders
+POST https://<project-ref>.supabase.co/functions/v1/send-due-reminders
 Authorization: Bearer <OUTFLOW_CRON_SECRET>
 Content-Type: application/json
 
-{"batchSize":25}
+{"batchSize":100}
 ```
 
-Monitor `claimed`, `sent`, `failed`, and `completionErrors` from the function response. A nonzero `completionErrors` count needs investigation even when Resend accepted the email, because the provider idempotency key only deduplicates matching retries for 24 hours.
+Wait for the first scheduled run, then call `reminder_scheduler_status('<project-ref>')` as service role or dispatch the protected messaging workflow. The expected reference binds the Vault endpoint to the project under test. The RPC exposes only configuration booleans, the fixed schedule, cron and HTTP timestamps/status, and aggregate health. It never returns the endpoint, cron command, request headers, response body, or decrypted values. Rotate a Vault value with `vault.update_secret` using the existing secret row ID; do not create a duplicate name. Monitor `claimed`, `sent`, `failed`, and `completionErrors` from the function response. A nonzero `completionErrors` count needs investigation even when Resend accepted the email, because the provider idempotency key only deduplicates matching retries for 24 hours.
 
 ## Operational Checks
 
@@ -75,6 +95,6 @@ Before production:
 6. Send to Resend's bounced and complained test addresses, confirm automatic suppression, then confirm explicit resume cannot be triggered without an authenticated active-Pro account.
 7. Alert on repeated worker failures, exhausted attempts, suppression growth, and completion errors without logging recipient addresses or message content.
 
-The protected workflow automates the active, pause-scope, idempotency, opt-out, refund, provider-delivery, signed provider-bounce and complaint suppression, explicit bounce recovery, and deterministic retry portions of this matrix. Timezone-provider breadth, concurrent workers, actual provider API failure, scheduler registration, and operational alerting remain manual release checks.
+The protected workflow automates the exact Cron/Vault registration and recent-run check plus the active, pause-scope, idempotency, opt-out, refund, provider-delivery, signed provider-bounce and complaint suppression, explicit bounce recovery, and deterministic retry portions of this matrix. Timezone-provider breadth, concurrent workers, actual provider API failure, and operational alerting remain manual release checks.
 
-References: [Supabase scheduled Edge Functions](https://supabase.com/docs/guides/functions/schedule-functions), [Supabase Edge Function authentication](https://supabase.com/docs/guides/functions/auth), [Resend webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), [Resend test addresses](https://resend.com/docs/dashboard/emails/send-test-emails), and [Resend idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys).
+References: [Supabase scheduled Edge Functions](https://supabase.com/docs/guides/functions/schedule-functions), [Supabase Vault](https://supabase.com/docs/guides/database/vault), [Supabase pg_net responses](https://supabase.com/docs/guides/database/extensions/pg_net), [Supabase Edge Function authentication](https://supabase.com/docs/guides/functions/auth), [Resend webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), [Resend test addresses](https://resend.com/docs/dashboard/emails/send-test-emails), and [Resend idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys).

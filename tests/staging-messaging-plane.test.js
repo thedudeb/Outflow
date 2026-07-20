@@ -7,6 +7,7 @@ import {
   invokeReminderWorker,
   replayResendDelivery,
   resolveMessagingAcceptanceConfig,
+  schedulerStatusMatches,
   waitForResendDelivery,
   waitForResendEvent,
 } from "../scripts/check-staging-messaging-plane.mjs";
@@ -32,6 +33,7 @@ function environment(overrides = {}) {
 }
 
 const checks = [
+  "cron scheduler registration",
   "synthetic messaging accounts",
   "provider invitation delivery",
   "invitation content privacy",
@@ -72,6 +74,32 @@ test("messaging-plane configuration binds provider access to one protected stagi
   assert.match(invalid.errors.join("\n"), /literal value staging/);
   assert.match(invalid.errors.join("\n"), /RESEND_API_KEY/);
   assert.match(invalid.errors.join("\n"), /OUTFLOW_CRON_SECRET/);
+});
+
+test("scheduler status requires the exact redacted Cron and Vault health contract", () => {
+  const healthy = {
+    cronReady: true,
+    networkReady: true,
+    vaultReady: true,
+    endpointConfigured: true,
+    cronSecretConfigured: true,
+    jobConfigured: true,
+    jobActive: true,
+    schedule: "7 * * * *",
+    lastRunStatus: "succeeded",
+    lastRunAt: "2026-07-20T01:07:00.000Z",
+    lastSuccessAt: "2026-07-20T01:07:00.000Z",
+    recentSuccess: true,
+    workerRequestStatus: 200,
+    workerRequestAt: "2026-07-20T01:07:01.000Z",
+    workerReached: true,
+    healthy: true,
+  };
+  assert.equal(schedulerStatusMatches(healthy), true);
+  assert.equal(schedulerStatusMatches({ ...healthy, recentSuccess: false, healthy: false }), false);
+  assert.equal(schedulerStatusMatches({ ...healthy, schedule: "* * * * *" }), false);
+  assert.equal(schedulerStatusMatches({ ...healthy, workerRequestStatus: 401, workerReached: false, healthy: false }), false);
+  assert.equal(schedulerStatusMatches({ ...healthy, endpoint: "https://secret.example" }), false);
 });
 
 test("Resend receipt probe correlates an exact synthetic recipient and waits for delivery", async () => {
@@ -285,11 +313,13 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
     completedAt: "2026-07-19T12:00:00.000Z",
   });
   assert.match(report, /PASS \/ provider invitation delivery/);
+  assert.match(report, /PASS \/ cron scheduler registration/);
   assert.match(report, /PASS \/ durable reminder retry/);
   assert.match(report, /PASS \/ provider suppression/);
   assert.match(report, /PASS \/ complaint suppression/);
   assert.match(report, /first retry failure was injected/);
   assert.match(report, /Provider-originated signed bounce and complaint/);
+  assert.match(report, /exact hourly Supabase Cron job/);
   assert.match(report, /does not prove delivery to a human inbox/);
   assert.doesNotMatch(report, /@resend\.dev|re_[A-Za-z0-9_-]+|Bearer |11111111-1111|#app\?invite=/);
   assert.throws(() => buildMessagingPlaneReport({
@@ -301,9 +331,10 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
 });
 
 test("messaging workflow confines live credentials to a protected main-ref acceptance step", async () => {
-  const [workflow, script] = await Promise.all([
+  const [workflow, script, schedulerMigration] = await Promise.all([
     readFile(new URL("../.github/workflows/staging-messaging-plane.yml", import.meta.url), "utf8"),
     readFile(new URL("../scripts/check-staging-messaging-plane.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260720233000_reminder_scheduler.sql", import.meta.url), "utf8"),
   ]);
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /environment: staging/);
@@ -315,6 +346,12 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.match(script, /delivered\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /bounced\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /complained\+outflow-reminder-\$\{suffix\}@resend\.dev/);
+  assert.match(script, /admin\.rpc\("reminder_scheduler_status", \{ expected_project_ref: config\.projectRef \}\)/);
   assert.match(script, /notification_provider_events/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);
+  assert.match(schedulerMigration, /'outflow-due-reminders-hourly'/);
+  assert.match(schedulerMigration, /'7 \* \* \* \*'/);
+  assert.match(schedulerMigration, /'select public\.invoke_due_reminder_worker\(\);'/);
+  assert.match(schedulerMigration, /revoke all on function public\.invoke_due_reminder_worker\(\) from public, anon, authenticated, service_role/);
+  assert.doesNotMatch(schedulerMigration, /https:\/\/[a-z0-9]{20}\.supabase\.co|Bearer [A-Za-z0-9_-]{16,}/);
 });

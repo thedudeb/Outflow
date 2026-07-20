@@ -1345,6 +1345,90 @@ end;
 $$;
 
 reset role;
+set role anon;
+do $$
+begin
+  perform public.reminder_scheduler_status('abcdefghijklmnopqrst');
+  raise exception 'anonymous scheduler health inspection unexpectedly succeeded';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+begin
+  perform public.reminder_scheduler_status('abcdefghijklmnopqrst');
+  raise exception 'authenticated scheduler health inspection unexpectedly succeeded';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
+set role service_role;
+do $$
+begin
+  perform count(*) from public.reminder_scheduler_requests;
+  raise exception 'service role read private scheduler request identifiers directly';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+do $$
+begin
+  perform public.reminder_scheduler_status('wrong-project');
+  raise exception 'scheduler health accepted an invalid project reference';
+exception
+  when invalid_parameter_value then null;
+end;
+$$;
+
+create temporary table reminder_scheduler_health as
+select public.reminder_scheduler_status('abcdefghijklmnopqrst') as payload;
+
+do $$
+declare
+  payload jsonb := (select payload from reminder_scheduler_health);
+begin
+  if (payload ->> 'healthy')::boolean
+    or (payload ->> 'cronReady')::boolean
+    or (payload ->> 'networkReady')::boolean
+    or (payload ->> 'vaultReady')::boolean
+    or (payload ->> 'recentSuccess')::boolean
+    or (payload ->> 'workerReached')::boolean then
+    raise exception 'unconfigured local scheduler reported healthy';
+  end if;
+  if payload ? 'endpoint'
+    or payload ? 'cronSecret'
+    or payload ? 'command'
+    or payload::text like '%Bearer %'
+    or payload::text like '%send-due-reminders%' then
+    raise exception 'scheduler health exposed private configuration';
+  end if;
+
+  begin
+    perform public.invoke_due_reminder_worker();
+    raise exception 'service role invoked the database-owned scheduler function';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+do $$
+begin
+  perform public.invoke_due_reminder_worker();
+  raise exception 'unconfigured scheduler invocation unexpectedly succeeded';
+exception
+  when sqlstate '55000' then null;
+end;
+$$;
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;

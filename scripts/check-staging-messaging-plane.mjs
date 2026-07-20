@@ -8,6 +8,7 @@ import { createAcceptanceClient } from "./staging-acceptance-client.mjs";
 const PRODUCT = "outflow_pro_lifetime";
 const RESEND_API = "https://api.resend.com";
 const expectedCheckNames = Object.freeze([
+  "cron scheduler registration",
   "synthetic messaging accounts",
   "provider invitation delivery",
   "invitation content privacy",
@@ -117,6 +118,50 @@ function remoteResult(result, label) {
     throw new Error(`${label}: remote operation failed (${code}).`);
   }
   return result?.data;
+}
+
+export function schedulerStatusMatches(status) {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return false;
+  const expectedKeys = [
+    "cronReady",
+    "networkReady",
+    "vaultReady",
+    "endpointConfigured",
+    "cronSecretConfigured",
+    "jobConfigured",
+    "jobActive",
+    "schedule",
+    "lastRunStatus",
+    "lastRunAt",
+    "lastSuccessAt",
+    "recentSuccess",
+    "workerRequestStatus",
+    "workerRequestAt",
+    "workerReached",
+    "healthy",
+  ].sort();
+  if (JSON.stringify(Object.keys(status).sort()) !== JSON.stringify(expectedKeys)) return false;
+  const requiredTrue = [
+    "cronReady",
+    "networkReady",
+    "vaultReady",
+    "endpointConfigured",
+    "cronSecretConfigured",
+    "jobConfigured",
+    "jobActive",
+    "recentSuccess",
+    "workerReached",
+    "healthy",
+  ];
+  return requiredTrue.every((key) => status[key] === true)
+    && status.schedule === "7 * * * *"
+    && status.workerRequestStatus === 200
+    && typeof status.lastRunStatus === "string"
+    && status.lastRunStatus.length >= 1
+    && status.lastRunStatus.length <= 40
+    && Number.isFinite(Date.parse(status.lastRunAt))
+    && Number.isFinite(Date.parse(status.lastSuccessAt))
+    && Number.isFinite(Date.parse(status.workerRequestAt));
 }
 
 async function boundedJson(response, label) {
@@ -503,6 +548,13 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
   const resources = { userIds: [], ledgerId: fixture.ledgerId };
 
   try {
+    const schedulerStatus = remoteResult(
+      await admin.rpc("reminder_scheduler_status", { expected_project_ref: config.projectRef }),
+      "cron scheduler registration",
+    );
+    assert(schedulerStatusMatches(schedulerStatus), "cron scheduler registration");
+    completed.push("cron scheduler registration");
+
     const ownerUser = remoteResult(await admin.auth.admin.createUser({
       email: ownerEmail,
       password,
@@ -890,8 +942,8 @@ export function buildMessagingPlaneReport({ checks, projectRef, appOrigin, commi
     "",
     ...checks.map((check) => `- PASS / ${check}`),
     "",
-    "This run used Resend's synthetic delivered-, bounced-, and complained-address contracts. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
-    "The first retry failure was injected at Outflow's durable completion boundary, then the deployed worker performed the provider retry. This does not prove delivery to a human inbox, scheduler registration, actual provider API failure, or provider diversity.",
+    "This run required the exact hourly Supabase Cron job, named Vault configuration, a successful scheduler run within two hours, and HTTP 200 from its correlated pg_net request before using Resend's synthetic delivered-, bounced-, and complained-address contracts. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
+    "The first retry failure was injected at Outflow's durable completion boundary, then the deployed worker performed the provider retry. Scheduler evidence contains only fixed configuration checks, timestamps, and the correlated HTTP status; it does not expose a command, URL, request, response body, or secret. This does not prove delivery to a human inbox, actual provider API failure, or provider diversity.",
     "The report excludes identities, credentials, invitation links, message content, provider identifiers, database rows, and response bodies.",
     "",
   ].join("\n");
