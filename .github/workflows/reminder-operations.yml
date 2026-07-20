@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: staging
+    outputs:
+      outcome: ${{ steps.health.outcome }}
 
     steps:
       - uses: actions/checkout@v6
@@ -34,6 +36,8 @@ jobs:
       - name: Verify reminder operations contract
         run: npm run test:reminder-operations
       - name: Check aggregate reminder health
+        id: health
+        continue-on-error: true
         run: npm run check:reminder-operations -- --summary-file "$GITHUB_STEP_SUMMARY"
         env:
           SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
@@ -41,3 +45,29 @@ jobs:
           OUTFLOW_ACCEPTANCE_MODE: staging
           OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
           OUTFLOW_OPERATIONS_SECRET: ${{ secrets.OUTFLOW_OPERATIONS_SECRET }}
+
+  reminder-incident:
+    name: Assigned reminder incident
+    needs: reminder-health
+    if: always() && (needs.reminder-health.outputs.outcome == 'success' || needs.reminder-health.outputs.outcome == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Synchronize assigned operations incident
+        run: npm run check:reminder-incident -- --status "${{ needs.reminder-health.outputs.outcome }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUTFLOW_OPERATIONS_ASSIGNEE: ${{ vars.OUTFLOW_OPERATIONS_ASSIGNEE }}
+      - name: Enforce aggregate reminder health
+        if: always() && needs.reminder-health.outputs.outcome == 'failure'
+        run: exit 1

@@ -36,7 +36,9 @@ Smaller retry backlogs, one through nine provider failures, and one through four
 
 The **Reminder Operations** GitHub workflow runs manually or at minute 23 of every hour after the repository variable `OUTFLOW_OPERATIONS_ENABLED` is set to the literal value `true`. The repository-level opt-in is evaluated before the protected `staging` environment is entered and prevents noisy scheduled failures before staging exists. The job receives only the project URL/reference and dedicated operations bearer; no Supabase publishable/service key, Resend, Stripe, cron, webhook, database-password, or deployment credential is available to it.
 
-The workflow summary contains the deployment commit, project reference, fixed alert/warning codes, and aggregate counters. A critical result fails the job so repository notification and escalation rules can act on it. Warning results create bounded GitHub annotations without exposing rows or provider diagnostics. Configure and prove the repository's notification recipients and escalation ownership before relying on this as a production alert channel.
+The workflow summary contains the deployment commit, project reference, fixed alert/warning codes, and aggregate counters. Warning results create bounded GitHub annotations without exposing rows or provider diagnostics.
+
+For a critical result, the workflow opens or updates one issue titled **[Outflow] Reminder operations requires attention** and assigns the repository variable `OUTFLOW_OPERATIONS_ASSIGNEE`. Repeated failures append only the exact commit and workflow-run link. The next healthy run records recovery and closes the incident. The synchronizer verifies that the named operator is assignable, rejects duplicate open incidents, receives the GitHub token only in its own step, and never copies health counters, remote response bodies, account data, provider data, endpoints, or credentials into the issue. The original health failure is re-applied after incident synchronization so routing cannot turn a failed gate green.
 
 The protected messaging-plane workflow also queries the same RPC after synthetic cleanup. It requires a fresh matching worker, zero critical alerts, no exhausted deliveries, and no stuck claims. Planned provider-conflict attempts may appear only as bounded warnings.
 
@@ -45,5 +47,6 @@ The protected messaging-plane workflow also queries the same RPC after synthetic
 1. Dispatch the messaging plane from the exact commit and retain its operational-health pass.
 2. Enable the hourly workflow repository variable only after staging migrations, worker deployment, scheduler, and secrets are configured.
 3. Inject a completion error, exhausted delivery, stuck claim, overdue retry backlog, provider-failure spike, and suppression spike in isolated non-production data; confirm the expected fixed codes and cleanup.
-4. Confirm a failed workflow reaches the named operator through the repository's configured notification path.
-5. Review 30-day retention and thresholds after beta volume provides a credible baseline.
+4. Confirm a failed workflow creates or updates the exact assigned incident, reaches the named operator through GitHub notifications, and fails the workflow.
+5. Restore health and confirm the next run comments with recovery, closes the same incident, and creates no duplicate.
+6. Review 30-day retention and thresholds after beta volume provides a credible baseline.
