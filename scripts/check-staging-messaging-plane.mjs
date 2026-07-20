@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnvFile, resolveSupabaseKeys } from "./check-service-readiness.mjs";
+import { reminderOperationsHealthMatches } from "./check-reminder-operations.mjs";
 import { createAcceptanceClient } from "./staging-acceptance-client.mjs";
 
 const PRODUCT = "outflow_pro_lifetime";
@@ -32,6 +33,7 @@ const expectedCheckNames = Object.freeze([
   "email opt-out suspension",
   "refund suspension",
   "synthetic messaging cleanup",
+  "operational health",
 ]);
 
 function hostedProjectOrigin(value) {
@@ -125,6 +127,7 @@ export function resolveMessagingDeploymentConfig(env) {
   const accessToken = String(env.SUPABASE_ACCESS_TOKEN || "").trim();
   const databasePassword = String(env.SUPABASE_DB_PASSWORD || "");
   const webhookSecret = String(env.RESEND_WEBHOOK_SECRET || "").trim();
+  const operationsSecret = String(env.OUTFLOW_OPERATIONS_SECRET || "").trim();
   const allowedOrigins = String(env.OUTFLOW_ALLOWED_ORIGINS || "").split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -144,6 +147,12 @@ export function resolveMessagingDeploymentConfig(env) {
   }
   if (!/^whsec_[A-Za-z0-9+/_=-]{16,}$/.test(webhookSecret)) {
     errors.push("RESEND_WEBHOOK_SECRET: expected a Resend webhook signing secret.");
+  }
+  if (!highEntropySecret(operationsSecret)) {
+    errors.push("OUTFLOW_OPERATIONS_SECRET: expected a high-entropy secret of at least 32 characters.");
+  }
+  if (operationsSecret && operationsSecret === acceptance.cronSecret) {
+    errors.push("OUTFLOW_OPERATIONS_SECRET: must differ from OUTFLOW_CRON_SECRET.");
   }
   if (
     !allowedOrigins.length
@@ -1131,6 +1140,19 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
   }
 
   completed.push("synthetic messaging cleanup");
+  const operationalHealth = remoteResult(await admin.rpc("reminder_operational_health", {
+    expected_deployment_commit: config.expectedDeploymentCommit,
+  }), "operational health");
+  assert(
+    reminderOperationsHealthMatches(operationalHealth)
+      && operationalHealth.healthy === true
+      && operationalHealth.recentRun === true
+      && operationalHealth.latestCommitMatches === true
+      && operationalHealth.exhaustedDeliveries === 0
+      && operationalHealth.stuckClaims === 0,
+    "operational health",
+  );
+  completed.push("operational health");
   assert(JSON.stringify(completed) === JSON.stringify(expectedCheckNames), "messaging acceptance check inventory");
   return completed;
 }
@@ -1158,7 +1180,7 @@ export function buildMessagingPlaneReport({ checks, projectRef, appOrigin, commi
     "",
     "This run required exact-commit worker attestation, the exact hourly Supabase Cron job, named Vault configuration, a successful scheduler run within two hours, and HTTP 200 from its correlated pg_net request before using Resend's synthetic delivered-, bounced-, and complained-address contracts. Two simultaneous worker calls had to produce one durable claim, one attempt, and one delivered provider receipt. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
     "A Resend test-address request primed one unique delivery key with a harmless synthetic payload. The deployed worker then received Resend's documented invalid-idempotent-request 409 for its different canonical payload, persisted only the bounded error class, and retried the same durable delivery under increasing backoff. Scheduler evidence contains only fixed configuration checks, timestamps, and the correlated HTTP status; no acceptance output exposes a scheduler command/endpoint, request/response body, provider identifier, or secret.",
-    "This does not prove delivery to a human inbox, an unplanned provider outage, provider diversity, or operational alert delivery.",
+    "This does not prove delivery to a human inbox, an unplanned provider outage, provider diversity, or delivery through a configured operator-notification path.",
     "The report excludes identities, credentials, invitation links, message content, provider identifiers, database rows, and response bodies.",
     "",
   ].join("\n");

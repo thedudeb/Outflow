@@ -20,6 +20,7 @@ const publishableKey = `sb_publishable_${"p".repeat(24)}`;
 const secretKey = `sb_secret_${"s".repeat(24)}`;
 const resendKey = `re_${"r".repeat(24)}`;
 const cronSecret = "acceptance-cron-secret-0123456789-ABCDEFG";
+const operationsSecret = "acceptance-operations-secret-9876543210-ZYXWV";
 const deploymentCommit = "a".repeat(40);
 
 function environment(overrides = {}) {
@@ -32,6 +33,7 @@ function environment(overrides = {}) {
     OUTFLOW_ACCEPTANCE_MODE: "staging",
     RESEND_API_KEY: resendKey,
     OUTFLOW_CRON_SECRET: cronSecret,
+    OUTFLOW_OPERATIONS_SECRET: operationsSecret,
     OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: deploymentCommit,
     ...overrides,
   };
@@ -62,6 +64,7 @@ const checks = [
   "email opt-out suspension",
   "refund suspension",
   "synthetic messaging cleanup",
+  "operational health",
 ];
 
 test("messaging-plane configuration binds provider access to one protected staging project", () => {
@@ -108,6 +111,7 @@ test("messaging deployment preflight requires bounded exact-project deployment c
     OUTFLOW_ALLOWED_ORIGINS: "https://another.example",
     OUTFLOW_INVITE_FROM: "invalid",
     OUTFLOW_REMINDER_FROM: "invalid",
+    OUTFLOW_OPERATIONS_SECRET: cronSecret,
   }));
   assert.match(invalid.errors.join("\n"), /SUPABASE_ACCESS_TOKEN/);
   assert.match(invalid.errors.join("\n"), /SUPABASE_DB_PASSWORD/);
@@ -115,6 +119,7 @@ test("messaging deployment preflight requires bounded exact-project deployment c
   assert.match(invalid.errors.join("\n"), /OUTFLOW_ALLOWED_ORIGINS/);
   assert.match(invalid.errors.join("\n"), /OUTFLOW_INVITE_FROM/);
   assert.match(invalid.errors.join("\n"), /OUTFLOW_REMINDER_FROM/);
+  assert.match(invalid.errors.join("\n"), /OUTFLOW_OPERATIONS_SECRET/);
 });
 
 test("scheduler status requires the exact redacted Cron and Vault health contract", () => {
@@ -424,11 +429,13 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
   assert.match(report, /invalid-idempotent-request 409/);
   assert.match(report, /PASS \/ provider suppression/);
   assert.match(report, /PASS \/ complaint suppression/);
+  assert.match(report, /PASS \/ operational health/);
   assert.match(report, /Provider-originated signed bounce and complaint/);
   assert.match(report, /exact-commit worker attestation/);
   assert.match(report, /Two simultaneous worker calls/);
   assert.match(report, /exact hourly Supabase Cron job/);
   assert.match(report, /does not prove delivery to a human inbox/);
+  assert.match(report, /operator-notification path/);
   assert.doesNotMatch(report, /@resend\.dev|re_[A-Za-z0-9_-]+|Bearer |11111111-1111|#app\?invite=/);
   assert.throws(() => buildMessagingPlaneReport({
     checks: checks.slice(0, -1),
@@ -439,10 +446,11 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
 });
 
 test("messaging workflow confines live credentials to a protected main-ref acceptance step", async () => {
-  const [workflow, script, schedulerMigration] = await Promise.all([
+  const [workflow, script, schedulerMigration, worker] = await Promise.all([
     readFile(new URL("../.github/workflows/staging-messaging-plane.yml", import.meta.url), "utf8"),
     readFile(new URL("../scripts/check-staging-messaging-plane.mjs", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260720233000_reminder_scheduler.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/functions/send-due-reminders/index.ts", import.meta.url), "utf8"),
   ]);
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /environment: staging/);
@@ -453,9 +461,11 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.match(workflow, /RESEND_API_KEY: \$\{\{ secrets\.OUTFLOW_RESEND_API_KEY \}\}/);
   assert.match(workflow, /RESEND_WEBHOOK_SECRET: \$\{\{ secrets\.OUTFLOW_RESEND_WEBHOOK_SECRET \}\}/);
   assert.match(workflow, /OUTFLOW_CRON_SECRET: \$\{\{ secrets\.OUTFLOW_CRON_SECRET \}\}/);
+  assert.match(workflow, /OUTFLOW_OPERATIONS_SECRET: \$\{\{ secrets\.OUTFLOW_OPERATIONS_SECRET \}\}/);
   assert.match(workflow, /SUPABASE_SECRET_KEY: \$\{\{ secrets\.OUTFLOW_SUPABASE_SECRET_KEY \}\}/);
   assert.match(workflow, /supabase db push --linked --password "\$SUPABASE_DB_PASSWORD" --yes/);
   assert.match(workflow, /"OUTFLOW_DEPLOYMENT_COMMIT=\$GITHUB_SHA"/);
+  assert.match(workflow, /"OUTFLOW_OPERATIONS_SECRET=\$OUTFLOW_OPERATIONS_SECRET"/);
   assert.match(workflow, /send-ledger-invite send-due-reminders resend-webhook/);
   assert.match(workflow, /OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: \$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(workflow, /functions deploy[^\n]*--prune/);
@@ -468,6 +478,9 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.match(script, /Promise\.all\(\[\s*invokeReminderWorker\(config, fetchImpl\),\s*invokeReminderWorker\(config, fetchImpl\),/);
   assert.match(script, /admin\.rpc\("reminder_scheduler_status", \{ expected_project_ref: config\.projectRef \}\)/);
   assert.match(script, /notification_provider_events/);
+  assert.match(script, /admin\.rpc\("reminder_operational_health"/);
+  assert.match(worker, /adminClient\.rpc\("record_reminder_worker_run"/);
+  assert.match(worker, /adminClient\.rpc\("reminder_operational_health"/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);
   assert.match(schedulerMigration, /'outflow-due-reminders-hourly'/);
   assert.match(schedulerMigration, /'7 \* \* \* \*'/);

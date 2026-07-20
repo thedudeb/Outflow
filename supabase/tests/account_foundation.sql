@@ -1429,6 +1429,156 @@ exception
 end;
 $$;
 
+set role anon;
+do $$
+begin
+  begin
+    perform count(*) from public.reminder_worker_runs;
+    raise exception 'anonymous client read reminder worker operations';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.reminder_operational_health(repeat('a', 40));
+    raise exception 'anonymous client inspected reminder operations';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+begin
+  begin
+    perform public.record_reminder_worker_run(now(), repeat('a', 40), 0, 0, 0, 0);
+    raise exception 'authenticated client recorded reminder worker operations';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.reminder_operational_health(repeat('a', 40));
+    raise exception 'authenticated client inspected reminder operations';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set role service_role;
+do $$
+begin
+  begin
+    perform count(*) from public.reminder_worker_runs;
+    raise exception 'service role read private reminder worker rows directly';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.record_reminder_worker_run(now(), repeat('a', 40), 1, 0, 0, 0);
+    raise exception 'invalid reminder worker counters were accepted';
+  exception
+    when invalid_parameter_value then null;
+  end;
+  if not public.record_reminder_worker_run(now() - interval '1 second', repeat('a', 40), 0, 0, 0, 0) then
+    raise exception 'healthy reminder worker run was not recorded';
+  end if;
+end;
+$$;
+
+create temporary table healthy_reminder_operations as
+select public.reminder_operational_health(repeat('a', 40)) as payload;
+
+do $$
+declare
+  payload jsonb := (select payload from healthy_reminder_operations);
+begin
+  if not (payload ->> 'healthy')::boolean
+    or not (payload ->> 'recentRun')::boolean
+    or not (payload ->> 'latestCommitMatches')::boolean
+    or (payload ->> 'runs1h')::integer <> 1
+    or (payload ->> 'claimed1h')::integer <> 0
+    or (payload ->> 'completionErrors1h')::integer <> 0
+    or jsonb_array_length(payload -> 'alerts') <> 0
+  then
+    raise exception 'healthy reminder operations status is invalid';
+  end if;
+  if (select count(*) from jsonb_object_keys(payload)) <> 16
+    or payload ? 'deploymentCommit'
+    or payload ? 'userId'
+    or payload ? 'recipient'
+    or payload ? 'providerMessageId'
+  then
+    raise exception 'reminder operations health exposed an invalid surface';
+  end if;
+end;
+$$;
+
+reset role;
+update public.notification_deliveries
+set status = 'failed', attempt_count = 5, next_attempt_at = now() + interval '100 years',
+    sent_at = null, claim_token = null, claimed_at = null
+where provider_message_id = 'resend-charge';
+update public.notification_deliveries
+set status = 'failed', attempt_count = 2, next_attempt_at = now() - interval '20 minutes',
+    sent_at = null, claim_token = null, claimed_at = null
+where provider_message_id = 'resend-trial';
+update public.notification_deliveries
+set status = 'sending', attempt_count = 1, next_attempt_at = now(), sent_at = null,
+    claim_token = 'eeeeeeee-5555-4555-8555-555555555555', claimed_at = now() - interval '20 minutes'
+where provider_message_id = 'resend-paused';
+update public.notification_preferences
+set email_enabled = false, email_suppressed_at = now(), email_suppression_reason = 'complained'
+where user_id = '11111111-1111-4111-8111-111111111111';
+
+set role service_role;
+select public.record_reminder_worker_run(
+  now() - interval '1 second', repeat('b', 40), 12, 0, 12, 1
+) as unhealthy_reminder_worker_run;
+create temporary table unhealthy_reminder_operations as
+select public.reminder_operational_health(repeat('a', 40)) as payload;
+
+do $$
+declare
+  payload jsonb := (select payload from unhealthy_reminder_operations);
+begin
+  if (payload ->> 'healthy')::boolean
+    or not (payload ->> 'recentRun')::boolean
+    or (payload ->> 'latestCommitMatches')::boolean
+    or (payload ->> 'failed1h')::integer <> 12
+    or (payload ->> 'completionErrors1h')::integer <> 1
+    or (payload ->> 'exhaustedDeliveries')::integer <> 1
+    or (payload ->> 'overdueRetries')::integer <> 1
+    or (payload ->> 'stuckClaims')::integer <> 1
+    or (payload ->> 'suppressions24h')::integer <> 1
+  then
+    raise exception 'unhealthy reminder operations counters are invalid';
+  end if;
+  if not (payload -> 'alerts' ? 'commit_mismatch')
+    or not (payload -> 'alerts' ? 'completion_errors')
+    or not (payload -> 'alerts' ? 'exhausted_deliveries')
+    or not (payload -> 'alerts' ? 'stuck_claims')
+    or not (payload -> 'alerts' ? 'failure_spike')
+    or not (payload -> 'warnings' ? 'retry_backlog')
+    or not (payload -> 'warnings' ? 'suppression_growth')
+  then
+    raise exception 'reminder operations alert classification is incomplete';
+  end if;
+
+  begin
+    perform public.reminder_operational_health('not-a-commit');
+    raise exception 'reminder operations accepted an invalid expected commit';
+  exception
+    when invalid_parameter_value then null;
+  end;
+end;
+$$;
+
+reset role;
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;
@@ -1450,6 +1600,7 @@ begin
   if (select count(*) from public.billing_checkout_requests) <> 0 then raise exception 'account deletion did not remove checkout reservations'; end if;
   if (select count(*) from public.notification_preferences) <> 1 then raise exception 'account deletion did not remove its notification preference'; end if;
   if (select count(*) from public.notification_deliveries) <> 0 then raise exception 'account deletion did not remove email delivery history'; end if;
+  if (select count(*) from public.reminder_worker_runs) <> 2 then raise exception 'account deletion removed de-identified reminder operations'; end if;
   if (select count(*) from public.calendar_feeds) <> 0 then raise exception 'account deletion did not remove hosted calendar feeds'; end if;
   if (select status from public.stripe_purchases where checkout_session_id = 'cs_test_outflowtwo') <> 'refunded' then raise exception 'post-deletion refund was not reconciled'; end if;
   if (select count(*) from public.billing_events) <> 5 then raise exception 'account deletion removed provider event tombstones'; end if;

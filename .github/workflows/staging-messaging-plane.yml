@@ -53,6 +53,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.OUTFLOW_RESEND_API_KEY }}
           RESEND_WEBHOOK_SECRET: ${{ secrets.OUTFLOW_RESEND_WEBHOOK_SECRET }}
           OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}
+          OUTFLOW_OPERATIONS_SECRET: ${{ secrets.OUTFLOW_OPERATIONS_SECRET }}
       - name: Link protected staging project
         run: supabase link --project-ref "$OUTFLOW_ACCEPTANCE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
         env:
@@ -75,6 +76,7 @@ jobs:
           "OUTFLOW_INVITE_FROM=$OUTFLOW_INVITE_FROM"
           "OUTFLOW_REMINDER_FROM=$OUTFLOW_REMINDER_FROM"
           "OUTFLOW_CRON_SECRET=$OUTFLOW_CRON_SECRET"
+          "OUTFLOW_OPERATIONS_SECRET=$OUTFLOW_OPERATIONS_SECRET"
           "OUTFLOW_DEPLOYMENT_COMMIT=$GITHUB_SHA"
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
@@ -86,6 +88,7 @@ jobs:
           OUTFLOW_INVITE_FROM: ${{ vars.OUTFLOW_INVITE_FROM }}
           OUTFLOW_REMINDER_FROM: ${{ vars.OUTFLOW_REMINDER_FROM }}
           OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}
+          OUTFLOW_OPERATIONS_SECRET: ${{ secrets.OUTFLOW_OPERATIONS_SECRET }}
       - name: Deploy exact messaging functions
         run: >-
           supabase functions deploy

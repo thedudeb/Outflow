@@ -1,0 +1,43 @@
+name: Reminder Operations
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-reminder-operations
+  cancel-in-progress: false
+
+jobs:
+  reminder-health:
+    name: Aggregate reminder health
+    # Repository variable: this gate is evaluated before staging environment access.
+    if: github.event_name == 'workflow_dispatch' || vars.OUTFLOW_OPERATIONS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify reminder operations contract
+        run: npm run test:reminder-operations
+      - name: Check aggregate reminder health
+        run: npm run check:reminder-operations -- --summary-file "$GITHUB_STEP_SUMMARY"
+        env:
+          SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          OUTFLOW_ACCEPTANCE_MODE: staging
+          OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
+          OUTFLOW_OPERATIONS_SECRET: ${{ secrets.OUTFLOW_OPERATIONS_SECRET }}

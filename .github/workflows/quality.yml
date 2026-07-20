@@ -67,6 +67,7 @@ jobs:
       - run: npm run test:staging-browser-sync
       - run: npm run test:staging-billing-plane
       - run: npm run test:staging-messaging-plane
+      - run: npm run test:reminder-operations
       - run: npm run test:account-service
       - run: npm run test:pwa-cache
       - run: npm run test:pwa

@@ -20,6 +20,8 @@
     "test:staging-messaging-plane": "node --test tests/staging-messaging-plane.test.js",
     "check:staging-messaging-deployment": "node scripts/check-staging-messaging-plane.mjs --deployment-preflight",
     "check:staging-messaging-plane": "node scripts/check-staging-messaging-plane.mjs",
+    "test:reminder-operations": "node --test tests/reminder-operations.test.js",
+    "check:reminder-operations": "node scripts/check-reminder-operations.mjs",
     "test:function-types": "deno check --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/delete-account/index.ts supabase/functions/send-ledger-invite/index.ts supabase/functions/create-pro-checkout/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/send-due-reminders/index.ts supabase/functions/resend-webhook/index.ts supabase/functions/calendar-feed/index.ts",
     "test:function-runtime": "deno test --allow-env=NODE_ENV --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts supabase/functions/resend-webhook/webhook.test.ts supabase/functions/calendar-feed/calendar.test.ts supabase/functions/send-due-reminders/reminder.test.ts",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",

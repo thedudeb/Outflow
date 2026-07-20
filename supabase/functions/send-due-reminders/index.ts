@@ -14,7 +14,7 @@ type Delivery = {
   lead_days: number;
 };
 
-function response(body: Record<string, unknown>, status = 200) {
+function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
@@ -56,6 +56,13 @@ function validAppUrl(value: string) {
   }
 }
 
+function validBearerSecret(value: string) {
+  return value.length >= 32
+    && value.length <= 512
+    && !/\s/.test(value)
+    && new Set(value).size >= 12;
+}
+
 function formattedAmount(amount: number | string, currency: string) {
   const numericAmount = Number(amount);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !/^[A-Z]{3}$/.test(currency)) return "Amount unavailable";
@@ -81,6 +88,7 @@ Deno.serve(async (request) => {
   const { projectUrl, secretKey } = resolveSupabaseRuntime();
   const resendKey = Deno.env.get("RESEND_API_KEY") || "";
   const cronSecret = Deno.env.get("OUTFLOW_CRON_SECRET") || "";
+  const operationsSecret = Deno.env.get("OUTFLOW_OPERATIONS_SECRET") || "";
   const reminderFrom = Deno.env.get("OUTFLOW_REMINDER_FROM") || "";
   const appUrl = Deno.env.get("OUTFLOW_APP_URL") || "";
   const deploymentCommit = Deno.env.get("OUTFLOW_DEPLOYMENT_COMMIT") || "";
@@ -88,7 +96,9 @@ Deno.serve(async (request) => {
     !projectUrl
     || !secretKey
     || !resendKey
-    || cronSecret.length < 32
+    || !validBearerSecret(cronSecret)
+    || !validBearerSecret(operationsSecret)
+    || operationsSecret === cronSecret
     || !reminderFrom
     || !validAppUrl(appUrl)
     || !/^[a-f0-9]{40}$/.test(deploymentCommit)
@@ -96,32 +106,64 @@ Deno.serve(async (request) => {
     return response({ error: "Email reminders are not configured." }, 503);
   }
 
-  const authorization = request.headers.get("authorization") || "";
-  const receivedSecret = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (!receivedSecret || !(await secretsMatch(receivedSecret, cronSecret))) {
-    return response({ error: "Worker authentication failed." }, 401);
-  }
-
-  let body: { batchSize?: unknown } = {};
+  let body: { action?: unknown; batchSize?: unknown; expectedCommit?: unknown } = {};
   try {
     const rawBody = await request.text();
     if (new TextEncoder().encode(rawBody).byteLength > 1024) return response({ error: "Request is too large." }, 413);
-    body = rawBody ? JSON.parse(rawBody) : {};
+    const parsedBody = rawBody ? JSON.parse(rawBody) : {};
+    if (!parsedBody || typeof parsedBody !== "object" || Array.isArray(parsedBody)) {
+      return response({ error: "A JSON object is required." }, 400);
+    }
+    body = parsedBody;
   } catch {
     return response({ error: "A valid JSON request is required." }, 400);
   }
+
+  const healthRequest = body.action === "health";
+  const allowedKeys = healthRequest ? ["action", "expectedCommit"] : ["batchSize"];
+  if (body.action !== undefined && !healthRequest) return response({ error: "Unsupported worker action." }, 400);
+  if (Object.keys(body).some((key) => !allowedKeys.includes(key))) return response({ error: "Unsupported request field." }, 400);
+
+  const authorization = request.headers.get("authorization") || "";
+  const receivedSecret = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expectedSecret = healthRequest ? operationsSecret : cronSecret;
+  if (!receivedSecret || receivedSecret.length > 512 || !(await secretsMatch(receivedSecret, expectedSecret))) {
+    return response({ error: "Worker authentication failed." }, 401);
+  }
+
+  const adminClient = createAdminClient(projectUrl, secretKey);
+  if (healthRequest) {
+    const expectedCommit = typeof body.expectedCommit === "string" ? body.expectedCommit : "";
+    if (!/^[a-f0-9]{40}$/.test(expectedCommit)) return response({ error: "Expected commit is invalid." }, 400);
+    const { data: health, error: healthError } = await adminClient.rpc("reminder_operational_health", {
+      expected_deployment_commit: expectedCommit,
+    });
+    if (healthError || !health) return response({ error: "Reminder health is unavailable." }, 500);
+    return response(health);
+  }
+
   const requestedBatchSize = body.batchSize === undefined ? 25 : Number(body.batchSize);
   if (!Number.isInteger(requestedBatchSize) || requestedBatchSize < 1 || requestedBatchSize > 100) {
     return response({ error: "Batch size must be between 1 and 100." }, 400);
   }
 
-  const adminClient = createAdminClient(projectUrl, secretKey);
+  const workerStartedAt = new Date().toISOString();
   const claimToken = crypto.randomUUID();
   const { data, error: claimError } = await adminClient.rpc("claim_due_email_notifications", {
     requested_batch_size: requestedBatchSize,
     worker_claim_token: claimToken,
   });
-  if (claimError) return response({ error: "Due reminders could not be claimed." }, 500);
+  if (claimError) {
+    await adminClient.rpc("record_reminder_worker_run", {
+      worker_started_at: workerStartedAt,
+      worker_deployment_commit: deploymentCommit,
+      worker_claimed: 0,
+      worker_sent: 0,
+      worker_failed: 0,
+      worker_completion_errors: 1,
+    });
+    return response({ error: "Due reminders could not be claimed." }, 500);
+  }
 
   const deliveries = (Array.isArray(data) ? data : []) as Delivery[];
   let sent = 0;
@@ -191,6 +233,16 @@ Deno.serve(async (request) => {
     if (succeeded) sent += 1;
     else failed += 1;
   }
+
+  const { data: runRecorded, error: runRecordError } = await adminClient.rpc("record_reminder_worker_run", {
+    worker_started_at: workerStartedAt,
+    worker_deployment_commit: deploymentCommit,
+    worker_claimed: deliveries.length,
+    worker_sent: sent,
+    worker_failed: failed,
+    worker_completion_errors: completionErrors,
+  });
+  if (runRecordError || runRecorded !== true) completionErrors += 1;
 
   return response({ claimed: deliveries.length, sent, failed, completionErrors, deploymentCommit });
 });
