@@ -21,6 +21,7 @@
     "test:cloud-outbox": "node --test tests/cloud-outbox.test.js",
     "test:github-environments": "node --test tests/github-environments.test.js",
     "check:github-environments": "node scripts/check-github-environments.mjs",
+    "provision:github-environments": "node scripts/provision-github-environments.mjs",
     "test:service-readiness": "node --test tests/service-readiness.test.js",
     "test:staging-boundaries": "node --test tests/staging-boundaries.test.js",
     "check:staging-boundaries": "node scripts/check-staging-boundaries.mjs",

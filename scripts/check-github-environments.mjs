@@ -42,15 +42,11 @@ export async function loadGitHubEnvironmentRequirements(url = requirementsUrl) {
   return validateGitHubEnvironmentRequirements(JSON.parse(await readFile(url, "utf8")));
 }
 
-export function evaluateGitHubEnvironmentReadiness(requirements, snapshot) {
+export function evaluateGitHubEnvironmentProtection(requirements, snapshot) {
   validateGitHubEnvironmentRequirements(requirements);
   const errors = [];
-  let variableCount = 0;
-  let secretCount = 0;
 
   for (const [name, requirement] of Object.entries(requirements.environments)) {
-    variableCount += requirement.variables.length;
-    secretCount += requirement.secrets.length;
     const environment = snapshot.environments?.[name];
     if (!environment) {
       errors.push(`${name}: environment is missing.`);
@@ -71,6 +67,25 @@ export function evaluateGitHubEnvironmentReadiness(requirements, snapshot) {
     if (branchPolicy.custom_branch_policies !== true || !sameNames(deploymentPolicies, requiredPolicies)) {
       errors.push(`${name}: deployment branches must be exactly ${requirement.allowedBranches.join(", ")}.`);
     }
+  }
+
+  return {
+    errors,
+    environmentCount: Object.keys(requirements.environments).length,
+  };
+}
+
+export function evaluateGitHubEnvironmentReadiness(requirements, snapshot) {
+  const protection = evaluateGitHubEnvironmentProtection(requirements, snapshot);
+  const errors = [...protection.errors];
+  let variableCount = 0;
+  let secretCount = 0;
+
+  for (const [name, requirement] of Object.entries(requirements.environments)) {
+    variableCount += requirement.variables.length;
+    secretCount += requirement.secrets.length;
+    const environment = snapshot.environments?.[name];
+    if (!environment) continue;
 
     const missingVariables = requirement.variables.filter((name) => !(environment.variableNames || []).includes(name));
     if (missingVariables.length) errors.push(`${name}: missing variables: ${missingVariables.join(", ")}.`);
@@ -80,10 +95,22 @@ export function evaluateGitHubEnvironmentReadiness(requirements, snapshot) {
 
   return {
     errors,
-    environmentCount: Object.keys(requirements.environments).length,
+    environmentCount: protection.environmentCount,
     variableCount,
     secretCount,
   };
+}
+
+export function buildGitHubEnvironmentProtectionReport(repository, result) {
+  const status = result.errors.length ? "BLOCKED" : "READY";
+  const lines = [
+    `GitHub environment protection: ${status}`,
+    `Repository: ${repository}`,
+    `Contract: ${result.environmentCount} protected environments`,
+    "Variables, secrets, and their values were not requested or changed.",
+  ];
+  if (result.errors.length) lines.push("", ...result.errors.map((error) => `- ${error}`));
+  return `${lines.join("\n")}\n`;
 }
 
 export function buildGitHubEnvironmentReadinessReport(repository, result) {

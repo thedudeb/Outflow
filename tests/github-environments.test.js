@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  buildGitHubEnvironmentProtectionReport,
   buildGitHubEnvironmentReadinessReport,
   collectGitHubEnvironmentSnapshot,
+  evaluateGitHubEnvironmentProtection,
   evaluateGitHubEnvironmentReadiness,
   loadGitHubEnvironmentRequirements,
 } from "../scripts/check-github-environments.mjs";
+import {
+  buildGitHubEnvironmentProtectionPlan,
+  buildGitHubEnvironmentProtectionPlanReport,
+} from "../scripts/provision-github-environments.mjs";
 
 function completeSnapshot(requirements) {
   return {
@@ -28,6 +34,64 @@ test("complete protected GitHub environments satisfy the versioned readiness con
   assert.equal(result.variableCount, 17);
   assert.equal(result.secretCount, 19);
   assert.match(buildGitHubEnvironmentReadinessReport(requirements.repository, result), /readiness: READY/);
+});
+
+test("environment protection can be verified independently of operator-owned settings", async () => {
+  const requirements = await loadGitHubEnvironmentRequirements();
+  const snapshot = completeSnapshot(requirements);
+  for (const environment of Object.values(snapshot.environments)) {
+    environment.variableNames = [];
+    environment.secretNames = [];
+  }
+  const result = evaluateGitHubEnvironmentProtection(requirements, snapshot);
+  assert.deepEqual(result.errors, []);
+  assert.match(buildGitHubEnvironmentProtectionReport(requirements.repository, result), /protection: READY/);
+  assert.match(buildGitHubEnvironmentProtectionReport(requirements.repository, result), /were not requested or changed/);
+  assert.ok(evaluateGitHubEnvironmentReadiness(requirements, snapshot).errors.some((error) => error.includes("missing variables")));
+});
+
+test("protection planner creates missing environments, reviewer rules, and exact main policies", async () => {
+  const requirements = await loadGitHubEnvironmentRequirements();
+  const reviewer = { id: 202567690, login: "thedudeb" };
+  const operations = buildGitHubEnvironmentProtectionPlan(requirements, { environments: {} }, reviewer);
+  assert.equal(operations.length, 8);
+  assert.deepEqual(operations.map((operation) => operation.method), ["PUT", "POST", "PUT", "POST", "PUT", "POST", "PUT", "POST"]);
+  for (const operation of operations.filter((operation) => operation.method === "PUT")) {
+    assert.deepEqual(operation.body.reviewers, [{ type: "User", id: reviewer.id }]);
+    assert.deepEqual(operation.body.deployment_branch_policy, { protected_branches: false, custom_branch_policies: true });
+  }
+  for (const operation of operations.filter((operation) => operation.method === "POST")) {
+    assert.deepEqual(operation.body, { name: "main", type: "branch" });
+  }
+  const report = buildGitHubEnvironmentProtectionPlanReport(requirements.repository, reviewer, operations);
+  assert.match(report, /Mode: DRY RUN/);
+  assert.match(report, /Re-run with --apply/);
+  assert.match(report, /secrets, and their values will not be requested or changed/);
+  assert.doesNotMatch(report, /private-secret-value/);
+});
+
+test("protection planner is idempotent and preserves existing reviewers", async () => {
+  const requirements = await loadGitHubEnvironmentRequirements();
+  const snapshot = completeSnapshot(requirements);
+  const reviewer = { id: 202567690, login: "thedudeb" };
+  for (const environment of Object.values(snapshot.environments)) {
+    environment.protectionRules = [{
+      type: "required_reviewers",
+      prevent_self_review: false,
+      reviewers: [{ type: "User", reviewer: { id: reviewer.id } }],
+    }];
+  }
+  assert.deepEqual(buildGitHubEnvironmentProtectionPlan(requirements, snapshot, reviewer), []);
+});
+
+test("protection planner refuses to delete unexpected deployment policies", async () => {
+  const requirements = await loadGitHubEnvironmentRequirements();
+  const snapshot = completeSnapshot(requirements);
+  snapshot.environments.staging.branchPolicies.push({ name: "release/*", type: "branch" });
+  assert.throws(
+    () => buildGitHubEnvironmentProtectionPlan(requirements, snapshot, { id: 1, login: "owner" }),
+    /unexpected deployment policies: branch:release\/\*/,
+  );
 });
 
 test("missing settings and weak environment protection fail with names but no values", async () => {
@@ -111,8 +175,10 @@ test("workflow setting references cannot drift from the environment inventory", 
   ]);
   const packageJson = JSON.parse(packageSource);
   assert.equal(packageJson.scripts["check:github-environments"], "node scripts/check-github-environments.mjs");
+  assert.equal(packageJson.scripts["provision:github-environments"], "node scripts/provision-github-environments.mjs");
   assert.equal(packageJson.scripts["test:github-environments"], "node --test tests/github-environments.test.js");
   assert.match(quality, /npm run test:github-environments/);
   assert.match(documentation, /Secret values are never requested/);
-  assert.match(prd, /read-only GitHub environment readiness contract/);
+  assert.match(prd, /versioned GitHub environment contract/);
+  assert.match(prd, /dry-run-first, idempotent provisioner/);
 });
