@@ -126,8 +126,25 @@ self.addEventListener("fetch", (event) => {
 }
 
 const publicBase = normalizePublicBase(process.env.OUTFLOW_PUBLIC_BASE);
+const tauriDevHost = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   base: publicBase,
   plugins: [react(), outflowServiceWorker()],
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  server: {
+    port: 5173,
+    strictPort: true,
+    host: tauriDevHost || false,
+    hmr: tauriDevHost
+      ? {
+          protocol: "ws",
+          host: tauriDevHost,
+          port: 1421,
+        }
+      : undefined,
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
+  },
 });

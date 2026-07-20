@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build --bundles app",
     "test:account-prompts": "node --test tests/account-prompt.test.js",
     "test:feature-access": "node --test tests/feature-access.test.js",
     "test:cloud-outbox": "node --test tests/cloud-outbox.test.js",
@@ -31,6 +33,7 @@
     "test:account-service": "playwright test --config=playwright.account.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
+    "test:desktop-shell": "node --test tests/desktop-shell.test.js",
     "test:web-deployment": "playwright test --config=playwright.deployment.config.js",
     "pretest:pwa": "npm run build",
     "test:pwa": "playwright test --config=playwright.pwa.config.js",
@@ -49,6 +52,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
+    "@tauri-apps/cli": "2.11.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
