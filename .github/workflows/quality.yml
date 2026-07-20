@@ -72,6 +72,7 @@ jobs:
       - run: npm run test:reminder-operations
       - run: npm run test:reminder-incident
       - run: npm run test:privacy-policy
+      - run: npm run test:product-language
       - run: npm run test:web-security
       - run: npm run test:dialog-dismissal
       - run: npm run test:account-service

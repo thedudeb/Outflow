@@ -19,9 +19,9 @@ const dialogs = [
   },
   {
     name: "ledger",
-    trigger: "Open Personal ledger controls",
-    title: "Ledger controls",
-    close: "Close ledger controls",
+    trigger: "Manage Personal subscriptions",
+    title: "Subscription lists",
+    close: "Close subscription lists",
   },
   {
     name: "alerts",

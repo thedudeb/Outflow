@@ -50,7 +50,7 @@ test("native delivery strips internal identifiers while browser delivery retains
   const nativePayloads = [];
   await sendDeviceNotification({
     title: "Outflow / Storage bills today",
-    body: "$2.99 will leave today / Personal / personal local ledger.",
+    body: "$2.99 will leave today / Personal / personal / on this device.",
     deliveryId: "private-ledger-id:charge-storage",
   }, {
     native: true,
@@ -58,7 +58,7 @@ test("native delivery strips internal identifiers while browser delivery retains
   });
   assert.deepEqual(nativePayloads, [{
     title: "Outflow / Storage bills today",
-    body: "$2.99 will leave today / Personal / personal local ledger.",
+    body: "$2.99 will leave today / Personal / personal / on this device.",
   }]);
 
   const browserPayloads = [];
@@ -69,13 +69,13 @@ test("native delivery strips internal identifiers while browser delivery retains
   }
   await sendDeviceNotification({
     title: "Outflow / Storage bills today",
-    body: "$2.99 will leave today / Personal / personal local ledger.",
+    body: "$2.99 will leave today / Personal / personal / on this device.",
     deliveryId: "local-tag",
   }, { native: false, browser: { Notification: BrowserNotification } });
   assert.deepEqual(browserPayloads, [{
     title: "Outflow / Storage bills today",
     options: {
-      body: "$2.99 will leave today / Personal / personal local ledger.",
+      body: "$2.99 will leave today / Personal / personal / on this device.",
       tag: "local-tag",
     },
   }]);

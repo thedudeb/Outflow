@@ -23,8 +23,8 @@ test("every guest dialog closes from its backdrop but not from its panel", async
   );
   await expectPanelAndBackdropBehavior(
     page,
-    page.getByRole("button", { name: "Open Personal ledger controls", exact: true }),
-    "Ledger controls",
+    page.getByRole("button", { name: "Manage Personal subscriptions", exact: true }),
+    "Subscription lists",
   );
   await expectPanelAndBackdropBehavior(
     page,

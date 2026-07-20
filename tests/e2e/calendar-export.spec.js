@@ -58,7 +58,7 @@ test("calendar exports preserve identity, publish edits, and isolate paused sche
   expect(initialNetflix.DTSTART).toMatch(/^\d{8}$/);
   expect(initialNetflix.CATEGORIES).toContain("Outflow");
   expect(initialNetflix.CATEGORIES).toContain("Streaming");
-  expect(initialNetflix.DESCRIPTION).toContain("Personal / personal local ledger");
+  expect(initialNetflix.DESCRIPTION).toContain("Personal / personal / on this device");
 
   const netflixCard = page.getByRole("article").filter({ hasText: "Netflix" });
   await netflixCard.getByRole("button", { name: "Edit", exact: true }).click();

@@ -178,13 +178,13 @@ Deno.serve(async (request) => {
     const text = [
       `${delivery.subscription_name} ${eventLabel} ${timingCopy(delivery.lead_days)}.`,
       `${amount} on ${billingDate}.`,
-      `Ledger: ${delivery.ledger_name} (${delivery.ledger_kind}).`,
+      `List: ${delivery.ledger_name} (${delivery.ledger_kind}).`,
       `Open Outflow: ${appUrl}`,
     ].join("\n");
     const html = [
       `<p><strong>${escapeHtml(delivery.subscription_name)}</strong> ${escapeHtml(eventLabel)} ${escapeHtml(timingCopy(delivery.lead_days))}.</p>`,
       `<p><strong>${escapeHtml(amount)}</strong> on ${escapeHtml(billingDate)}.</p>`,
-      `<p>Ledger: ${escapeHtml(delivery.ledger_name)} (${escapeHtml(delivery.ledger_kind)}).</p>`,
+      `<p>List: ${escapeHtml(delivery.ledger_name)} (${escapeHtml(delivery.ledger_kind)}).</p>`,
       `<p><a href="${escapeHtml(appUrl)}">Open Outflow</a></p>`,
     ].join("");
 

@@ -83,7 +83,7 @@ export function calendarBody(payload: FeedPayload) {
     start: dateParts(subscription.nextBillingDate),
     end: nextDateParts(subscription.nextBillingDate),
     title: `${calendarText(subscription.name)} / ${money(subscription.amount, subscription.currency)}`,
-    description: `${subscription.paused ? "Paused schedule / " : ""}${subscription.cycle} charge / ${calendarText(payload.ledger.name)} / ${payload.ledger.kind} cloud ledger`,
+    description: `${subscription.paused ? "Paused schedule / " : ""}${subscription.cycle} charge / ${calendarText(payload.ledger.name)} / ${payload.ledger.kind} / synced`,
     categories: ["Outflow", calendarText(subscription.category)],
     status: subscription.paused ? "TENTATIVE" : "CONFIRMED",
     busyStatus: "FREE",

@@ -12,9 +12,9 @@ function selectedDayPane(calendar) {
 }
 
 async function createEmptyHouseholdLedger(page, name) {
-  await page.getByRole("button", { name: "Open Personal ledger controls", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Ledger controls" });
-  await dialog.getByLabel("New ledger", { exact: true }).fill(name);
+  await page.getByRole("button", { name: "Manage Personal subscriptions", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Subscription lists" });
+  await dialog.getByLabel("New list", { exact: true }).fill(name);
   await dialog.locator("form select").selectOption("household");
   await dialog.getByRole("button", { name: "Create local", exact: true }).click();
   await expect(dialog).toBeHidden();

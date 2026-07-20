@@ -40,9 +40,9 @@ async function installNotificationMock(page, requestResult = "granted") {
 }
 
 async function createEmptyHouseholdLedger(page, name = "Notify Lab") {
-  await page.getByRole("button", { name: "Open Personal ledger controls", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Ledger controls" });
-  await dialog.getByLabel("New ledger", { exact: true }).fill(name);
+  await page.getByRole("button", { name: "Manage Personal subscriptions", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Subscription lists" });
+  await dialog.getByLabel("New list", { exact: true }).fill(name);
   await dialog.locator("form select").selectOption("household");
   await dialog.getByRole("button", { name: "Create local", exact: true }).click();
   await expect(dialog).toBeHidden();
@@ -133,14 +133,14 @@ test("device alerts recover malformed dedupe state, limit content, and deduplica
     {
       title: "Outflow / Renewal Monitor bills 7 days",
       options: {
-        body: "$12.50 will leave on Sun, Jul 26 / Notify Lab / household local ledger.",
+        body: "$12.50 will leave on Sun, Jul 26 / Notify Lab / household / on this device.",
         tag: expect.stringContaining(":charge-"),
       },
     },
     {
       title: "Outflow / Renewal Monitor trial ends 5 days",
       options: {
-        body: "$12.50 expected after the trial ends on Fri, Jul 24 / Notify Lab / household local ledger.",
+        body: "$12.50 expected after the trial ends on Fri, Jul 24 / Notify Lab / household / on this device.",
         tag: expect.stringContaining(":trial-"),
       },
     },
@@ -175,7 +175,7 @@ test("paused alerts require opt-in and global device disablement stops delivery"
   await settingsCheckbox(dialog, "Paused schedule alerts").check();
   await expect.poll(() => page.evaluate(() => window.__outflowNotifications.length)).toBe(1);
   let notifications = await page.evaluate(() => window.__outflowNotifications);
-  expect(notifications[0].options.body).toContain("Paused schedule / Notify Lab / household local ledger.");
+  expect(notifications[0].options.body).toContain("Paused schedule / Notify Lab / household / on this device.");
 
   await settingsCheckbox(dialog, "Device notifications").uncheck();
   await expect(dialog.getByRole("status")).toContainText("Device notifications disabled");

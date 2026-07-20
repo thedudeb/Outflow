@@ -166,7 +166,7 @@ export function saveCloudWriteOperation(storage, operation) {
     candidate.accountId === normalized.accountId && candidate.ledgerId === normalized.ledgerId
   );
   if (existingIndex >= 0 && operations[existingIndex].operationId !== normalized.operationId) {
-    throw new Error("This cloud ledger already has a pending change.");
+    throw new Error("This synced list already has a pending change.");
   }
   if (existingIndex >= 0) {
     const existing = operations[existingIndex];
@@ -195,7 +195,7 @@ export function saveCloudWriteOperation(storage, operation) {
     }
     operations[existingIndex] = normalized;
   } else {
-    if (operations.length >= MAX_OPERATIONS) throw new Error("Too many cloud ledgers have pending changes on this browser.");
+    if (operations.length >= MAX_OPERATIONS) throw new Error("Too many synced lists have pending changes on this browser.");
     operations.push(normalized);
   }
   writeStore(storage, operations);

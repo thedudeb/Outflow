@@ -143,11 +143,11 @@ test("production security policy preserves CSV, calendar, and backup downloads",
   );
   await expect(calendarDialog).toBeHidden();
 
-  await page.getByRole("button", { name: "Open Personal ledger controls", exact: true }).click();
-  const ledgerDialog = page.getByRole("dialog", { name: "Ledger controls" });
+  await page.getByRole("button", { name: "Manage Personal subscriptions", exact: true }).click();
+  const ledgerDialog = page.getByRole("dialog", { name: "Subscription lists" });
   await expectDownload(
     page,
-    () => ledgerDialog.getByRole("button", { name: "Export full ledger", exact: true }).click(),
+    () => ledgerDialog.getByRole("button", { name: "Export full list", exact: true }).click(),
     /^outflow-personal-backup-\d{4}-\d{2}-\d{2}\.json$/,
   );
 });

@@ -16,9 +16,9 @@ function forecastMetric(forecast, label) {
 }
 
 async function createEmptyHouseholdLedger(page) {
-  await page.getByRole("button", { name: "Open Personal ledger controls", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Ledger controls" });
-  await dialog.getByLabel("New ledger", { exact: true }).fill("Forecast Lab");
+  await page.getByRole("button", { name: "Manage Personal subscriptions", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Subscription lists" });
+  await dialog.getByLabel("New list", { exact: true }).fill("Forecast Lab");
   await dialog.locator("form select").selectOption("household");
   await dialog.getByRole("button", { name: "Create local", exact: true }).click();
   await expect(dialog).toBeHidden();
@@ -167,7 +167,7 @@ test("weekly, monthly, and yearly schedules produce exact 30, 60, and 90 day for
   await expect(forecastMetric(forecast, "Debits")).toContainText("17");
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Open Forecast Lab ledger controls", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage Forecast Lab subscriptions", exact: true })).toBeVisible();
   await expect(page.getByRole("article")).toHaveCount(3);
   await expect(forecastMetric(panel(page, "Cash-out forecast"), "Scheduled")).toContainText("$200.00");
 });

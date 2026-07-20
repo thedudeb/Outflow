@@ -703,7 +703,7 @@ async function openStudioCloud(page, email = "owner@example.com") {
   await expect(dialog).toContainText("Studio Cloud");
   await dialog.getByRole("button", { name: "Open", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: "Open Studio Cloud ledger controls", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage Studio Cloud subscriptions", exact: true })).toBeVisible();
 }
 
 test("configured guest explicitly creates or signs in without uploading local data", async ({ page }) => {
@@ -781,13 +781,13 @@ test("verified sign-in preserves local data until Create cloud copy is selected"
   await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Identity Signed in");
-  await expect(dialog).toContainText("Local workspace active");
-  await expect(dialog).toContainText("No cloud ledgers yet");
+  await expect(dialog).toContainText("Device workspace active");
+  await expect(dialog).toContainText("No synced lists yet");
   expect(fixture.migrations).toHaveLength(0);
 
   const workspaceBefore = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
   await dialog.getByRole("button", { name: "Create cloud copy", exact: true }).click();
-  await expect(dialog.getByRole("status")).toContainText("Cloud copy confirmed / 1 ledgers / 6 records. Local data remains available.");
+  await expect(dialog.getByRole("status")).toContainText("Synced copy confirmed / 1 list / 6 records. Data on this device remains available.");
   expect(fixture.migrations).toHaveLength(1);
   expect(fixture.migrations[0]?.workspace_payload?.ledgers).toHaveLength(1);
   expect(fixture.migrations[0]?.workspace_payload?.ledgers[0]?.subscriptions).toEqual(
@@ -812,7 +812,7 @@ test("forged stored session is rejected and cleared without touching the local l
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
   await page.getByRole("button", { name: "Open optional account controls", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
-  await expect(dialog.getByRole("alert")).toContainText("Your account session could not be verified. Sign in again; local ledgers were not changed.");
+  await expect(dialog.getByRole("alert")).toContainText("Your account session could not be verified. Sign in again; subscriptions on this device were not changed.");
   await expect(dialog).toContainText("Identity Guest");
   expect(fixture.migrations).toHaveLength(0);
   expect(fixture.traffic.filter((request) => request.path.includes("/rest/v1/"))).toHaveLength(0);
@@ -828,7 +828,7 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
   await openStudioCloud(page);
 
-  await expect(page.getByRole("status")).toContainText("Cloud ledger loaded. Changes use optimistic revision checks.");
+  await expect(page.getByRole("status")).toContainText("Synced list loaded. Changes are protected against conflicting updates.");
   await expect(monthlyOutflow(page)).toContainText("$25.00");
   await expect(monthlyOutflow(page)).not.toContainText("$39.47");
   let cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
@@ -852,7 +852,7 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await dialog.getByRole("button", { name: "Sign out", exact: true }).click();
-  await expect(dialog.getByRole("status")).toContainText("Signed out. Local ledgers remain on this browser.");
+  await expect(dialog.getByRole("status")).toContainText("Signed out. Subscriptions on this device remain available.");
   await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
   await expect(monthlyOutflow(page)).toContainText("$39.47");
@@ -917,7 +917,7 @@ test("failed cloud writes survive reload, replay once, fail closed on conflict, 
   expect((await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")))).operations).toEqual([]);
 
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Cloud ledger refreshed.");
+  await expect(page.getByRole("status")).toContainText("Synced list refreshed.");
   cloudState.replaceMode = "applied";
   cloudState.replaceFailuresRemaining = 1;
   await authoritativeCard.getByRole("button", { name: "Edit", exact: true }).click();
@@ -979,7 +979,7 @@ test("account display name stays private and refreshes shared attribution throug
     await displayName.fill("  Avery   Ledger  ");
     await dialog.getByRole("button", { name: "Save profile", exact: true }).click();
 
-    await expect(dialog.getByText("Profile saved. Shared ledgers now identify you as Avery Ledger.", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Profile saved. Shared lists now identify you as Avery Ledger.", { exact: true })).toBeVisible();
     await expect(displayName).toHaveValue("Avery Ledger");
     await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.");
     await expect(peerCard).toContainText("Added by You / Updated by Avery Ledger");
@@ -1056,7 +1056,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
 
     await peerPage.getByRole("button", { name: "Clear", exact: true }).click();
     await peerPage.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(peerPage.getByRole("status")).toContainText("Cloud ledger refreshed.");
+    await expect(peerPage.getByRole("status")).toContainText("Synced list refreshed.");
     await expect(peerCard).toContainText("$35.00");
 
     expect(await realtimeState.disconnect("peer")).toBe(1);
@@ -1140,7 +1140,7 @@ test("Pro owner manages shared roles, invitations, and removals through authorit
   const memberRow = dialog.getByRole("combobox", { name: "Access level for Morgan Editor", exact: true }).locator("xpath=ancestor::div[1]");
   await memberRow.getByRole("button", { name: "Remove", exact: true }).click();
   await memberRow.getByRole("button", { name: "Confirm", exact: true }).click();
-  await expect(dialog.getByText("Member removed from the cloud ledger.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Member removed from the synced list.", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Morgan Editor", { exact: true })).toHaveCount(0);
   expect(cloudState.removedMembers).toEqual([editorUserId]);
 });
@@ -1185,7 +1185,7 @@ test("refunded owner keeps data-control removal while Pro collaboration actions 
   await expect(remove).toBeEnabled();
   await remove.click();
   await memberRow.getByRole("button", { name: "Confirm", exact: true }).click();
-  await expect(dialog.getByText("Member removed from the cloud ledger.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Member removed from the synced list.", { exact: true })).toBeVisible();
   expect(cloudState.removedMembers).toEqual([editorUserId]);
   expect(cloudState.roleChanges).toHaveLength(0);
   expect(cloudState.sentInvitations).toHaveLength(0);
@@ -1200,8 +1200,8 @@ test("invited account accepts the private token without changing its local works
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toBeVisible();
   const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
-  await expect(dialog).toContainText("Private ledger invitation");
-  await expect(dialog).toContainText("No cloud ledgers yet");
+  await expect(dialog).toContainText("Private list invitation");
+  await expect(dialog).toContainText("No synced lists yet");
   await dialog.getByRole("button", { name: "Accept invitation", exact: true }).click();
 
   await expect(dialog.getByText("Joined Studio Cloud as viewer.", { exact: true })).toBeVisible();
@@ -1695,7 +1695,7 @@ test("signed-in account export downloads complete portable cloud data without se
   expect(cloudState.accountExportRequests).toBe(1);
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
   await expect(dialog.getByText(
-    "Account data exported / 1 cloud ledger. Local browser ledgers were not included.",
+    "Account data exported / 1 synced list. Subscriptions stored on this device were not included.",
     { exact: true },
   )).toBeVisible();
 });
@@ -1743,7 +1743,7 @@ test("confirmed cloud-account deletion clears remote access and restores the exa
     .analyze();
   expect(violations.length, violationSummary(violations)).toBe(0);
   await dialog.getByRole("button", { name: "Confirm cloud delete", exact: true }).click();
-  await expect(dialog.getByText("Cloud account deleted. Local ledgers were not removed.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Cloud account deleted. Subscriptions on this device were not removed.", { exact: true })).toBeVisible();
 
   expect(cloudState.deleteRequests).toBe(1);
   expect(cloudState.deleted).toBe(true);

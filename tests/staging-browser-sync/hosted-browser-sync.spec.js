@@ -112,7 +112,7 @@ async function openHostedLedger(
   const ledgerRow = ledgerTitle.locator("..").locator("..");
   await ledgerRow.getByRole("button", { name: "Open", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByRole("button", { name: `Open ${ledgerName} ledger controls`, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Manage ${ledgerName} subscriptions`, exact: true })).toBeVisible();
   if (waitForSynced) {
     await expect(page.getByText("synced", { exact: true })).toBeVisible();
   }
@@ -241,7 +241,7 @@ test("deployed UI recovers durable writes, rejects conflicts, and catches up aft
 
     await ownerPage.getByRole("button", { name: "Clear", exact: true }).click();
     await ownerPage.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(ownerPage.getByRole("status").filter({ hasText: "Cloud ledger refreshed." })).toBeVisible();
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Synced list refreshed." })).toBeVisible();
     await expectCardAmount(ownerPage, fixture.subscriptionName, 37);
     completed.push("stale refresh recovery");
 
@@ -260,7 +260,7 @@ test("deployed UI recovers durable writes, rejects conflicts, and catches up aft
 
     await ownerPage.evaluate(() => window.__OUTFLOW_STAGING_SYNC__.dropChanges(false));
     await ownerPage.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(ownerPage.getByRole("status").filter({ hasText: "Cloud ledger refreshed." })).toBeVisible();
+    await expect(ownerPage.getByRole("status").filter({ hasText: "Synced list refreshed." })).toBeVisible();
     await expect(ownerPage.getByText("synced", { exact: true })).toBeVisible();
     completed.push("conflict refresh recovery");
 

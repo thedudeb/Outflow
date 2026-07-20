@@ -79,7 +79,7 @@ Deno.serve(async (request) => {
   const appUrl = Deno.env.get("OUTFLOW_APP_URL") || "";
   const authorization = request.headers.get("authorization") || "";
   if (!projectUrl || !publishableKey || !secretKey || !resendKey || !inviteFrom || !validAppUrl(appUrl) || !authorization.startsWith("Bearer ")) {
-    return response({ error: "Ledger invitations are not configured." }, 503, origin);
+    return response({ error: "List invitations are not configured." }, 503, origin);
   }
 
   let body: { ledgerId?: unknown; email?: unknown; role?: unknown };
@@ -106,7 +106,7 @@ Deno.serve(async (request) => {
   const { data: permission, error: permissionError } = await userClient.rpc("can_invite_to_ledger", {
     target_ledger_id: ledgerId,
   });
-  if (permissionError || !permission?.ledgerId) return response({ error: "A Pro ledger owner is required." }, 403, origin);
+  if (permissionError || !permission?.ledgerId) return response({ error: "A Pro list owner is required." }, 403, origin);
 
   const adminClient = createAdminClient(projectUrl, secretKey);
   const { count: pendingCount, error: countError } = await adminClient
@@ -116,7 +116,7 @@ Deno.serve(async (request) => {
     .is("accepted_at", null)
     .gt("expires_at", new Date().toISOString());
   if (countError) return response({ error: "Invitation could not be prepared." }, 500, origin);
-  if ((pendingCount || 0) >= 25) return response({ error: "This ledger has reached its pending invitation limit." }, 409, origin);
+  if ((pendingCount || 0) >= 25) return response({ error: "This list has reached its pending invitation limit." }, 409, origin);
 
   const { data: existing, error: existingError } = await adminClient
     .from("ledger_invitations")
@@ -152,7 +152,7 @@ Deno.serve(async (request) => {
 
   const joinUrl = new URL(appUrl);
   joinUrl.hash = `app?invite=${encodeURIComponent(token)}`;
-  const ledgerName = String(permission.ledgerName || "Shared ledger");
+  const ledgerName = String(permission.ledgerName || "Shared list");
   const sender = userData.user.email || "An Outflow member";
   const resendResponse = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -164,8 +164,8 @@ Deno.serve(async (request) => {
       from: inviteFrom,
       to: [email],
       subject: `${sender} invited you to ${ledgerName} in ${PRODUCT}`,
-      text: `${sender} invited you to the ${ledgerName} ledger as ${role}. Open this private link within 7 days: ${joinUrl.toString()}`,
-      html: `<p><strong>${escapeHtml(sender)}</strong> invited you to the <strong>${escapeHtml(ledgerName)}</strong> ledger as ${escapeHtml(role)}.</p><p><a href="${escapeHtml(joinUrl.toString())}">Accept the Outflow invitation</a></p><p>This private link expires in 7 days.</p>`,
+      text: `${sender} invited you to the ${ledgerName} subscription list as ${role}. Open this private link within 7 days: ${joinUrl.toString()}`,
+      html: `<p><strong>${escapeHtml(sender)}</strong> invited you to the <strong>${escapeHtml(ledgerName)}</strong> subscription list as ${escapeHtml(role)}.</p><p><a href="${escapeHtml(joinUrl.toString())}">Accept the Outflow invitation</a></p><p>This private link expires in 7 days.</p>`,
     }),
   });
 

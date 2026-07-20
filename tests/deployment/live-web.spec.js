@@ -72,9 +72,9 @@ test("the published guest tracker identifies its boundary and persists a local e
   await page.goto(trackerUrl.href, { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Active subscriptions", exact: true })).toBeVisible();
-  const ledgerControl = page.getByRole("button", { name: "Open Personal ledger controls", exact: true });
+  const ledgerControl = page.getByRole("button", { name: "Manage Personal subscriptions", exact: true });
     await expect(ledgerControl).toContainText("Personal");
-    await expect(ledgerControl).toContainText("Personal / Local");
+    await expect(ledgerControl).toContainText("Personal / On this device");
   await expect(page.getByRole("button", { name: "Open optional account controls", exact: true })).toContainText("Account / Guest");
   await expect(page.getByText("Offline ready", { exact: true })).toBeVisible({ timeout: 15_000 });
 

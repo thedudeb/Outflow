@@ -429,20 +429,20 @@ function sanitizeWorkspace(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Workspace root must be an object.");
   if (value.schemaVersion !== WORKSPACE_SCHEMA_VERSION) throw new TypeError("Workspace version is not supported.");
   if (!Array.isArray(value.ledgers) || value.ledgers.length < 1 || value.ledgers.length > MAX_LEDGERS) {
-    throw new TypeError(`A workspace must contain between 1 and ${MAX_LEDGERS} ledgers.`);
+    throw new TypeError(`A workspace must contain between 1 and ${MAX_LEDGERS} subscription lists.`);
   }
 
   const ledgerIds = new Set();
   let personalLedgerCount = 0;
   const ledgers = value.ledgers.map((entry) => {
-    if (!entry || typeof entry !== "object") throw new TypeError("Workspace ledger entries must be objects.");
+    if (!entry || typeof entry !== "object") throw new TypeError("Workspace subscription-list entries must be objects.");
     if (!entry.ledger || typeof entry.ledger.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(entry.ledger.id)) {
-      throw new TypeError("Every workspace ledger must have a valid identifier.");
+      throw new TypeError("Every workspace subscription list must have a valid identifier.");
     }
-    if (!validLedgerKinds.has(entry.ledger.kind)) throw new TypeError("Workspace ledger kind is invalid.");
-    if (!Array.isArray(entry.subscriptions)) throw new TypeError("Every workspace ledger must have a subscription list.");
+    if (!validLedgerKinds.has(entry.ledger.kind)) throw new TypeError("Workspace subscription-list type is invalid.");
+    if (!Array.isArray(entry.subscriptions)) throw new TypeError("Every workspace entry must have a subscription list.");
     if (entry.subscriptions.length > MAX_SUBSCRIPTIONS) {
-      throw new TypeError(`A workspace ledger may contain at most ${MAX_SUBSCRIPTIONS} subscriptions.`);
+      throw new TypeError(`A subscription list may contain at most ${MAX_SUBSCRIPTIONS} subscriptions.`);
     }
     if (
       entry.subscriptions.some(
@@ -452,14 +452,14 @@ function sanitizeWorkspace(value) {
       throw new TypeError("Every workspace subscription must have a valid identifier.");
     }
     if (new Set(entry.subscriptions.map((subscription) => subscription.id)).size !== entry.subscriptions.length) {
-      throw new TypeError("Subscription identifiers must be unique within a ledger.");
+      throw new TypeError("Subscription identifiers must be unique within a list.");
     }
     const ledger = sanitizeLedgerMeta(entry.ledger);
     const subscriptions = entry.subscriptions.map(sanitizeSubscription);
     if (subscriptions.some((subscription) => !subscription)) {
       throw new TypeError("One or more workspace subscriptions are invalid.");
     }
-    if (ledgerIds.has(ledger.id)) throw new TypeError("Workspace ledger identifiers must be unique.");
+    if (ledgerIds.has(ledger.id)) throw new TypeError("Workspace subscription-list identifiers must be unique.");
     ledgerIds.add(ledger.id);
     if (ledger.kind === "personal") personalLedgerCount += 1;
     return {
@@ -467,7 +467,7 @@ function sanitizeWorkspace(value) {
       subscriptions: subscriptions.map((subscription) => normalizeBillingDate(subscription)),
     };
   });
-  if (personalLedgerCount !== 1) throw new TypeError("A workspace must contain exactly one personal ledger.");
+  if (personalLedgerCount !== 1) throw new TypeError("A workspace must contain exactly one personal subscription list.");
   const activeLedgerId = ledgerIds.has(value.activeLedgerId) ? value.activeLedgerId : ledgers[0].ledger.id;
 
   return {
@@ -479,18 +479,18 @@ function sanitizeWorkspace(value) {
 
 function sanitizeCloudLedgerSnapshot(value) {
   if (!value || typeof value !== "object" || !value.ledger || !Array.isArray(value.subscriptions)) {
-    throw new TypeError("Cloud ledger snapshot is invalid.");
+    throw new TypeError("Synced subscription snapshot is invalid.");
   }
   const source = value.ledger;
   if (typeof source.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(source.id)) {
-    throw new TypeError("Cloud ledger identifier is invalid.");
+    throw new TypeError("Synced list identifier is invalid.");
   }
   if (!validLedgerKinds.has(source.kind) || typeof source.name !== "string" || !source.name.trim()) {
-    throw new TypeError("Cloud ledger metadata is invalid.");
+    throw new TypeError("Synced list details are invalid.");
   }
-  if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new TypeError("Cloud ledger exceeds subscription capacity.");
+  if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new TypeError("Synced list exceeds subscription capacity.");
   const subscriptions = value.subscriptions.map(sanitizeSubscription);
-  if (subscriptions.some((subscription) => !subscription)) throw new TypeError("Cloud ledger contains an invalid subscription.");
+  if (subscriptions.some((subscription) => !subscription)) throw new TypeError("Synced list contains an invalid subscription.");
 
   return {
     ledger: {
@@ -569,7 +569,7 @@ function parseLedgerBackup(value, permission = "default") {
   if (value.product !== "Outflow") throw new TypeError("This is not an Outflow backup.");
   if (value.schemaVersion !== BACKUP_SCHEMA_VERSION) throw new TypeError("This backup version is not supported.");
   if (!value.ledger || typeof value.ledger.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(value.ledger.id)) {
-    throw new TypeError("The backup ledger identifier is invalid.");
+    throw new TypeError("The backup list identifier is invalid.");
   }
   if (!Array.isArray(value.subscriptions)) throw new TypeError("The backup has no subscription list.");
   if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new TypeError(`Backups may contain at most ${MAX_SUBSCRIPTIONS} subscriptions.`);
@@ -1041,7 +1041,7 @@ function subscriptionCalendarEvent(subscription, ledger) {
     monthly: "FREQ=MONTHLY",
     yearly: "FREQ=YEARLY",
   }[subscription.cycle];
-  const ledgerContext = `${ledger.name} / ${ledger.kind} ${ledger.storage} ledger`;
+  const ledgerContext = `${ledger.name} / ${ledger.kind} / ${ledger.storage === "cloud" ? "synced" : "on this device"}`;
 
   return {
     productId: "Outflow Subscription Tracker",
@@ -1396,10 +1396,10 @@ function PrivacyPage({ onHome, onOpen }) {
       <article className="mx-auto max-w-[1180px] border-x border-zinc-800 bg-black">
         <PrivacySection code="01" title="Local guest data">
           <p>
-            You can use Outflow without an account. Subscription names, amounts, currencies, billing cycles and dates, trial dates, categories, tags, color labels, pause state, reminder rules, local ledgers, and local preferences are stored in this browser or application sandbox. Outflow does not transmit those records to an account service unless you create an account and separately choose to create a cloud copy.
+            You can use Outflow without an account. Subscription names, amounts, currencies, billing cycles and dates, trial dates, categories, tags, color labels, pause state, reminder rules, local subscription lists, and local preferences are stored in this browser or application sandbox. Outflow does not transmit those records to an account service unless you create an account and separately choose to create a cloud copy.
           </p>
           <p>
-            Browser and native device notifications are generated from local records. The operating system or browser necessarily receives the notification title and body to display it. Outflow limits that content to the subscription, amount, billing date, and ledger and does not include account identifiers or service credentials.
+            Browser and native device notifications are generated from local records. The operating system or browser necessarily receives the notification title and body to display it. Outflow limits that content to the subscription, amount, billing date, and list name and does not include account identifiers or service credentials.
           </p>
           <p>
             The public website is hosted through GitHub Pages. Like any website host, it may process standard request information such as IP address, browser type, requested path, and request time. Outflow does not add analytics, advertising pixels, or cross-site tracking to the current build.
@@ -1408,22 +1408,22 @@ function PrivacyPage({ onHome, onOpen }) {
 
         <PrivacySection code="02" title="Optional account and shared data">
           <p>
-            When account services are available, requesting a passwordless link sends your email address to Supabase for authentication and to its configured email provider. Signing in alone does not upload a guest ledger. A cloud copy is created only after you select that action.
+            When account services are available, requesting a passwordless link sends your email address to Supabase for authentication and to its configured email provider. Signing in alone does not upload subscriptions from this device. A synced copy is created only after you select that action.
           </p>
           <p>
-            A cloud account can store your email-linked account identifier, optional display name, ledgers, subscriptions, roles, invitations, creator and updater attribution, synchronization revisions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-ledger members can see subscription data, roles, and display-name attribution for ledgers they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
+            A cloud account can store your email-linked account identifier, optional display name, subscription lists, subscriptions, roles, invitations, creator and updater attribution, synchronization revisions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-list members can see subscription data, roles, and display-name attribution for lists they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
           </p>
           <p>
-            One bounded pending cloud write may be retained in the browser for retry. It is tied to the account and ledger but excludes email addresses, session credentials, provider responses, and server secrets.
+            One bounded pending sync may be retained in the browser for retry. It is tied to the account and subscription list but excludes email addresses, session credentials, provider responses, and server secrets.
           </p>
         </PrivacySection>
 
         <PrivacySection code="03" title="Email, calendars, and payments">
           <p>
-            If you enable hosted email reminders, Outflow processes the selected subscription, amount, due date, ledger name, reminder timing, timezone, and recipient account email to deliver the message. Delivery status, retry state, and bounded bounce or complaint status may be retained so duplicate or unwanted email is not sent. Raw provider diagnostics are not exposed to the browser.
+            If you enable hosted email reminders, Outflow processes the selected subscription, amount, due date, list name, reminder timing, timezone, and recipient account email to deliver the message. Delivery status, retry state, and bounded bounce or complaint status may be retained so duplicate or unwanted email is not sent. Raw provider diagnostics are not exposed to the browser.
           </p>
           <p>
-            If you publish a hosted calendar, Outflow creates a private feed URL. Anyone or any calendar client with that URL can read the selected ledger schedule, so you should treat it like a password and revoke or rotate it if exposed. Downloaded CSV, backup, and calendar files are created at your request and are controlled by you after download.
+            If you publish a hosted calendar, Outflow creates a private feed URL. Anyone or any calendar client with that URL can read the selected subscription schedule, so you should treat it like a password and revoke or rotate it if exposed. Downloaded CSV, backup, and calendar files are created at your request and are controlled by you after download.
           </p>
           <p>
             Direct-web Pro uses Stripe-hosted Checkout for a one-time payment. Payment-card details are entered with Stripe and are not collected by the Outflow application. Outflow retains entitlement status and limited transaction references needed to activate, restore, refund, prevent duplicate fulfillment, and reconcile a lifetime purchase. Outflow does not create a recurring product subscription.
@@ -1458,7 +1458,7 @@ function PrivacyPage({ onHome, onOpen }) {
             De-identified reminder-operation summaries are designed to expire after 30 days. Invitation and private calendar credentials are stored as protected one-way values where supported, and server-only provider credentials are not shipped to the browser. Network transport uses HTTPS in hosted releases, and cloud data access is constrained by authenticated row-level authorization.
           </p>
           <p>
-            No system can guarantee absolute security. Do not place bank credentials, card numbers, passwords, or unrelated sensitive information in subscription names, categories, tags, ledger names, or shared display names.
+            No system can guarantee absolute security. Do not place bank credentials, card numbers, passwords, or unrelated sensitive information in subscription names, categories, tags, list names, or shared display names.
           </p>
         </PrivacySection>
 
@@ -1467,9 +1467,9 @@ function PrivacyPage({ onHome, onOpen }) {
             <ul className="grid gap-2">
               {[
                 "Use the complete guest tracker without creating an account.",
-                "Export subscriptions as CSV, download a ledger backup, or export a calendar file.",
+                "Export subscriptions as CSV, download a full backup, or export a calendar file.",
                 "Disable device and email notifications independently and control reminder timing per subscription.",
-                "Sign out without deleting local browser ledgers.",
+                "Sign out without deleting subscriptions stored on this device.",
                 "Download a free account-data archive when signed in.",
                 "Revoke hosted calendar links, remove shared members, and delete cloud account data from Account / Pro controls.",
                 "Clear browser or application storage to remove local data from that installation.",
@@ -1482,7 +1482,7 @@ function PrivacyPage({ onHome, onOpen }) {
             </ul>
           </div>
           <p>
-            Deleting a cloud account does not delete independent local ledgers on your devices. Clear those installations separately when desired. Payment processors, app stores, or email providers may retain records under their own legal obligations and privacy policies.
+            Deleting a cloud account does not delete independent subscription lists on your devices. Clear those installations separately when desired. Payment processors, app stores, or email providers may retain records under their own legal obligations and privacy policies.
           </p>
         </PrivacySection>
 
@@ -1566,11 +1566,11 @@ function LandingPage({ onOpen, pwa }) {
             </div>
             <h1 className="text-[48px] font-black uppercase leading-[0.9] text-white min-[360px]:text-6xl sm:text-8xl lg:text-9xl">Outflow</h1>
             <p className="mt-4 max-w-2xl text-base leading-6 text-zinc-300 sm:mt-6 sm:text-xl sm:leading-7">
-              Know what is leaving your account, how much it costs, and exactly when it lands. One clear ledger for every recurring charge.
+              Know what is leaving your account, how much it costs, and exactly when it lands. One clear view of every recurring charge.
             </p>
             <div className="mt-5 grid grid-cols-2 gap-2 sm:mt-8 sm:flex sm:flex-wrap sm:gap-3">
               <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-2 py-3 text-[11px] font-black uppercase text-black hover:bg-amber-300 sm:px-5 sm:text-sm">
-                Open your ledger
+                Open Outflow
               </button>
               <a href="#system" className="border border-zinc-600 bg-black/70 px-2 py-3 text-center text-[11px] font-black uppercase text-zinc-200 hover:border-zinc-300 sm:px-5 sm:text-sm">
                 See the system
@@ -1636,7 +1636,7 @@ function LandingPage({ onOpen, pwa }) {
             {[
               ["Local first", "Your subscription data stays in this browser. No account or external service required."],
               ["Date aware", "Weekly, monthly, and yearly charges roll forward automatically when billing dates pass."],
-              ["Action ready", "Pause, edit, or remove a subscription directly from the ledger whenever plans change."],
+              ["Action ready", "Pause, edit, or remove a subscription directly from the list whenever plans change."],
             ].map(([title, copy], index) => (
               <div key={title} className="border-b border-zinc-800 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
                 <div className="font-mono text-xs text-zinc-600">0{index + 1}</div>
@@ -1902,7 +1902,7 @@ function Tracker({ onExit, pwa }) {
         } catch {
           if (!active || sequence !== verificationSequence) return;
           setAccountSession(null);
-          setAccountError("Your account session could not be verified. Sign in again; local ledgers were not changed.");
+          setAccountError("Your account session could not be verified. Sign in again; subscriptions on this device were not changed.");
           window.setTimeout(() => client.auth.signOut({ scope: "local" }).catch(() => {}), 0);
         } finally {
           if (active && sequence === verificationSequence) setAccountLoading(false);
@@ -1917,7 +1917,7 @@ function Tracker({ onExit, pwa }) {
       if (!active) return;
       if (error) {
         setAccountSession(null);
-        setAccountError("Your account session could not be read. Sign in again; local ledgers were not changed.");
+        setAccountError("Your account session could not be read. Sign in again; subscriptions on this device were not changed.");
         setAccountLoading(false);
         return;
       }
@@ -2165,7 +2165,7 @@ function Tracker({ onExit, pwa }) {
         setManagedCloudLedgerId((current) => current && ledgers.some((ledger) => ledger.id === current) ? current : "");
       })
       .catch((error) => {
-        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read cloud ledger access.");
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read synced-list access.");
       })
       .finally(() => {
         if (active) setCloudLedgersLoading(false);
@@ -2201,7 +2201,7 @@ function Tracker({ onExit, pwa }) {
       refreshTimer = window.setTimeout(async () => {
         if (!active || cloudSyncingRef.current) return;
         setCloudSyncStatus("refreshing");
-        setCloudSyncMessage("A remote change arrived. Refreshing the cloud ledger...");
+        setCloudSyncMessage("A remote change arrived. Refreshing synced subscriptions...");
         try {
           const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
           if (!active) return;
@@ -2432,9 +2432,9 @@ function Tracker({ onExit, pwa }) {
       detail: "An optional account can add recovery on another device after you explicitly create a cloud copy.",
     },
     shared: {
-      code: "Shared ledger / local",
+      code: "Shared list / on this device",
       title: `${ledgerMeta.name} is isolated to this browser.`,
-      detail: "An optional account is the first step toward cloud access and member invitations. The local ledger stays intact.",
+      detail: "An optional account is the first step toward sync and member invitations. Subscriptions on this device stay intact.",
     },
     install: {
       code: "Installed locally",
@@ -2449,7 +2449,7 @@ function Tracker({ onExit, pwa }) {
     "pro-currency": {
       code: "Lifetime Pro / currencies",
       title: "Track new non-USD charges with Pro.",
-      detail: "Free ledgers use USD for new records. Existing currency data remains visible and editable after account or entitlement changes.",
+      detail: "Free lists use USD for new records. Existing currency data remains visible and editable after account or entitlement changes.",
     },
     "pro-reminders": {
       code: "Lifetime Pro / alert timing",
@@ -2487,7 +2487,7 @@ function Tracker({ onExit, pwa }) {
     pending.forEach((alert) => {
       if (!claimDeviceNotification(alert.deliveryId)) return;
       const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
-      const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} ${ledgerMeta.storage} ledger.`;
+      const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} / ${ledgerMeta.storage === "cloud" ? "synced" : "on this device"}.`;
       const body = alert.type === "trial"
         ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
         : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
@@ -2926,8 +2926,8 @@ function Tracker({ onExit, pwa }) {
           ? "A cloud change saved on this device is waiting to synchronize."
           : "A cloud change is saved on this device, but this account no longer has write access."
         : snapshot.ledger.canSync
-          ? "Cloud ledger loaded. Changes use optimistic revision checks."
-          : "Cloud ledger opened read-only. Pro editor access is required to synchronize changes.");
+          ? "Synced list loaded. Changes are protected against conflicting updates."
+          : "Synced list opened read-only. Pro editor access is required to synchronize changes.");
       setCloudRemotePending(false);
       setAccountOpen(false);
       setLedgerOpen(false);
@@ -2941,7 +2941,7 @@ function Tracker({ onExit, pwa }) {
       }
     } catch (error) {
       setCloudSyncStatus("offline");
-      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not open this cloud ledger.");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not open this synced list.");
     } finally {
       setCloudOpenId("");
     }
@@ -2975,12 +2975,12 @@ function Tracker({ onExit, pwa }) {
       const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
       setCloudLedgerSession(snapshot);
       setCloudSyncStatus(snapshot.ledger.canSync ? "synced" : "read-only");
-      setCloudSyncMessage("Cloud ledger refreshed.");
+      setCloudSyncMessage("Synced list refreshed.");
       setCloudRemotePending(false);
       resetForm();
     } catch (error) {
       setCloudSyncStatus("offline");
-      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not refresh this cloud ledger.");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not refresh this synced list.");
     }
   }
 
@@ -3127,7 +3127,7 @@ function Tracker({ onExit, pwa }) {
     if (!operation || cloudSyncingRef.current) return;
     if (!cloudDiscardArmed) {
       setCloudDiscardArmed(true);
-      setCloudSyncMessage("Discarding removes this unsynchronized browser change. Confirm to return to the local ledger.");
+      setCloudSyncMessage("Discarding removes this unsynchronized browser change. Confirm to return to subscriptions on this device.");
       return;
     }
     try {
@@ -3194,7 +3194,7 @@ function Tracker({ onExit, pwa }) {
 
     cloudSyncingRef.current = true;
     setCloudSyncStatus("syncing");
-    setCloudSyncMessage(`Renaming cloud revision ${baseSession.ledger.revision}...`);
+    setCloudSyncMessage(`Renaming synced list version ${baseSession.ledger.revision}...`);
     let result;
     try {
       result = await renameCloudLedger(
@@ -3206,7 +3206,7 @@ function Tracker({ onExit, pwa }) {
     } catch (error) {
       setCloudLedgerNameDraft(baseSession.ledger.name);
       setCloudSyncStatus("offline");
-      setCloudSyncMessage(error instanceof Error ? error.message : "Cloud ledger rename failed before it was committed.");
+      setCloudSyncMessage(error instanceof Error ? error.message : "Synced list rename failed before it was saved.");
       cloudSyncingRef.current = false;
       return;
     }
@@ -3297,7 +3297,7 @@ function Tracker({ onExit, pwa }) {
       const receipt = await uploadGuestWorkspace(workspace);
       const ledgerCount = Number(receipt?.ledgerCount ?? receipt?.ledger_count ?? workspace.ledgers.length);
       const recordCount = Number(receipt?.subscriptionCount ?? receipt?.subscription_count ?? workspaceRecordCount);
-      setAccountMessage(`Cloud copy confirmed / ${ledgerCount} ledgers / ${recordCount} records. Local data remains available.`);
+      setAccountMessage(`Synced copy confirmed / ${ledgerCount} ${ledgerCount === 1 ? "list" : "lists"} / ${recordCount} records. Data on this device remains available.`);
       setCloudAccessRefresh((current) => current + 1);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not upload this workspace.");
@@ -3407,8 +3407,8 @@ function Tracker({ onExit, pwa }) {
       setAccountDisplayName(saved.displayName);
       setCloudAccessRefresh((current) => current + 1);
       setAccountMessage(saved.displayName
-        ? `Profile saved. Shared ledgers now identify you as ${saved.displayName}.`
-        : "Display name removed. Shared ledgers will use your member identifier.");
+        ? `Profile saved. Shared lists now identify you as ${saved.displayName}.`
+        : "Display name removed. Shared lists will use your member identifier.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not save the account profile.");
     } finally {
@@ -3432,7 +3432,7 @@ function Tracker({ onExit, pwa }) {
       setAccountSession(null);
       setAccountEntitlement(null);
       setCloudLedgers([]);
-      setAccountMessage("Signed out. Local ledgers remain on this browser.");
+      setAccountMessage("Signed out. Subscriptions on this device remain available.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not sign out.");
     } finally {
@@ -3456,7 +3456,7 @@ function Tracker({ onExit, pwa }) {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setAccountMessage(`Account data exported / ${accountData.ledgers.length} cloud ${accountData.ledgers.length === 1 ? "ledger" : "ledgers"}. Local browser ledgers were not included.`);
+      setAccountMessage(`Account data exported / ${accountData.ledgers.length} synced ${accountData.ledgers.length === 1 ? "list" : "lists"}. Subscriptions stored on this device were not included.`);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not export this account's data.");
     } finally {
@@ -3494,7 +3494,7 @@ function Tracker({ onExit, pwa }) {
       setCloudDiscardArmed(false);
       setDeleteAccountArmed(false);
       setAccountMessage(outboxCleared
-        ? "Cloud account deleted. Local ledgers were not removed."
+        ? "Cloud account deleted. Subscriptions on this device were not removed."
         : "Cloud account deleted, but the browser denied pending-data cleanup. Clear this site's stored data before leaving the device.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not delete this cloud account.");
@@ -3513,7 +3513,7 @@ function Tracker({ onExit, pwa }) {
       window.history.replaceState(null, "", "#app");
       setPendingInviteToken("");
       setCloudAccessRefresh((current) => current + 1);
-      setAccountMessage(`Joined ${result?.ledgerName || "shared ledger"} as ${result?.role || "member"}.`);
+      setAccountMessage(`Joined ${result?.ledgerName || "shared list"} as ${result?.role || "member"}.`);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not accept this invitation.");
     } finally {
@@ -3571,7 +3571,7 @@ function Tracker({ onExit, pwa }) {
       await removeCloudLedgerMember(managedCloudLedger.id, userId);
       setRemoveMemberArmed("");
       setCloudAccessRefresh((current) => current + 1);
-      setAccountMessage("Member removed from the cloud ledger.");
+      setAccountMessage("Member removed from the synced list.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not remove this member.");
     } finally {
@@ -4186,7 +4186,7 @@ function Tracker({ onExit, pwa }) {
                 <button
                   type="button"
                   onClick={() => setLedgerOpen(true)}
-                  aria-label={`Open ${ledgerMeta.name} ledger controls`}
+                  aria-label={`Manage ${ledgerMeta.name} subscriptions`}
                   className="flex items-center gap-2 text-zinc-300 hover:text-amber-300"
                 >
                   <span className={`h-2 w-2 ${
@@ -4197,7 +4197,7 @@ function Tracker({ onExit, pwa }) {
                   <span className="max-w-40 truncate">{ledgerMeta.name}</span>
                   <span className="text-zinc-700">/</span>
                   <span className="text-zinc-500">
-                    {ledgerKindLabel(ledgerMeta.kind)} / {usingCloudLedger ? `Cloud ${ledgerMeta.currentRole}` : "Local"}
+                    {ledgerKindLabel(ledgerMeta.kind)} / {usingCloudLedger ? `Synced ${ledgerMeta.currentRole}` : "On this device"}
                   </span>
                 </button>
                 <span className="text-zinc-700">/</span>
@@ -4326,7 +4326,7 @@ function Tracker({ onExit, pwa }) {
                   : "border-cyan-950 bg-cyan-950/10 text-cyan-200"
               }`}
             >
-              <span>{cloudSyncMessage || `Cloud revision ${ledgerMeta.revision}`}</span>
+              <span>{cloudSyncMessage || `Synced version ${ledgerMeta.revision}`}</span>
               {cloudWriteOperation ? (
                 <span className="flex flex-wrap gap-2 sm:justify-end">
                   <button
@@ -4349,7 +4349,7 @@ function Tracker({ onExit, pwa }) {
                   </button>
                 </span>
               ) : (
-                <span aria-hidden="true" className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
+                <span aria-hidden="true" className="text-zinc-600">Version {ledgerMeta.revision} / device lists isolated</span>
               )}
             </LiveMessage>
           )}
@@ -4821,7 +4821,7 @@ function Tracker({ onExit, pwa }) {
                   Cloud <span className={`ml-1 ${cloudConfigured ? "text-emerald-300" : "text-zinc-500"}`}>{cloudConfigured ? "Ready" : "Not configured"}</span>
                 </div>
                 <div className="border-r border-zinc-800 px-3 py-2">
-                  Ledgers <span className="ml-1 text-zinc-200">{workspace.ledgers.length}L / {cloudLedgersLoading ? "..." : `${cloudLedgers.length}C`}</span>
+                  Lists <span className="ml-1 text-zinc-200">{workspace.ledgers.length}D / {cloudLedgersLoading ? "..." : `${cloudLedgers.length}S`}</span>
                 </div>
                 <div className="px-3 py-2">
                   Entitlement <span className={`ml-1 ${accountEntitlement?.status === "active" ? "text-amber-300" : "text-zinc-400"}`}>
@@ -4959,12 +4959,12 @@ function Tracker({ onExit, pwa }) {
                   </button>
                   <div className="font-mono text-[9px] uppercase text-zinc-700 sm:col-span-2">
                     {pendingInviteToken
-                      ? "Sign in with the address that received this private invitation. Local ledger data stays untouched."
+                      ? "Sign in with the address that received this private invitation. Subscriptions on this device stay untouched."
                       : proReturn === "success"
                         ? "Sign in to confirm and restore the account entitlement. The return URL does not grant Pro."
                         : accountAccessMode === "create"
-                          ? "A new account is created only after you open the email link. Local ledger data stays on this browser."
-                          : "Sign-in mode never creates an account. Local ledger data stays on this browser."}
+                          ? "A new account is created only after you open the email link. Subscriptions on this device stay here."
+                          : "Sign-in mode never creates an account. Subscriptions on this device stay here."}
                   </div>
                 </form>
               )}
@@ -4974,7 +4974,7 @@ function Tracker({ onExit, pwa }) {
                   {pendingInviteToken && (
                     <section className="grid gap-3 border-b border-amber-900 bg-amber-950/15 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                       <div>
-                        <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-200">Private ledger invitation</div>
+                        <div className="text-xs font-black uppercase tracking-[0.12em] text-amber-200">Private list invitation</div>
                         <div className="mt-1 font-mono text-[10px] uppercase leading-5 text-zinc-500">
                           Acceptance is limited to the account email that received this link.
                         </div>
@@ -4995,7 +4995,7 @@ function Tracker({ onExit, pwa }) {
                       <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Authenticated identity</div>
                       <div className="mt-1 truncate text-sm font-bold text-zinc-200">{accountSession.user.email || "Email unavailable"}</div>
                       <div className="mt-1 font-mono text-[9px] uppercase text-zinc-700">
-                        {usingCloudLedger ? `${ledgerMeta.name} cloud ledger active / local workspace isolated` : "Local workspace active"}
+                        {usingCloudLedger ? `${ledgerMeta.name} synced / device workspace isolated` : "Device workspace active"}
                       </div>
                     </div>
                     <button
@@ -5193,8 +5193,8 @@ function Tracker({ onExit, pwa }) {
                         {accountEntitlementLoading
                           ? "Checking entitlement"
                           : cloudUploadRequiresPro
-                            ? `${sharedWorkspaceCount} shared local ${sharedWorkspaceCount === 1 ? "ledger requires" : "ledgers require"} Pro`
-                            : `${workspace.ledgers.length} ledgers / ${workspaceRecordCount} records / transactional`}
+                            ? `${sharedWorkspaceCount} shared ${sharedWorkspaceCount === 1 ? "list requires" : "lists require"} Pro`
+                            : `${workspace.ledgers.length} ${workspace.ledgers.length === 1 ? "list" : "lists"} / ${workspaceRecordCount} records / transactional`}
                       </div>
                     </div>
                     <button
@@ -5209,7 +5209,7 @@ function Tracker({ onExit, pwa }) {
 
                   <section className="border-b border-zinc-800">
                     <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Cloud ledger access</span>
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Synced subscriptions</span>
                       <span className="font-mono text-[10px] uppercase text-cyan-300">
                         {cloudLedgersLoading ? "Checking" : `${cloudLedgers.length} visible`}
                       </span>
@@ -5217,7 +5217,7 @@ function Tracker({ onExit, pwa }) {
 
                     {!cloudLedgersLoading && cloudLedgers.length === 0 && (
                       <div className="px-4 py-4 font-mono text-[10px] uppercase leading-5 text-zinc-600">
-                        No cloud ledgers yet. Upload a local workspace to create the first cloud revision.
+                        No synced lists yet. Create a synced copy from this device to get started.
                       </div>
                     )}
 
@@ -5384,7 +5384,7 @@ function Tracker({ onExit, pwa }) {
                     <div>
                       <div className="text-xs font-black uppercase tracking-[0.12em] text-zinc-200">Export account data</div>
                       <div className="mt-1 font-mono text-[10px] uppercase leading-5 text-zinc-600">
-                        Cloud ledgers, collaboration, preferences, and reminder history / JSON / Free
+                        Synced lists, collaboration, preferences, and reminder history / JSON / Free
                       </div>
                     </div>
                     <button
@@ -5400,7 +5400,7 @@ function Tracker({ onExit, pwa }) {
                   <section className="grid gap-3 border-b border-red-950 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div>
                       <div className="text-xs font-black uppercase tracking-[0.12em] text-red-200">Delete cloud account</div>
-                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-700">Local browser ledgers are retained</div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-700">Subscriptions on this device are retained</div>
                     </div>
                     <button
                       type="button"
@@ -5466,7 +5466,7 @@ function Tracker({ onExit, pwa }) {
             <div className="min-h-0 flex-1 overflow-auto">
               <div className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
                 <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
-                  Ledger <span className="ml-1 text-zinc-200">{ledgerMeta.name}</span>
+                  List <span className="ml-1 text-zinc-200">{ledgerMeta.name}</span>
                 </div>
                 <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
                   Events <span className="ml-1 text-zinc-200">{calendarExportSubscriptions.length}</span>
@@ -5656,12 +5656,12 @@ function Tracker({ onExit, pwa }) {
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Data control</div>
-                <h2 id="ledger-controls-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Ledger controls</h2>
+                <h2 id="ledger-controls-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Subscription lists</h2>
               </div>
               <button
                 type="button"
                 onClick={closeLedgerControls}
-                aria-label="Close ledger controls"
+                aria-label="Close subscription lists"
                 data-dialog-initial-focus
                 className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
               >
@@ -5672,7 +5672,7 @@ function Tracker({ onExit, pwa }) {
             <div className="min-h-0 flex-1 overflow-auto">
               <section className="border-b border-zinc-800">
                 <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
-                  <span>Local ledgers</span>
+                  <span>On this device</span>
                   <span>{workspace.ledgers.length} / {MAX_LEDGERS}</span>
                 </header>
                 <div className="divide-y divide-zinc-900">
@@ -5716,7 +5716,7 @@ function Tracker({ onExit, pwa }) {
                 </div>
 
                 <form onSubmit={createLocalLedger} className="grid gap-2 border-t border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-end">
-                  <Field label="New ledger">
+                  <Field label="New list">
                     <input
                       value={newLedgerName}
                       maxLength={60}
@@ -5744,18 +5744,18 @@ function Tracker({ onExit, pwa }) {
                   </button>
                 </form>
                 <div className="border-t border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase text-zinc-700">
-                  Local ledgers stay on this browser and never merge into cloud totals unless explicitly uploaded.
+                  Lists on this device stay here and never merge into synced totals unless explicitly uploaded.
                 </div>
               </section>
 
               {accountSession && (
                 <section className="border-b border-zinc-800">
                   <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
-                    <span>Cloud ledgers</span>
+                    <span>Synced lists</span>
                     <span>{cloudLedgersLoading ? "Checking" : cloudLedgers.length}</span>
                   </header>
                   {cloudLedgers.length === 0 && !cloudLedgersLoading && (
-                    <div className="px-4 py-4 font-mono text-[10px] uppercase text-zinc-700">No cloud ledger access</div>
+                    <div className="px-4 py-4 font-mono text-[10px] uppercase text-zinc-700">No synced lists</div>
                   )}
                   {cloudLedgers.map((cloudLedger) => {
                     const active = usingCloudLedger && cloudLedger.id === ledgerMeta.id;
@@ -5788,7 +5788,7 @@ function Tracker({ onExit, pwa }) {
               <section className="border-b border-zinc-800 p-4">
                 {usingCloudLedger ? (
                   <form onSubmit={renameActiveCloudLedger} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                    <Field label="Cloud ledger name">
+                    <Field label="Synced list name">
                       <input
                         value={cloudLedgerNameDraft}
                         maxLength={60}
@@ -5806,7 +5806,7 @@ function Tracker({ onExit, pwa }) {
                     </button>
                   </form>
                 ) : (
-                  <Field label="Ledger name">
+                  <Field label="List name">
                     <input
                       value={ledgerMeta.name}
                       maxLength={60}
@@ -5822,7 +5822,7 @@ function Tracker({ onExit, pwa }) {
                     Kind <span className="ml-1 text-zinc-200">{ledgerKindLabel(ledgerMeta.kind)}</span>
                   </div>
                   <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
-                    Storage <span className={`ml-1 ${usingCloudLedger ? "text-cyan-300" : "text-zinc-200"}`}>{usingCloudLedger ? "Cloud" : "Local"}</span>
+                    Storage <span className={`ml-1 ${usingCloudLedger ? "text-cyan-300" : "text-zinc-200"}`}>{usingCloudLedger ? "Synced" : "Device"}</span>
                   </div>
                   <div className="border-r border-zinc-800 px-3 py-2">
                     Sync <span className={`ml-1 ${usingCloudLedger && cloudSyncStatus === "synced" ? "text-emerald-300" : "text-zinc-500"}`}>
@@ -5843,7 +5843,7 @@ function Tracker({ onExit, pwa }) {
                     onClick={exportLedgerBackup}
                     className="h-10 border border-zinc-700 bg-black px-3 font-mono text-xs font-black uppercase text-zinc-300 hover:border-amber-400 hover:text-amber-300"
                   >
-                    Export full ledger
+                    Export full list
                   </button>
                 </div>
 
@@ -5869,7 +5869,7 @@ function Tracker({ onExit, pwa }) {
                 <section>
                   <header className="grid grid-cols-2 border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-4">
                     <div className="border-b border-r border-zinc-800 px-3 py-2 sm:border-b-0">
-                      Ledger <span className="ml-1 text-zinc-200">{backupSession.ledger.name}</span>
+                      List <span className="ml-1 text-zinc-200">{backupSession.ledger.name}</span>
                     </div>
                     <div className="border-b border-zinc-800 px-3 py-2 sm:border-b-0 sm:border-r">
                       Records <span className="ml-1 text-zinc-200">{backupSession.subscriptions.length}</span>
@@ -5945,7 +5945,7 @@ function Tracker({ onExit, pwa }) {
           >
             <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
               <div className="min-w-0">
-                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">{ledgerKindLabel(ledgerMeta.kind)} local ledger</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">{ledgerKindLabel(ledgerMeta.kind)} / on this device</div>
                 <h2 id="alert-settings-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Alert controls</h2>
               </div>
               <button

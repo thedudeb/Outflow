@@ -49,15 +49,15 @@ function backupEnvelope(overrides = {}) {
 }
 
 async function openLedgerControls(page, ledgerName = "Personal") {
-  await page.getByRole("button", { name: `Open ${ledgerName} ledger controls`, exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Ledger controls" });
+  await page.getByRole("button", { name: `Manage ${ledgerName} subscriptions`, exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Subscription lists" });
   await expect(dialog).toBeVisible();
   return dialog;
 }
 
 async function downloadBackup(page, dialog, expectedSlug) {
   const downloadPromise = page.waitForEvent("download");
-  await dialog.getByRole("button", { name: "Export full ledger", exact: true }).click();
+  await dialog.getByRole("button", { name: "Export full list", exact: true }).click();
   const download = await downloadPromise;
   const downloadPath = await download.path();
   expect(download.suggestedFilename()).toMatch(new RegExp(`^outflow-${expectedSlug}-backup-\\d{4}-\\d{2}-\\d{2}\\.json$`));
@@ -187,7 +187,7 @@ test("backup replacement restores data and settings without replacing the local 
 
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Restored Service" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Open Restored Home ledger controls", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage Restored Home subscriptions", exact: true })).toBeVisible();
 });
 
 test("invalid and unsupported backups are rejected without changing the ledger", async ({ page }) => {
@@ -211,6 +211,6 @@ test("invalid and unsupported backups are rejected without changing the ledger",
   })] }), "invalid-trial-order.json");
   await expect(error).toHaveText("A backup first paid charge cannot precede its trial end date.");
   await expect(dialog.getByRole("button", { name: "Replace all", exact: true })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Close ledger controls", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close subscription lists", exact: true }).click();
   await expect(page.getByRole("article")).toHaveCount(5);
 });

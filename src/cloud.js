@@ -424,7 +424,7 @@ export async function readCloudLedgerSnapshot(ledgerId, userId) {
   if (!cloud) throw new Error("Outflow cloud is not configured.");
 
   const access = (await readCloudLedgerAccess(userId)).find((ledger) => ledger.id === ledgerId);
-  if (!access) throw new Error("This cloud ledger is unavailable.");
+  if (!access) throw new Error("This synced list is unavailable.");
 
   const { data: rows, error } = await cloud
     .from("subscriptions")

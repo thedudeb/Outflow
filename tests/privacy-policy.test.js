@@ -23,7 +23,7 @@ test("the policy reflects the implemented local, hosted, provider, and data-cont
     "No bank connections",
     "No ads or tracking",
     "No sale of personal data",
-    "Signing in alone does not upload a guest ledger",
+    "Signing in alone does not upload subscriptions from this device",
     "Payment-card details are entered with Stripe and are not collected by the Outflow application",
     "Outflow does not create a recurring product subscription",
     "GitHub Pages",
@@ -31,7 +31,7 @@ test("the policy reflects the implemented local, hosted, provider, and data-cont
     "Resend",
     "Stripe",
     "Download a free account-data archive when signed in",
-    "Deleting a cloud account does not delete independent local ledgers",
+    "Deleting a cloud account does not delete independent subscription lists",
   ];
 
   requiredStatements.forEach((statement) => assert.match(app, new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))));

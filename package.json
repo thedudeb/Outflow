@@ -38,6 +38,7 @@
     "check:reminder-operations": "node scripts/check-reminder-operations.mjs",
     "test:reminder-incident": "node --test tests/reminder-incident.test.js",
     "test:privacy-policy": "node --test tests/privacy-policy.test.js",
+    "test:product-language": "node --test tests/product-language.test.js",
     "test:web-security": "node --test tests/web-security.test.js",
     "test:dialog-dismissal": "node --test tests/dialog-dismissal.test.js",
     "check:reminder-incident": "node scripts/sync-reminder-operations-incident.mjs",
