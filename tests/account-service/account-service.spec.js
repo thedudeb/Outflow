@@ -802,7 +802,7 @@ test("verified sign-in preserves local data until Create cloud copy is selected"
   expect(fixture.migrations).toHaveLength(1);
 });
 
-test("forged stored session is rejected and cleared without touching the local ledger", async ({ page }) => {
+test("forged stored session is rejected and cleared without touching the list on this device", async ({ page }) => {
   const fixture = await installCloudFixture(page);
   await seedStoredSession(page, storedSession({ ...fixtureUser, email: "forged@example.com" }));
   await openTracker(page);
@@ -818,7 +818,7 @@ test("forged stored session is rejected and cleared without touching the local l
   expect(fixture.traffic.filter((request) => request.path.includes("/rest/v1/"))).toHaveLength(0);
 });
 
-test("cloud ledger stays isolated, synchronizes one revision, and sign-out restores local totals", async ({ page }) => {
+test("synced list stays isolated, synchronizes one version, and sign-out restores device totals", async ({ page }) => {
   const cloudState = createCloudState();
   await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
   await seedStoredSession(page);
@@ -838,7 +838,7 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await cloudCard.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("30");
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Synchronized revision 3.");
+  await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
   await expect(monthlyOutflow(page)).toContainText("$30.00");
   expect(cloudState.writes).toHaveLength(1);
   expect(cloudState.writes[0]).toMatchObject({
@@ -859,7 +859,7 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await expect(page.getByText("Figma Cloud", { exact: true })).toHaveCount(0);
 });
 
-test("failed cloud writes survive reload, replay once, fail closed on conflict, and discard explicitly", async ({ page }) => {
+test("failed synced writes survive reload, replay once, fail closed on conflict, and discard explicitly", async ({ page }) => {
   const cloudState = createCloudState({ replaceFailuresRemaining: 1 });
   await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
   await seedStoredSession(page);
@@ -887,7 +887,7 @@ test("failed cloud writes survive reload, replay once, fail closed on conflict, 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await openStudioCloud(page);
-  await expect(page.getByRole("status")).toContainText("Synchronized revision 3.");
+  await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
   cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
   await expect(cloudCard).toContainText("$31.00");
   expect(cloudState.writes).toHaveLength(2);
@@ -908,7 +908,7 @@ test("failed cloud writes survive reload, replay once, fail closed on conflict, 
 
   cloudState.replaceMode = "conflict";
   await page.getByRole("button", { name: "Retry saved change", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Cloud changed at revision 4. Your stale write was rejected");
+  await expect(page.getByRole("alert")).toContainText("The synced list changed at version 4. Your stale write was rejected");
   const authoritativeCard = page.getByRole("article").filter({ hasText: "Remote Winner" });
   await expect(authoritativeCard).toContainText("$42.00");
   expect(cloudState.writes).toHaveLength(4);
@@ -1030,7 +1030,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("30");
     await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Synchronized revision 3.");
+    await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
 
     realtimeState.emitChange();
     const peerCard = peerPage.getByRole("article").filter({ hasText: "Figma Cloud" });
@@ -1046,10 +1046,10 @@ test("isolated browser clients refresh through Realtime and protect an active st
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("35");
     await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Synchronized revision 4.");
+    await expect(page.getByRole("status")).toContainText("Synchronized version 4.");
 
     realtimeState.emitChange();
-    await expect(peerPage.getByRole("alert")).toContainText("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+    await expect(peerPage.getByRole("alert")).toContainText("Another synced update is available. Finish or cancel the current edit, then refresh.");
     await expect(peerPage.getByRole("spinbutton", { name: "Amount", exact: true })).toHaveValue("32");
     await expect(peerPage.getByRole("button", { name: "Commit changes", exact: true })).toBeDisabled();
     await expect(peerCard).toContainText("$30.00");
@@ -1078,7 +1078,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
   }
 });
 
-test("stale cloud write is rejected and replaced by the authoritative server revision", async ({ page }) => {
+test("stale synced write is rejected and replaced by the current synced version", async ({ page }) => {
   const cloudState = createCloudState({ replaceMode: "conflict" });
   await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
   await seedStoredSession(page);
@@ -1092,7 +1092,7 @@ test("stale cloud write is rejected and replaced by the authoritative server rev
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
 
   const conflict = page.getByRole("alert");
-  await expect(conflict).toContainText("Cloud changed at revision 3. Your stale write was rejected");
+  await expect(conflict).toContainText("The synced list changed at version 3. Your stale write was rejected");
   const authoritativeCard = page.getByRole("article").filter({ hasText: "Remote Winner" });
   await expect(authoritativeCard).toContainText("$42.00");
   await expect(page.getByText("$31.00", { exact: true })).toHaveCount(0);

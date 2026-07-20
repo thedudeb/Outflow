@@ -131,7 +131,7 @@ async function beginAmountEdit(page, subscriptionName, amount) {
 async function commitAmount(page, subscriptionName, amount, revision) {
   await beginAmountEdit(page, subscriptionName, amount);
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-  await expect(page.getByRole("status").filter({ hasText: `Synchronized revision ${revision}.` })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: `Synchronized version ${revision}.` })).toBeVisible();
 }
 
 async function expectCardAmount(page, subscriptionName, amount) {
@@ -212,7 +212,7 @@ test("deployed UI recovers durable writes, rejects conflicts, and catches up aft
       navigate: false,
       waitForSynced: false,
     });
-    await expect(ownerPage.getByRole("status")).toContainText("Synchronized revision 1.");
+    await expect(ownerPage.getByRole("status")).toContainText("Synchronized version 1.");
     expect(ownerWriteAttempts).toHaveLength(2);
     expect(ownerWriteAttempts[1]).toEqual(ownerWriteAttempts[0]);
     await expectCardAmount(ownerPage, fixture.subscriptionName, 34);
@@ -232,7 +232,7 @@ test("deployed UI recovers durable writes, rejects conflicts, and catches up aft
     await ownerPage.waitForTimeout(500);
     await commitAmount(editorPage, fixture.subscriptionName, 37, 2);
     const staleAlert = ownerPage.getByRole("alert").filter({
-      hasText: "Another cloud revision is available. Finish or cancel the current edit, then refresh.",
+      hasText: "Another synced update is available. Finish or cancel the current edit, then refresh.",
     });
     await expect(staleAlert).toBeVisible({ timeout: 20_000 });
     await expect(ownerPage.getByRole("spinbutton", { name: "Amount", exact: true })).toHaveValue("36");
@@ -251,7 +251,7 @@ test("deployed UI recovers durable writes, rejects conflicts, and catches up aft
     await beginAmountEdit(ownerPage, fixture.subscriptionName, 39);
     await ownerPage.getByRole("button", { name: "Commit changes", exact: true }).click();
     const conflictAlert = ownerPage.getByRole("alert").filter({
-      hasText: "Cloud changed at revision 3. Your stale write was rejected",
+      hasText: "The synced list changed at version 3. Your stale write was rejected",
     });
     await expect(conflictAlert).toBeVisible({ timeout: 20_000 });
     await expectCardAmount(ownerPage, fixture.subscriptionName, 38);

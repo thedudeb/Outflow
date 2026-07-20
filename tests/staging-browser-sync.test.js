@@ -248,8 +248,8 @@ test("browser-sync workflow is manual, protected, main-only, and artifact-free",
   assert.match(spec, /dropChanges\(true\)/);
   assert.match(spec, /\.disconnect\(\)/);
   assert.match(spec, /Realtime connection interrupted/);
-  assert.match(spec, /Cloud changed at revision 3/);
-  assert.match(spec, /Another cloud revision is available/);
+  assert.match(spec, /The synced list changed at version 3/);
+  assert.match(spec, /Another synced update is available/);
   assert.match(spec, /getByText\("synced"/);
   assert.match(spec, /finally \{/);
   assert.match(spec, /await fixture\.cleanup\(\)/);
