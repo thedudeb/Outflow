@@ -40,6 +40,7 @@
     "test:function-runtime": "deno test --allow-env=NODE_ENV --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts supabase/functions/resend-webhook/webhook.test.ts supabase/functions/calendar-feed/calendar.test.ts supabase/functions/send-due-reminders/reminder.test.ts",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
     "test:account-service": "playwright test --config=playwright.account.config.js",
+    "test:browser-compatibility": "playwright test --config=playwright.browser-compatibility.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
     "test:device-notifications": "node --test tests/device-notifications.test.js",

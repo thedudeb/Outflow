@@ -6,16 +6,18 @@ Outflow treats browser compatibility as separate product surfaces rather than on
 
 | Surface | Chromium desktop | Chromium mobile | Firefox desktop | WebKit desktop |
 | --- | --- | --- | --- | --- |
-| Free core and local data workflows | Required | Required | Smoke through configured account matrix | Smoke through configured account matrix |
+| Free core and local data workflows | Required | Required | Required | Required |
 | Configured account and collaboration runtime | Required | Required | Required | Required |
 | Two-client Realtime refresh, stale edit, and reconnect | Required | Required | Required | Required |
 | Installable shell and offline relaunch | Required | Required | Not claimed | Not claimed |
 | Automated WCAG regression gate | Required | Required | Not claimed | Not claimed |
 | Protected hosted browser synchronization | Required | Required | Required | Required |
 
-`npm run test:account-service` is the deterministic multi-engine compatibility gate. It runs the complete configured-service contract against desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit. This includes verified session recovery, explicit migration, local/cloud isolation, optimistic writes and conflict recovery, two-client Realtime behavior, collaboration, entitlement changes, reviewed import, hosted calendar controls, purchase/restore states, and account deletion.
+`npm run test:browser-compatibility` is the direct public-guest compatibility gate. It runs the landing, privacy, and local tracker shells plus subscription CRUD and recurrence, the internal calendar and timeline, CSV export, iCalendar export, versioned backup and restore, and isolated personal/household/team ledgers in desktop Chromium, Firefox, and WebKit. The broader `npm run test:e2e` suite repeats these workflows in desktop and mobile Chromium and adds browser-notification, entitlement-prompt, and automated accessibility coverage.
 
-The broader local-ledger, PWA, and accessibility suites remain intentionally scoped to their documented Chromium profiles. Passing the configured account matrix does not imply that every browser-specific install prompt, notification permission surface, download presentation, service-worker lifecycle, or accessibility API behaves identically.
+`npm run test:account-service` separately runs the complete configured-service contract against desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit. This includes verified session recovery, explicit migration, local/cloud isolation, optimistic writes and conflict recovery, two-client Realtime behavior, collaboration, entitlement changes, reviewed import, hosted calendar controls, purchase/restore states, and account deletion.
+
+The PWA, browser-notification, and automated accessibility suites remain intentionally scoped to their documented Chromium profiles. Passing either multi-engine matrix does not imply that every browser-specific install prompt, notification permission surface, service-worker lifecycle, or accessibility API behaves identically. Downloaded CSV, backup, and iCalendar artifact contents are directly verified in all three desktop engines.
 
 ## Protected Hosted Matrix
 

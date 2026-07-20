@@ -16,7 +16,7 @@ These rules prevent native JavaScript date overflow from skipping short months. 
 
 ## Automated Browser Contract
 
-`npm run test:e2e` verifies the free-core behavior in desktop and mobile Chromium. The contract proves that:
+`npm run test:e2e` verifies the free-core behavior in desktop and mobile Chromium. `npm run test:browser-compatibility` repeats the guest shell, CRUD, persistence, recurrence, trial, and forecast contract in desktop Chromium, Firefox, and WebKit. Together, the contracts prove that:
 
 - A user can add, edit, pause, resume, and delete a subscription without creating an account.
 - Amount, existing currency, cycle, next date, category, tags, trial date, and existing reminder rules remain visible and survive reloads.

@@ -46,7 +46,7 @@ If a stored workspace cannot be validated, Outflow attempts the legacy migration
 
 ## Automated Isolation Contract
 
-`npm run test:e2e` verifies the local collaboration boundary in desktop and mobile Chromium. The contract proves that:
+`npm run test:e2e` verifies the local collaboration boundary in desktop and mobile Chromium. `npm run test:browser-compatibility` repeats the complete ledger-isolation contract in desktop Chromium, Firefox, and WebKit. Together, the contracts prove that:
 
 - A newly created household ledger starts empty and has a zero monthly total.
 - Adding a shared subscription changes only the active shared ledger and attributes the change to `Local guest`.

@@ -66,7 +66,7 @@ Account deletion must remove account-held copies without deleting an independent
 
 ## Automated Backup Contract
 
-Run `npm run test:e2e` to verify backup and restore behavior in desktop and mobile Chromium profiles. The browser suite proves:
+Run `npm run test:e2e` to verify backup and restore behavior in desktop and mobile Chromium, and `npm run test:browser-compatibility` to repeat the complete backup contract in desktop Chromium, Firefox, and WebKit. The browser suites prove:
 
 - Downloads contain the complete versioned active-ledger envelope, normalized records, alert settings, and unique stable identifiers without browser permission or notification-history data.
 - Merge skips both identifier duplicates and normalized content duplicates, adds only new records, preserves the active ledger and alert settings, and survives a reload.

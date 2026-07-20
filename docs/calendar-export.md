@@ -40,7 +40,7 @@ Calendar exports include only subscription name, amount, currency, cycle, catego
 
 ## Automated Calendar Contract
 
-Run `npm run test:e2e` to verify downloaded iCalendar artifacts in desktop and mobile Chromium profiles. The browser suite proves:
+Run `npm run test:e2e` to verify downloaded iCalendar artifacts in desktop and mobile Chromium, and `npm run test:browser-compatibility` to repeat the complete artifact contract in desktop Chromium, Firefox, and WebKit. The browser suites prove:
 
 - Default downloads include active subscriptions only and preserve Outflow, ledger, category, amount, recurrence, privacy, transparency, and free/busy identity.
 - Editing a billing date keeps the event UID stable while incrementing `SEQUENCE`, changing `DTSTART`, and publishing a newer `LAST-MODIFIED` timestamp.

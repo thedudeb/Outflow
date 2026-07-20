@@ -29,7 +29,7 @@ Outflow's free dashboard includes a billing calendar and a date-ordered 30-day u
 
 ## Automated Browser Contract
 
-`npm run test:e2e` verifies the internal calendar and timeline in desktop and mobile Chromium. The contract proves that:
+`npm run test:e2e` verifies the internal calendar and timeline in desktop and mobile Chromium. `npm run test:browser-compatibility` repeats the complete calendar and timeline contract in desktop Chromium, Firefox, and WebKit. Together, the contracts prove that:
 
 - Empty ledgers report zero calendar events and an explicit empty 30-day timeline.
 - Weekly, monthly, and yearly subscriptions produce exact current/next-month totals and date order.

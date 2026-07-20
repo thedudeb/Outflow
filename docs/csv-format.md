@@ -39,7 +39,7 @@ Outflow exports UTF-8 CSV with one subscription per row. Export remains part of 
 
 ## Automated Portability Contract
 
-Run `npm run test:e2e` and `npm run test:account-service` to verify the complete CSV workflow in desktop and mobile Chromium profiles. The browser suites prove:
+Run `npm run test:e2e` for the guest export and configured import workflows in desktop and mobile Chromium, `npm run test:browser-compatibility` for direct guest export verification in desktop Chromium, Firefox, and WebKit, and `npm run test:account-service` for the configured reviewed-import workflow in all four supported profiles. The browser suites prove:
 
 - Common source-column aliases map into the canonical Outflow fields.
 - Preview counts and row states respond to mapping changes, validation failures, existing-ledger duplicates, and duplicates within the source file.
