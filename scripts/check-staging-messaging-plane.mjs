@@ -22,6 +22,8 @@ const expectedCheckNames = Object.freeze([
   "provider bounce event",
   "provider suppression",
   "suppression recovery",
+  "provider complaint event",
+  "complaint suppression",
   "email opt-out suspension",
   "refund suspension",
   "synthetic messaging cleanup",
@@ -217,7 +219,8 @@ export async function waitForResendEvent({
     const message = await resendRequest(`/emails/${encodeURIComponent(providerId)}`, resendKey, fetchImpl, "Resend synthetic event receipt");
     assert(messageMatches(message, recipient, subjectIncludes, startedAt), "Resend synthetic event receipt");
     if (message.last_event === expectedEvent) return message;
-    if (["bounced", "complained", "canceled", "failed", "delivered"].includes(message.last_event)) {
+    const deliveredBeforeComplaint = expectedEvent === "complained" && message.last_event === "delivered";
+    if (!deliveredBeforeComplaint && ["bounced", "complained", "canceled", "failed", "delivered"].includes(message.last_event)) {
       throw new Error("Resend synthetic event receipt: provider reported an unexpected terminal state.");
     }
     if (attempt + 1 < attempts) await sleepImpl(1_000);
@@ -410,9 +413,11 @@ async function waitForProviderSuppression({
   admin,
   userId,
   deliveryId,
+  expectedReason,
   sleepImpl = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
   attempts = 30,
 }) {
+  assert(["bounced", "complained"].includes(expectedReason), "provider suppression reason");
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const preferences = remoteResult(await admin.from("notification_preferences")
       .select("email_enabled, email_suppressed_at, email_suppression_reason")
@@ -423,10 +428,10 @@ async function waitForProviderSuppression({
     if (
       preferences?.length === 1
       && preferences[0].email_enabled === false
-      && preferences[0].email_suppression_reason === "bounced"
+      && preferences[0].email_suppression_reason === expectedReason
       && Number.isFinite(Date.parse(preferences[0].email_suppressed_at))
       && deliveries?.length === 1
-      && deliveries[0].provider_status === "bounced"
+      && deliveries[0].provider_status === expectedReason
       && Number.isFinite(Date.parse(deliveries[0].provider_event_at))
     ) return { preference: preferences[0], delivery: deliveries[0] };
     if (attempt + 1 < attempts) await sleepImpl(1_000);
@@ -472,8 +477,8 @@ export async function cleanupMessagingAcceptance(admin, resources) {
       const invitations = remoteResult(await admin.from("ledger_invitations").select("id").eq("ledger_id", resources.ledgerId), "messaging invitation cleanup");
       if (ledgers?.length || invitations?.length) failed = true;
     }
-    if (resources.ownerId) {
-      const deliveries = remoteResult(await admin.from("notification_deliveries").select("id").eq("user_id", resources.ownerId), "messaging delivery cleanup");
+    if (resources.userIds.length) {
+      const deliveries = remoteResult(await admin.from("notification_deliveries").select("id").in("user_id", resources.userIds), "messaging delivery cleanup");
       if (deliveries?.length) failed = true;
     }
   } catch {
@@ -489,11 +494,13 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
   const ownerEmail = `delivered+outflow-reminder-${suffix}@resend.dev`;
   const recipientEmail = `delivered+outflow-invite-${suffix}@resend.dev`;
   const bouncedEmail = `bounced+outflow-reminder-${suffix}@resend.dev`;
+  const complainedEmail = `complained+outflow-reminder-${suffix}@resend.dev`;
   const password = `${randomBytes(24).toString("base64url")}aA1!`;
   const billingDate = new Date().toISOString().slice(0, 10);
   const fixture = workspaceFixture(suffix, billingDate);
   const bouncedFixture = workspaceFixture(`bounce-${suffix}`, billingDate);
-  const resources = { userIds: [], ownerId: "", ledgerId: fixture.ledgerId };
+  const complainedFixture = workspaceFixture(`complaint-${suffix}`, billingDate);
+  const resources = { userIds: [], ledgerId: fixture.ledgerId };
 
   try {
     const ownerUser = remoteResult(await admin.auth.admin.createUser({
@@ -503,7 +510,6 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       user_metadata: { display_name: "Outflow messaging acceptance owner" },
     }), "messaging owner setup")?.user;
     if (ownerUser?.id) resources.userIds.push(ownerUser.id);
-    resources.ownerId = ownerUser?.id || "";
     const recipientUser = remoteResult(await admin.auth.admin.createUser({
       email: recipientEmail,
       password,
@@ -518,15 +524,24 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       user_metadata: { display_name: "Outflow bounce acceptance" },
     }), "messaging bounce account setup")?.user;
     if (bouncedUser?.id) resources.userIds.push(bouncedUser.id);
-    assert(ownerUser?.id && recipientUser?.id && bouncedUser?.id, "synthetic messaging accounts");
+    const complainedUser = remoteResult(await admin.auth.admin.createUser({
+      email: complainedEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { display_name: "Outflow complaint acceptance" },
+    }), "messaging complaint account setup")?.user;
+    if (complainedUser?.id) resources.userIds.push(complainedUser.id);
+    assert(ownerUser?.id && recipientUser?.id && bouncedUser?.id && complainedUser?.id, "synthetic messaging accounts");
 
     const owner = await signIn(config, ownerEmail, password);
     const recipient = await signIn(config, recipientEmail, password);
     const bounced = await signIn(config, bouncedEmail, password);
+    const complained = await signIn(config, complainedEmail, password);
     assert(
       owner.user.id === ownerUser.id
         && recipient.user.id === recipientUser.id
-        && bounced.user.id === bouncedUser.id,
+        && bounced.user.id === bouncedUser.id
+        && complained.user.id === complainedUser.id,
       "synthetic messaging accounts",
     );
     completed.push("synthetic messaging accounts");
@@ -549,6 +564,15 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       purchased_at: new Date().toISOString(),
       revoked_at: null,
     }, { onConflict: "user_id,product" }), "messaging bounce entitlement setup");
+    remoteResult(await admin.from("entitlements").upsert({
+      user_id: complainedUser.id,
+      product: PRODUCT,
+      status: "active",
+      provider: "manual",
+      provider_reference: `staging-messaging-complaint-${suffix}`,
+      purchased_at: new Date().toISOString(),
+      revoked_at: null,
+    }, { onConflict: "user_id,product" }), "messaging complaint entitlement setup");
     const migrated = remoteResult(await owner.client.rpc("migrate_guest_workspace", {
       workspace_payload: fixture.workspace,
     }), "messaging workspace setup");
@@ -557,6 +581,10 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       workspace_payload: bouncedFixture.workspace,
     }), "messaging bounce workspace setup");
     assert(bouncedMigrated?.ledgerCount === 2 && bouncedMigrated?.subscriptionCount === 2, "messaging bounce workspace setup");
+    const complainedMigrated = remoteResult(await complained.client.rpc("migrate_guest_workspace", {
+      workspace_payload: complainedFixture.workspace,
+    }), "messaging complaint workspace setup");
+    assert(complainedMigrated?.ledgerCount === 2 && complainedMigrated?.subscriptionCount === 2, "messaging complaint workspace setup");
 
     const invitationStartedAt = Date.now();
     const inviteResponse = await fetchImpl(`${config.projectUrl}/functions/v1/send-ledger-invite`, {
@@ -757,6 +785,7 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       admin,
       userId: bouncedUser.id,
       deliveryId: bouncedDelivery.id,
+      expectedReason: "bounced",
       sleepImpl,
     });
     const providerEvents = remoteResult(await admin.from("notification_provider_events")
@@ -773,6 +802,44 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
       "suppression recovery",
     );
     completed.push("suppression recovery");
+
+    await savePreferences(complained.client, true, false);
+    const complaintStartedAt = Date.now();
+    const complaintWorker = await invokeReminderWorker(config, fetchImpl);
+    assert(workerMatches(complaintWorker, 1, 1), "provider complaint event");
+    const complaintRows = await deliveryRows(admin, complainedUser.id, [complainedFixture.activeId, complainedFixture.pausedId]);
+    const complainedDelivery = complaintRows.find((row) => row.subscription_id === complainedFixture.activeId);
+    assert(
+      complaintRows.length === 1
+        && complainedDelivery?.status === "sent"
+        && complainedDelivery?.provider_status === "accepted"
+        && typeof complainedDelivery?.provider_message_id === "string",
+      "provider complaint event",
+    );
+    await waitForResendEvent({
+      resendKey: config.resendKey,
+      recipient: complainedEmail,
+      subjectIncludes: "Active reminder acceptance",
+      providerId: complainedDelivery.provider_message_id,
+      expectedEvent: "complained",
+      startedAt: complaintStartedAt,
+      fetchImpl,
+      sleepImpl,
+    });
+    completed.push("provider complaint event");
+
+    await waitForProviderSuppression({
+      admin,
+      userId: complainedUser.id,
+      deliveryId: complainedDelivery.id,
+      expectedReason: "complained",
+      sleepImpl,
+    });
+    const complaintEvents = remoteResult(await admin.from("notification_provider_events")
+      .select("event_type")
+      .eq("delivery_id", complainedDelivery.id), "provider complaint event ledger");
+    assert(complaintEvents?.some((event) => event.event_type === "email.complained"), "complaint suppression");
+    completed.push("complaint suppression");
 
     await savePreferences(owner.client, false, false);
     const optOutId = `accept-message-optout-${suffix}`;
@@ -823,8 +890,8 @@ export function buildMessagingPlaneReport({ checks, projectRef, appOrigin, commi
     "",
     ...checks.map((check) => `- PASS / ${check}`),
     "",
-    "This run used Resend's synthetic delivered- and bounced-address contracts. A provider-originated signed bounce must reach the deployed webhook, update the durable event ledger, suppress the synthetic account, and permit explicit recovery.",
-    "The first retry failure was injected at Outflow's durable completion boundary, then the deployed worker performed the provider retry. This does not prove delivery to a human inbox, scheduler registration, complaint handling, or provider diversity.",
+    "This run used Resend's synthetic delivered-, bounced-, and complained-address contracts. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
+    "The first retry failure was injected at Outflow's durable completion boundary, then the deployed worker performed the provider retry. This does not prove delivery to a human inbox, scheduler registration, actual provider API failure, or provider diversity.",
     "The report excludes identities, credentials, invitation links, message content, provider identifiers, database rows, and response bodies.",
     "",
   ].join("\n");

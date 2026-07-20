@@ -46,6 +46,8 @@ const checks = [
   "provider bounce event",
   "provider suppression",
   "suppression recovery",
+  "provider complaint event",
+  "complaint suppression",
   "email opt-out suspension",
   "refund suspension",
   "synthetic messaging cleanup",
@@ -162,6 +164,34 @@ test("Resend event probe waits for the exact synthetic bounce", async () => {
   assert.equal(sleeps, 1);
 });
 
+test("Resend event probe allows delivery before the exact synthetic complaint", async () => {
+  const recipient = "complained+acceptance@resend.dev";
+  const providerId = "22222222-2222-4222-8222-222222222222";
+  let reads = 0;
+  const event = await waitForResendEvent({
+    resendKey,
+    recipient,
+    subjectIncludes: "Complaint acceptance",
+    providerId,
+    expectedEvent: "complained",
+    startedAt: Date.parse("2026-07-19T12:00:00.000Z"),
+    attempts: 3,
+    sleepImpl: async () => {},
+    fetchImpl: async () => {
+      reads += 1;
+      return Response.json({
+        id: providerId,
+        to: [recipient],
+        subject: "Complaint acceptance is due today",
+        created_at: "2026-07-19T12:00:01.000Z",
+        last_event: reads === 1 ? "delivered" : "complained",
+      });
+    },
+  });
+  assert.equal(event.last_event, "complained");
+  assert.equal(reads, 2);
+});
+
 test("invitation parser accepts only a private link for the configured application origin", () => {
   const token = "A".repeat(43);
   assert.equal(extractInvitationToken({
@@ -257,8 +287,9 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
   assert.match(report, /PASS \/ provider invitation delivery/);
   assert.match(report, /PASS \/ durable reminder retry/);
   assert.match(report, /PASS \/ provider suppression/);
+  assert.match(report, /PASS \/ complaint suppression/);
   assert.match(report, /first retry failure was injected/);
-  assert.match(report, /provider-originated signed bounce/);
+  assert.match(report, /Provider-originated signed bounce and complaint/);
   assert.match(report, /does not prove delivery to a human inbox/);
   assert.doesNotMatch(report, /@resend\.dev|re_[A-Za-z0-9_-]+|Bearer |11111111-1111|#app\?invite=/);
   assert.throws(() => buildMessagingPlaneReport({
@@ -283,6 +314,7 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.match(script, /delivered\+outflow-invite-\$\{suffix\}@resend\.dev/);
   assert.match(script, /delivered\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /bounced\+outflow-reminder-\$\{suffix\}@resend\.dev/);
+  assert.match(script, /complained\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /notification_provider_events/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);
 });

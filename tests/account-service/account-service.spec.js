@@ -1186,7 +1186,23 @@ test("provider suppression stops email reminders in Realtime and requires explic
   await expect(dialog.getByText("Enabled", { exact: true })).toBeVisible();
   await expect(dialog.getByText("Provider delivery stopped", { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).toBeChecked();
-  expect(cloudState.notificationResumeRequests).toBe(1);
+
+  cloudState.notificationPreferences = {
+    ...cloudState.notificationPreferences,
+    email_enabled: false,
+    email_suppressed_at: "2026-07-19T18:05:00.000Z",
+    email_suppression_reason: "complained",
+    updated_at: "2026-07-19T18:05:00.000Z",
+  };
+  realtimeState.emitChange({ table: "notification_preferences" });
+
+  await expect(dialog.getByText("Suppressed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/recipient marked an Outflow email as spam/)).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Resume email", exact: true }).click();
+  await expect.poll(() => cloudState.notificationResumeRequests).toBe(2);
+  await expect(dialog.getByText("Email reminders resumed. Outflow will stop them again if the provider reports another permanent delivery problem.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Enabled", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
   expect(await page.evaluate(() => localStorage.getItem("outflow:alert-settings"))).toBe(localAlertSettings);
 });
