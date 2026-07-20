@@ -13,9 +13,9 @@ export function validateMacosReleaseEnvironment(env, options = {}) {
   const root = resolve(options.root || process.cwd());
   const inspectPath = options.inspectPath || ((path) => {
     const resolved = resolve(path);
-    if (!existsSync(resolved)) return { exists: false, file: false, mode: 0, path: resolved };
+    if (!existsSync(resolved)) return { exists: false, file: false, mode: 0, size: 0, path: resolved };
     const stats = statSync(resolved);
-    return { exists: true, file: stats.isFile(), mode: stats.mode, path: resolved };
+    return { exists: true, file: stats.isFile(), mode: stats.mode, size: stats.size, path: resolved };
   });
   const errors = [];
   const identity = value(env, "APPLE_SIGNING_IDENTITY");
@@ -30,8 +30,28 @@ export function validateMacosReleaseEnvironment(env, options = {}) {
 
   const certificate = value(env, "APPLE_CERTIFICATE");
   const certificatePassword = value(env, "APPLE_CERTIFICATE_PASSWORD");
+  const requireCertificate = value(env, "OUTFLOW_MACOS_REQUIRE_CERTIFICATE");
+  if (requireCertificate && !/^(?:true|false)$/.test(requireCertificate)) {
+    errors.push("OUTFLOW_MACOS_REQUIRE_CERTIFICATE: expected true or false.");
+  }
   if (Boolean(certificate) !== Boolean(certificatePassword)) {
     errors.push("APPLE_CERTIFICATE: certificate and password must be provided together when importing a CI identity.");
+  }
+  if (requireCertificate === "true" && (!certificate || !certificatePassword)) {
+    errors.push("APPLE_CERTIFICATE: a certificate and password are required for this release environment.");
+  }
+
+  const expectedCommit = value(env, "OUTFLOW_MACOS_EXPECTED_COMMIT");
+  if (expectedCommit) {
+    if (!/^[a-f0-9]{40}$/.test(expectedCommit)) {
+      errors.push("OUTFLOW_MACOS_EXPECTED_COMMIT: expected an exact lowercase Git commit SHA.");
+    }
+    if (value(env, "GITHUB_SHA") !== expectedCommit) {
+      errors.push("GITHUB_SHA: must match the pinned macOS release commit.");
+    }
+    if (value(env, "GITHUB_REF") !== "refs/heads/main") {
+      errors.push("GITHUB_REF: production macOS releases must run from main.");
+    }
   }
 
   const apiPresent = apiNames.filter((name) => value(env, name));
@@ -59,6 +79,9 @@ export function validateMacosReleaseEnvironment(env, options = {}) {
     if (!key.exists || !key.file) {
       errors.push("APPLE_API_KEY_PATH: expected a readable private-key file.");
     } else {
+      if (!Number.isSafeInteger(key.size) || key.size < 100 || key.size > 20_000) {
+        errors.push("APPLE_API_KEY_PATH: private-key file size is outside the accepted boundary.");
+      }
       const repositoryRelative = relative(root, key.path);
       if (!repositoryRelative.startsWith("..") || repositoryRelative === "") {
         errors.push("APPLE_API_KEY_PATH: private key must be stored outside the repository.");

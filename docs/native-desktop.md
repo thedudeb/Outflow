@@ -13,6 +13,7 @@ This is a build-verified guest alpha, not a signed public desktop release. The c
 - `npm run desktop:release` creates the same verified app plus a headless ZIP distribution container without Finder automation.
 - `npm run check:desktop:release` verifies bundle identity, metadata, executable architecture, hardened runtime, sealed resources, empty entitlements, signatures before and after archive extraction, and the expected non-distributable ad-hoc boundary.
 - `npm run test:desktop-release` covers the production environment policy, while `npm run check:desktop:release-environment` validates a real protected Developer ID/notarization environment without printing values. See [macos-release.md](macos-release.md).
+- The manual `macOS Production Release` workflow binds a reviewed `macos-production` environment to one exact `main` commit, limits signing secrets to preflight/build steps, verifies the notarized result, and retains only a seven-day ZIP/checksum release candidate. The candidate is not a published release and follows repository artifact access rules.
 
 ## Security Boundary
 
@@ -25,4 +26,4 @@ This is a build-verified guest alpha, not a signed public desktop release. The c
 
 ## Verification
 
-The main Quality workflow runs the notification adapter and shell policy contracts on Linux alongside the browser suite. On a fresh `macos-latest` runner it independently builds the hardened ad-hoc-signed `.app` and ZIP, deeply verifies both copies of the bundle, and proves that neither contains a notarization ticket nor passes Gatekeeper distribution assessment. CI does not upload either artifact. Operator-owned Developer ID signing, notarization acceptance, update metadata, and real permission/delivery checks on supported macOS versions must be completed before this alpha is offered to users.
+The main Quality workflow runs the notification adapter and shell policy contracts on Linux alongside the browser suite. On a fresh `macos-latest` runner it independently builds the hardened ad-hoc-signed `.app` and ZIP, deeply verifies both copies of the bundle, and proves that neither contains a notarization ticket nor passes Gatekeeper distribution assessment. CI does not upload either artifact. The separate protected production workflow is ready to consume operator credentials but has not established release acceptance until it runs successfully. Operator-owned Developer ID signing, notarization acceptance, update metadata, and real permission/delivery checks on supported macOS versions must be completed before this alpha is offered to users.

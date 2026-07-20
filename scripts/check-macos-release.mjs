@@ -1,19 +1,27 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 assert.equal(process.platform, "darwin", "macOS release artifacts must be inspected on macOS");
 
-const appPath = resolve(process.env.OUTFLOW_MACOS_APP_PATH || "src-tauri/target/release/bundle/macos/Outflow.app");
+const tauriConfig = JSON.parse(readFileSync(resolve("src-tauri/tauri.conf.json"), "utf8"));
+const regexEscape = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const archivePattern = new RegExp(
+  `^${regexEscape(tauriConfig.productName)}_${regexEscape(tauriConfig.version)}_(?:aarch64|x64)\\.zip$`,
+);
+const appPath = resolve(
+  process.env.OUTFLOW_MACOS_APP_PATH
+    || `src-tauri/target/release/bundle/macos/${tauriConfig.productName}.app`,
+);
 const archiveDirectory = resolve("src-tauri/target/release/bundle/macos-release");
-const archives = existsSync(archiveDirectory)
-  ? readdirSync(archiveDirectory).filter((name) => /^Outflow_0\.1\.0_(?:aarch64|x64)\.zip$/.test(name))
-  : [];
+const releaseFiles = existsSync(archiveDirectory) ? readdirSync(archiveDirectory) : [];
+const zipFiles = releaseFiles.filter((name) => name.endsWith(".zip"));
+const archives = zipFiles.filter((name) => archivePattern.test(name));
 const archivePath = resolve(
   process.env.OUTFLOW_MACOS_ARCHIVE_PATH
-    || join(archiveDirectory, archives[0] || "Outflow_0.1.0_missing.zip"),
+    || join(archiveDirectory, archives[0] || `${tauriConfig.productName}_${tauriConfig.version}_missing.zip`),
 );
 const expectDistributable = process.env.OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE === "true";
 const expectedTeamId = String(process.env.OUTFLOW_MACOS_EXPECTED_TEAM_ID || "").trim();
@@ -40,11 +48,11 @@ function verifyApp(path) {
   assert.ok(statSync(icon).size > 100_000, "Outflow macOS icon is unexpectedly small");
   assert.ok(statSync(codeResources).size > 500, "Outflow sealed-resource inventory is missing");
 
-  assert.equal(plistValue(path, "CFBundleIdentifier"), "com.thedudeb.outflow");
-  assert.equal(plistValue(path, "CFBundleDisplayName"), "Outflow");
+  assert.equal(plistValue(path, "CFBundleIdentifier"), tauriConfig.identifier);
+  assert.equal(plistValue(path, "CFBundleDisplayName"), tauriConfig.productName);
   assert.equal(plistValue(path, "CFBundleExecutable"), "outflow");
-  assert.equal(plistValue(path, "CFBundleShortVersionString"), "0.1.0");
-  assert.equal(plistValue(path, "CFBundleVersion"), "0.1.0");
+  assert.equal(plistValue(path, "CFBundleShortVersionString"), tauriConfig.version);
+  assert.equal(plistValue(path, "CFBundleVersion"), tauriConfig.version);
   assert.equal(plistValue(path, "LSApplicationCategoryType"), "public.app-category.finance");
   assert.equal(plistValue(path, "LSMinimumSystemVersion"), "10.13");
   assert.match(run("file", [executable]), /Mach-O 64-bit executable (?:arm64|x86_64)/);
@@ -52,7 +60,7 @@ function verifyApp(path) {
   execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=4", path], { stdio: "pipe" });
   const signature = inspect("codesign", ["--display", "--verbose=4", path]);
   assert.equal(signature.status, 0, signature.output);
-  assert.match(signature.output, /Identifier=com\.thedudeb\.outflow/);
+  assert.match(signature.output, new RegExp(`Identifier=${regexEscape(tauriConfig.identifier)}`));
   assert.match(signature.output, /flags=0x[0-9a-f]+\([^)]*runtime[^)]*\)/i);
   assert.match(signature.output, /Sealed Resources version=2/);
   assert.match(signature.output, /Info\.plist entries=/);
@@ -80,7 +88,8 @@ function verifyApp(path) {
   }
 }
 
-assert.equal(archives.length, 1, "exactly one Outflow macOS release archive is required");
+assert.equal(zipFiles.length, 1, "exactly one macOS ZIP release candidate is required");
+assert.equal(archives.length, 1, "the macOS ZIP release candidate must match the configured product and version");
 assert.equal(existsSync(archivePath), true, `Outflow macOS archive is missing at ${archivePath}`);
 assert.ok(statSync(archivePath).size > 4_000_000, "Outflow macOS archive is unexpectedly small");
 assert.match(run("file", [archivePath]), /Zip archive data/);
@@ -91,7 +100,7 @@ verifyApp(appPath);
 const extractionDirectory = mkdtempSync(join(tmpdir(), "outflow-macos-release-"));
 try {
   run("ditto", ["-x", "-k", archivePath, extractionDirectory]);
-  verifyApp(join(extractionDirectory, "Outflow.app"));
+  verifyApp(join(extractionDirectory, `${tauriConfig.productName}.app`));
 } finally {
   rmSync(extractionDirectory, { recursive: true, force: true });
 }

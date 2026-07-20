@@ -1,0 +1,79 @@
+name: macOS Production Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-macos-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Developer ID signed and notarized archive
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: macos-production
+    env:
+      APPLE_SIGNING_IDENTITY: ${{ vars.OUTFLOW_MACOS_SIGNING_IDENTITY }}
+      OUTFLOW_MACOS_EXPECTED_TEAM_ID: ${{ vars.OUTFLOW_MACOS_TEAM_ID }}
+      OUTFLOW_MACOS_EXPECTED_COMMIT: ${{ github.sha }}
+      OUTFLOW_MACOS_REQUIRE_CERTIFICATE: "true"
+      APPLE_API_KEY: ${{ vars.OUTFLOW_APPLE_API_KEY }}
+      APPLE_API_ISSUER: ${{ vars.OUTFLOW_APPLE_API_ISSUER }}
+      APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey_${{ vars.OUTFLOW_APPLE_API_KEY }}.p8
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify release contracts
+        run: |
+          npm run test:device-notifications
+          npm run test:desktop-shell
+          npm run test:desktop-release
+      - name: Materialize private notarization key
+        env:
+          OUTFLOW_APPLE_API_PRIVATE_KEY: ${{ secrets.OUTFLOW_APPLE_API_PRIVATE_KEY }}
+        run: |
+          umask 077
+          install -m 600 /dev/null "$APPLE_API_KEY_PATH"
+          printf '%s' "$OUTFLOW_APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH"
+      - name: Verify protected release environment
+        run: npm run check:desktop:release-environment
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE_PASSWORD }}
+      - name: Build signed and notarized archive
+        run: npm run desktop:release
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE_PASSWORD }}
+      - name: Remove notarization key
+        if: always()
+        run: rm -f "$APPLE_API_KEY_PATH"
+      - name: Inspect distributable archive
+        run: npm run check:desktop:release
+        env:
+          OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE: "true"
+      - name: Write archive checksum
+        working-directory: src-tauri/target/release/bundle/macos-release
+        run: shasum -a 256 *.zip > SHA256SUMS.txt
+      - name: Upload verified release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: outflow-macos-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/macos-release/*.zip
+            src-tauri/target/release/bundle/macos-release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

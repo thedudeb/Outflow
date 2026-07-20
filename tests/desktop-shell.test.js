@@ -113,6 +113,12 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   assert.match(app, /sendDeviceNotification/);
   assert.match(releaseBuilder, /LANG: "C"/);
   assert.match(releaseBuilder, /--keepParent/);
+  assert.match(releaseBuilder, /tauriConfig\.productName/);
+  assert.match(releaseBuilder, /tauriConfig\.version/);
+  assert.doesNotMatch(releaseBuilder, /Outflow_0\.1\.0/);
+  assert.match(releaseInspector, /tauriConfig\.identifier/);
+  assert.match(releaseInspector, /tauriConfig\.version/);
+  assert.doesNotMatch(releaseInspector, /Outflow_0\\\.1\\\.0/);
   assert.match(releaseInspector, /release-readiness app must not contain a notarization ticket/);
   assert.match(releaseInspector, /source=Notarized Developer ID/);
   assert.match(releaseEnvironment, /configure exactly one authentication mode/);

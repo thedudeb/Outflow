@@ -49,7 +49,32 @@ APPLE_TEAM_ID
 
 Run `npm run check:desktop:release-environment` before building. The preflight requires a canonical Developer ID identity whose Team ID matches the independent pin, rejects partial or mixed notarization modes, and requires an API private key to be a private regular file outside the repository. It reports field names and policy errors without echoing values.
 
-## Protected Release
+## Protected GitHub Workflow
+
+`.github/workflows/macos-release.yml` is a manual, `main`-only production path. Its `macos-production` environment must have deployment-branch protection and required reviewers before credentials are added.
+
+Configure these environment variables:
+
+```text
+OUTFLOW_MACOS_SIGNING_IDENTITY
+OUTFLOW_MACOS_TEAM_ID
+OUTFLOW_APPLE_API_KEY
+OUTFLOW_APPLE_API_ISSUER
+```
+
+Configure these environment secrets:
+
+```text
+OUTFLOW_APPLE_CERTIFICATE
+OUTFLOW_APPLE_CERTIFICATE_PASSWORD
+OUTFLOW_APPLE_API_PRIVATE_KEY
+```
+
+`OUTFLOW_APPLE_CERTIFICATE` is the certificate payload accepted by Tauri and its password must be stored separately. The workflow installs locked dependencies and passes release policy tests before exposing any production secret. It then writes the App Store Connect private key to a `0600` file in the ephemeral runner directory, binds the release to the exact `main` commit, imports the certificate only for preflight and build steps, and removes the private key before inspecting or uploading the result.
+
+The workflow uploads only the verified notarized ZIP and `SHA256SUMS.txt` as a GitHub Actions release-candidate artifact named for the exact commit, with seven-day retention. Under [GitHub's workflow-artifact access rules](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts), signed-in users with repository read access can download artifacts; in a public repository this is intentionally treated as a review candidate rather than private storage. It does not create a GitHub Release, publish an ad-hoc artifact, or upload the raw `.app`. Promotion remains a separate operator decision after clean-machine acceptance.
+
+## Operator Release Procedure
 
 1. Create or import an operator-owned Developer ID Application certificate and confirm it appears in `security find-identity -v -p codesigning`.
 2. Configure the pinned Team ID and one complete notarization mode in a protected macOS build environment.
