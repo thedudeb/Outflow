@@ -18,3 +18,4 @@ tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
 tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-notification = "=2.3.3"

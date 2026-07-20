@@ -36,7 +36,7 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   assert.equal(config.app.security.freezePrototype, true);
   assert.equal(config.app.security.dangerousDisableAssetCspModification, false);
   assert.deepEqual(config.app.security.assetProtocol, { enable: false, scope: [] });
-  assert.deepEqual(config.app.security.capabilities, []);
+  assert.deepEqual(config.app.security.capabilities, ["main-notifications"]);
   assert.equal(directive(csp, "default-src"), "default-src 'self'");
   assert.equal(directive(csp, "base-uri"), "base-uri 'self'");
   assert.equal(directive(csp, "form-action"), "form-action 'self'");
@@ -53,7 +53,15 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   const capabilityFiles = existsSync(capabilityUrl)
     ? readdirSync(capabilityUrl).filter((name) => name.endsWith(".json"))
     : [];
-  assert.deepEqual(capabilityFiles, []);
+  assert.deepEqual(capabilityFiles, ["main-notifications.json"]);
+  const notificationCapability = JSON.parse(read("src-tauri/capabilities/main-notifications.json"));
+  assert.equal(notificationCapability.identifier, "main-notifications");
+  assert.deepEqual(notificationCapability.windows, ["main"]);
+  assert.deepEqual(notificationCapability.permissions, [
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+  ]);
   assert.deepEqual(config.bundle.targets, ["app"]);
   assert.equal(config.bundle.category, "Finance");
   config.bundle.icon.forEach((path) => {
@@ -61,7 +69,7 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   });
 });
 
-test("the native backend exposes no commands or plugins", () => {
+test("the native backend exposes only the notification plugin and no commands", () => {
   const manifest = read("src-tauri/Cargo.toml");
   const backend = read("src-tauri/src/lib.rs");
 
@@ -69,9 +77,12 @@ test("the native backend exposes no commands or plugins", () => {
   assert.match(manifest, /repository = "https:\/\/github\.com\/thedudeb\/Outflow"/);
   assert.match(manifest, /tauri-build = \{ version = "=2\.6\.3"/);
   assert.match(manifest, /tauri = \{ version = "=2\.11\.5"/);
-  assert.doesNotMatch(manifest, /tauri-plugin|serde|reqwest|tokio/);
+  assert.match(manifest, /tauri-plugin-notification = "=2\.3\.3"/);
+  assert.doesNotMatch(manifest, /tauri-plugin-(?!notification)|serde|reqwest|tokio/);
   assert.match(backend, /tauri::Builder::default\(\)/);
-  assert.doesNotMatch(backend, /invoke_handler|\.plugin\(|Command|http|shell|process/);
+  assert.match(backend, /\.plugin\(tauri_plugin_notification::init\(\)\)/);
+  assert.equal(backend.match(/\.plugin\(/g)?.length, 1);
+  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell|process/);
 });
 
 test("desktop builds use the shared frontend and remain a tested release gate", () => {
@@ -81,6 +92,7 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   const quality = read(".github/workflows/quality.yml");
 
   assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.11.4");
+  assert.equal(packageJson.dependencies["@tauri-apps/plugin-notification"], "2.3.3");
   assert.equal(packageJson.scripts["desktop:dev"], "tauri dev");
   assert.equal(packageJson.scripts["desktop:build"], "tauri build --bundles app");
   assert.equal(packageJson.scripts["test:desktop-shell"], "node --test tests/desktop-shell.test.js");
@@ -89,9 +101,11 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   assert.match(app, /nativeDesktop = Boolean\(import\.meta\.env\.TAURI_ENV_PLATFORM\)/);
   assert.match(app, /!nativeDesktop && import\.meta\.env\.PROD/);
   assert.match(app, /nativeDesktop \? "Desktop embedded" : "Offline ready"/);
+  assert.match(app, /sendDeviceNotification/);
   assert.match(quality, /desktop:\n\s+runs-on: macos-latest/);
   assert.match(quality, /persist-credentials: false/);
   assert.match(quality, /npm run test:desktop-shell/);
+  assert.match(quality, /npm run test:device-notifications/);
   assert.match(quality, /npm run desktop:build/);
   assert.doesNotMatch(quality, /VITE_SUPABASE|SUPABASE_SECRET|SERVICE_ROLE|STRIPE_|RESEND_/);
 });

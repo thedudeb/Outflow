@@ -65,6 +65,14 @@ import {
   isValidReminderLeadDay,
   restrictedDraftFeature,
 } from "./featureAccess";
+import {
+  claimDeviceNotification,
+  initialDeviceNotificationPermission,
+  readDeviceNotificationPermission,
+  releaseDeviceNotification,
+  requestDeviceNotificationPermission,
+  sendDeviceNotification,
+} from "./deviceNotifications";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -320,7 +328,7 @@ function sanitizeAlertSettings(value, permission = "default") {
   const source = value && typeof value === "object" ? value : {};
   const deviceRequested = typeof source.deviceEnabled === "boolean" ? source.deviceEnabled : permission === "granted";
   return {
-    deviceEnabled: permission === "granted" && deviceRequested,
+    deviceEnabled: ["granted", "checking"].includes(permission) && deviceRequested,
     includePausedSchedules: source.includePausedSchedules === true,
   };
 }
@@ -1575,11 +1583,9 @@ function Tracker({ onExit, pwa }) {
   const [customReminderError, setCustomReminderError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
-  const [notificationPermission, setNotificationPermission] = useState(() =>
-    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported",
-  );
+  const [notificationPermission, setNotificationPermission] = useState(initialDeviceNotificationPermission);
   const [alertSettings, setAlertSettings] = useState(() => {
-    const permission = typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported";
+    const permission = initialDeviceNotificationPermission();
     try {
       return sanitizeAlertSettings(JSON.parse(localStorage.getItem(ALERT_SETTINGS_KEY) || "null"), permission);
     } catch {
@@ -1623,6 +1629,26 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
   }, [alertSettings]);
+
+  useEffect(() => {
+    let active = true;
+    readDeviceNotificationPermission()
+      .then((permission) => {
+        if (!active) return;
+        setNotificationPermission(permission);
+        if (permission !== "granted") {
+          setAlertSettings((current) => current.deviceEnabled ? { ...current, deviceEnabled: false } : current);
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setNotificationPermission("unsupported");
+        setAlertSettings((current) => current.deviceEnabled ? { ...current, deviceEnabled: false } : current);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(ACCOUNT_NUDGE_KEY, JSON.stringify(accountNudge));
@@ -2244,24 +2270,35 @@ function Tracker({ onExit, pwa }) {
       .filter((alert) => !notified.has(alert.deliveryId));
 
     pending.forEach((alert) => {
-      try {
-        const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
-        const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} ${ledgerMeta.storage} ledger.`;
-        const body = alert.type === "trial"
-          ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
-          : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
-        new window.Notification(`Outflow / ${title}`, { body, tag: alert.deliveryId });
-        notified.add(alert.deliveryId);
-      } catch {
-        // A failed alert remains eligible while later due alerts can still be delivered.
-      }
-    });
+      if (!claimDeviceNotification(alert.deliveryId)) return;
+      const title = alert.type === "trial" ? `${alert.name} trial ends ${dayLabel(alert.daysOut)}` : `${alert.name} bills ${dayLabel(alert.daysOut)}`;
+      const ledgerContext = `${alert.paused ? "Paused schedule / " : ""}${ledgerMeta.name} / ${ledgerMeta.kind} ${ledgerMeta.storage} ledger.`;
+      const body = alert.type === "trial"
+        ? `${money(alert.amount, alert.currency)} expected after the trial ends on ${fullDate(alert.date)} / ${ledgerContext}`
+        : `${money(alert.amount, alert.currency)} will leave on ${fullDate(alert.date)} / ${ledgerContext}`;
 
-    try {
-      localStorage.setItem(NOTIFIED_ALERTS_KEY, JSON.stringify([...notified].slice(-200)));
-    } catch {
-      // Device notifications are best-effort; the in-app alert remains available.
-    }
+      void sendDeviceNotification({ title: `Outflow / ${title}`, body, deliveryId: alert.deliveryId })
+        .then(() => {
+          let delivered = [];
+          try {
+            const parsed = JSON.parse(localStorage.getItem(NOTIFIED_ALERTS_KEY) || "[]");
+            if (Array.isArray(parsed)) delivered = parsed;
+          } catch {
+            delivered = [];
+          }
+          const deliveredIds = new Set(delivered.slice(-200).filter((id) => typeof id === "string"));
+          deliveredIds.add(alert.deliveryId);
+          try {
+            localStorage.setItem(NOTIFIED_ALERTS_KEY, JSON.stringify([...deliveredIds].slice(-200)));
+          } catch {
+            // Device notifications are best-effort; the in-app alert remains available.
+          }
+        })
+        .catch(() => {
+          // A failed alert remains eligible while later due alerts can still be delivered.
+        })
+        .finally(() => releaseDeviceNotification(alert.deliveryId));
+    });
   }, [alerts, alertSettings.deviceEnabled, notificationPermission, ledgerMeta.id, ledgerMeta.kind, ledgerMeta.name, ledgerMeta.storage]);
 
   function updateField(field, value) {
@@ -2614,18 +2651,15 @@ function Tracker({ onExit, pwa }) {
   }
 
   async function requestDeviceAlerts() {
-    if (!("Notification" in window)) {
-      setNotificationPermission("unsupported");
-      setDeviceAlertStatus({ kind: "alert", message: "Device notifications are not available in this browser." });
-      return;
-    }
     try {
-      const permission = await window.Notification.requestPermission();
+      const permission = await requestDeviceNotificationPermission();
       setNotificationPermission(permission);
       setAlertSettings((current) => ({ ...current, deviceEnabled: permission === "granted" }));
       setDeviceAlertStatus(permission === "granted"
-        ? { kind: "status", message: "Device notifications enabled for due alerts in this browser." }
-        : { kind: "alert", message: "Device notification permission was not granted." });
+        ? { kind: "status", message: "Device notifications enabled for due alerts on this device." }
+        : permission === "unsupported"
+          ? { kind: "alert", message: "Device notifications are not available on this device." }
+          : { kind: "alert", message: "Device notification permission was not granted." });
     } catch {
       setAlertSettings((current) => ({ ...current, deviceEnabled: false }));
       setDeviceAlertStatus({ kind: "alert", message: "Outflow could not request device notification permission." });
@@ -2643,7 +2677,7 @@ function Tracker({ onExit, pwa }) {
       return;
     }
     setAlertSettings((current) => ({ ...current, deviceEnabled: true }));
-    setDeviceAlertStatus({ kind: "status", message: "Device notifications enabled for due alerts in this browser." });
+    setDeviceAlertStatus({ kind: "status", message: "Device notifications enabled for due alerts on this device." });
   }
 
   function exportCsv() {

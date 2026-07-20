@@ -32,7 +32,7 @@
         "enable": false,
         "scope": []
       },
-      "capabilities": []
+      "capabilities": ["main-notifications"]
     }
   },
   "bundle": {

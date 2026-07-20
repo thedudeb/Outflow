@@ -73,6 +73,7 @@ jobs:
       - run: npm run test:account-service
       - run: npm run test:pwa-cache
       - run: npm run test:pages-deployment
+      - run: npm run test:device-notifications
       - run: npm run test:desktop-shell
       - run: npm run test:pwa
       - run: npm run test:e2e
@@ -90,5 +91,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:device-notifications
       - run: npm run test:desktop-shell
       - run: npm run desktop:build

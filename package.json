@@ -33,6 +33,7 @@
     "test:account-service": "playwright test --config=playwright.account.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
+    "test:device-notifications": "node --test tests/device-notifications.test.js",
     "test:desktop-shell": "node --test tests/desktop-shell.test.js",
     "test:web-deployment": "playwright test --config=playwright.deployment.config.js",
     "pretest:pwa": "npm run build",
@@ -44,6 +45,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.75.0",
+    "@tauri-apps/plugin-notification": "2.3.3",
     "ics": "^3.12.0",
     "papaparse": "^5.5.3",
     "react": "^19.0.0",

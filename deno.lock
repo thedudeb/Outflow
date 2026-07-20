@@ -5,6 +5,7 @@
     "npm:@playwright/test@^1.61.1": "1.61.1",
     "npm:@supabase/supabase-js@2.75.0": "2.75.0",
     "npm:@tauri-apps/cli@2.11.4": "2.11.4",
+    "npm:@tauri-apps/plugin-notification@2.3.3": "2.3.3",
     "npm:@vitejs/plugin-react@^4.3.4": "4.7.0_vite@6.4.3",
     "npm:autoprefixer@^10.4.20": "10.5.4_postcss@8.5.20",
     "npm:ics@3.12.0": "3.12.0",
@@ -525,6 +526,9 @@
         "@supabase/storage-js"
       ]
     },
+    "@tauri-apps/api@2.11.1": {
+      "integrity": "sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA=="
+    },
     "@tauri-apps/cli-darwin-arm64@2.11.4": {
       "integrity": "sha512-1ryOF3ZhpZ/nemHV5zVwBQBz9jDGKmKPvWPADOhc83ig0P4bMc2iER4NbC6r9sjeIZ6RVQ4g3RZIYvezhcl4TQ==",
       "os": ["darwin"],
@@ -596,6 +600,12 @@
         "@tauri-apps/cli-win32-x64-msvc"
       ],
       "bin": true
+    },
+    "@tauri-apps/plugin-notification@2.3.3": {
+      "integrity": "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
     },
     "@types/babel__core@7.20.5": {
       "integrity": "sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==",
@@ -1297,6 +1307,7 @@
         "npm:@playwright/test@^1.61.1",
         "npm:@supabase/supabase-js@2.75.0",
         "npm:@tauri-apps/cli@2.11.4",
+        "npm:@tauri-apps/plugin-notification@2.3.3",
         "npm:@vitejs/plugin-react@^4.3.4",
         "npm:autoprefixer@^10.4.20",
         "npm:ics@^3.12.0",
