@@ -1,6 +1,6 @@
 # Native Desktop Alpha
 
-Outflow has a minimal macOS desktop shell built with Tauri 2. It embeds the same production React bundle as the responsive web product and opens directly into `#app`; subscription rules, forecasts, calendar behavior, CSV/backup exports, and browser-local ledger storage are not reimplemented in Rust.
+Outflow has a minimal macOS desktop shell built with Tauri 2. It embeds the same production React bundle as the responsive web product and opens directly into `#app`; subscription rules, forecasts, calendar behavior, CSV/backup exports, and subscription-list storage are not reimplemented in Rust.
 
 This is a build-verified guest alpha, not a signed public desktop release. The current shell does not bundle Supabase, Stripe, or Resend credentials and does not enable account/cloud features by itself. Default builds now receive a valid full-bundle ad-hoc signature with hardened runtime and sealed resources, but they remain intentionally rejected by Gatekeeper and are not Developer ID signed, notarized, or distributed. A production desktop release still needs signed update and distribution policy, configured-service acceptance in the native webview, account callback handling, real macOS notification-permission acceptance, and persistence validation across an application upgrade.
 

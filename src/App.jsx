@@ -1411,7 +1411,7 @@ function PrivacyPage({ onHome, onOpen }) {
             When account services are available, requesting a passwordless link sends your email address to Supabase for authentication and to its configured email provider. Signing in alone does not upload subscriptions from this device. A synced copy is created only after you select that action.
           </p>
           <p>
-            A cloud account can store your email-linked account identifier, optional display name, subscription lists, subscriptions, roles, invitations, creator and updater attribution, synchronization revisions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-list members can see subscription data, roles, and display-name attribution for lists they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
+            A cloud account can store your email-linked account identifier, optional display name, subscription lists, subscriptions, roles, invitations, creator and updater attribution, synchronization versions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-list members can see subscription data, roles, and display-name attribution for lists they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
           </p>
           <p>
             One bounded pending sync may be retained in the browser for retry. It is tied to the account and subscription list but excludes email addresses, session credentials, provider responses, and server secrets.
@@ -2190,10 +2190,10 @@ function Tracker({ onExit, pwa }) {
         setCloudRemotePending(true);
         if (cloudWriteOperation) {
           setCloudSyncStatus("queued");
-          setCloudSyncMessage("A remote revision is available. Retry the saved change; the server will apply it once or return a conflict.");
+          setCloudSyncMessage("A synced update is available. Retry the saved change; the service will apply it once or return a conflict.");
         } else {
           setCloudSyncStatus("stale");
-          setCloudSyncMessage("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+          setCloudSyncMessage("Another synced update is available. Finish or cancel the current edit, then refresh.");
         }
         return;
       }
@@ -2229,7 +2229,7 @@ function Tracker({ onExit, pwa }) {
           void retryQueuedCloudWrite();
           return;
         }
-        setCloudSyncMessage("Realtime connection restored. Checking the authoritative cloud revision...");
+        setCloudSyncMessage("Realtime connection restored. Checking for synced updates...");
         receiveRemoteChange();
         return;
       }
@@ -2970,7 +2970,7 @@ function Tracker({ onExit, pwa }) {
       return;
     }
     setCloudSyncStatus("refreshing");
-    setCloudSyncMessage("Checking the authoritative cloud revision...");
+    setCloudSyncMessage("Checking for synced updates...");
     try {
       const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
       setCloudLedgerSession(snapshot);
@@ -3009,7 +3009,7 @@ function Tracker({ onExit, pwa }) {
     setCloudWriteOperation(attemptedOperation);
     setCloudDiscardArmed(false);
     setCloudSyncStatus("syncing");
-    setCloudSyncMessage(`${attemptedOperation.attemptCount > 1 ? "Retrying" : "Writing"} revision ${attemptedOperation.expectedRevision + 1}...`);
+    setCloudSyncMessage(`${attemptedOperation.attemptCount > 1 ? "Retrying" : "Writing"} version ${attemptedOperation.expectedRevision + 1}...`);
     setCloudLedgerSession({
       ...baseSession,
       ledger: { ...baseSession.ledger, revision: attemptedOperation.expectedRevision, updatedAt: attemptedOperation.createdAt },
@@ -3059,7 +3059,7 @@ function Tracker({ onExit, pwa }) {
           setCloudRemotePending(true);
         }
         setCloudSyncStatus("conflict");
-        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. Your stale write was rejected; the saved browser operation was cleared. Review the server copy before editing again.`);
+        setCloudSyncMessage(`The synced list changed at version ${result.currentRevision}. Your stale write was rejected; the saved browser operation was cleared. Review the synced copy before editing again.`);
       } else if (
         result?.status === "applied"
         && result.ledgerId === attemptedOperation.ledgerId
@@ -3091,18 +3091,18 @@ function Tracker({ onExit, pwa }) {
         setCloudLedgerSession(committedSession);
         if (!cleared) {
           setCloudSyncStatus("queued");
-          setCloudSyncMessage(`Revision ${committedRevision} synchronized, but its local recovery marker still needs cleanup. Retry safely.`);
+          setCloudSyncMessage(`Version ${committedRevision} synchronized, but its local recovery marker still needs cleanup. Retry safely.`);
         } else {
           try {
             const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
             setCloudLedgerSession(serverSnapshot);
             setCloudRemotePending(false);
             setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
-            setCloudSyncMessage(`Synchronized revision ${committedRevision}.`);
+            setCloudSyncMessage(`Synchronized version ${committedRevision}.`);
           } catch {
             setCloudRemotePending(true);
             setCloudSyncStatus("stale");
-            setCloudSyncMessage(`Revision ${committedRevision} was committed, but confirmation failed. Refresh before making another change.`);
+            setCloudSyncMessage(`Version ${committedRevision} was saved, but confirmation failed. Refresh before making another change.`);
           }
         }
       } else {
@@ -3222,7 +3222,7 @@ function Tracker({ onExit, pwa }) {
           setCloudRemotePending(true);
         }
         setCloudSyncStatus("conflict");
-        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. The rename was rejected; refresh the current name.`);
+        setCloudSyncMessage(`The synced list changed at version ${result.currentRevision}. The rename was rejected; refresh the current name.`);
       } else {
         const committedRevision = Number.isInteger(result?.currentRevision)
           ? result.currentRevision
@@ -3242,11 +3242,11 @@ function Tracker({ onExit, pwa }) {
           setCloudLedgerSession(serverSnapshot);
           setCloudRemotePending(false);
           setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
-          setCloudSyncMessage(`Renamed and synchronized revision ${committedRevision}.`);
+          setCloudSyncMessage(`Renamed and synchronized version ${committedRevision}.`);
         } catch {
           setCloudRemotePending(true);
           setCloudSyncStatus("stale");
-          setCloudSyncMessage(`The rename committed at revision ${committedRevision}, but confirmation failed. Refresh before making another change.`);
+          setCloudSyncMessage(`The rename was saved at version ${committedRevision}, but confirmation failed. Refresh before making another change.`);
         }
       }
       setCloudAccessRefresh((current) => current + 1);
@@ -5230,7 +5230,7 @@ function Tracker({ onExit, pwa }) {
                             <div className="min-w-0">
                               <div className="truncate text-sm font-black uppercase tracking-[0.08em] text-zinc-200">{cloudLedger.name}</div>
                               <div className="mt-1 font-mono text-[9px] uppercase text-zinc-600">
-                                {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / {cloudLedger.members.length} {cloudLedger.members.length === 1 ? "member" : "members"} / rev {cloudLedger.revision}
+                                {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / {cloudLedger.members.length} {cloudLedger.members.length === 1 ? "member" : "members"} / version {cloudLedger.revision}
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -5538,7 +5538,7 @@ function Tracker({ onExit, pwa }) {
                           {calendarFeed
                             ? `Rotated ${calendarFeed.rotatedAt ? shortDate(calendarFeed.rotatedAt.slice(0, 10)) : "previously"} / ${calendarFeed.lastAccessAt ? `last fetched ${shortDate(calendarFeed.lastAccessAt.slice(0, 10))}` : "not fetched"}`
                             : accountEntitlement?.status === "active"
-                              ? "Private recurring feed / live cloud revisions"
+                              ? "Private recurring feed / live synced updates"
                               : "One-time Pro unlock required"}
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -5611,7 +5611,7 @@ function Tracker({ onExit, pwa }) {
                         {subscription.paused && <span className="border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] uppercase text-zinc-500">Paused</span>}
                       </div>
                       <div className="mt-1 font-mono text-[10px] uppercase text-zinc-600">
-                        {subscription.cycle} / {fullDate(subscription.nextBillingDate)} / rev {subscription.revision}
+                        {subscription.cycle} / {fullDate(subscription.nextBillingDate)} / version {subscription.revision}
                       </div>
                     </div>
                     <div className="font-mono text-sm font-black text-amber-300">{money(subscription.amount, subscription.currency)}</div>
@@ -5768,7 +5768,7 @@ function Tracker({ onExit, pwa }) {
                             {active && <span className="border border-cyan-800 px-1.5 py-0.5 font-mono text-[8px] uppercase text-cyan-300">Active</span>}
                           </div>
                           <div className="mt-1 pl-[18px] font-mono text-[10px] uppercase text-zinc-600">
-                            {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / rev {cloudLedger.revision}
+                            {ledgerKindLabel(cloudLedger.kind)} / {cloudLedger.currentRole} / version {cloudLedger.revision}
                           </div>
                         </div>
                         <button

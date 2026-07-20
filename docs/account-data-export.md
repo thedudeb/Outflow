@@ -1,6 +1,6 @@
 # Outflow Account Data Export Contract
 
-Outflow gives every signed-in account a free, versioned JSON export of its portable cloud data. This is separate from CSV and active-ledger backup: CSV is a subscription interchange format, ledger backup preserves one local ledger for restore, and account export captures the account's complete user-visible cloud footprint.
+Outflow gives every signed-in account a free, versioned JSON export of its portable cloud data. This is separate from CSV and active-list backup: CSV is a subscription interchange format, list backup preserves one list on this device for restore, and account export captures the account's complete user-visible cloud footprint.
 
 ## Envelope
 
@@ -9,7 +9,7 @@ The `export_account_data()` RPC returns a `schemaVersion: 1` document containing
 - Account ID, email, display name, and account/profile timestamps.
 - Lifetime-Pro product, status, provider, purchase date, and revocation date when present.
 - Email-reminder preference state, timezone, and any current bounded provider-suppression reason.
-- Every cloud ledger the account can currently access, including its role, revision, members, pending invitations visible to an owner, and complete subscription records.
+- Every synchronized list the account can currently access, including its role, version, members, pending invitations visible to an owner, and complete subscription records.
 - Hosted-calendar metadata owned by the account.
 - Email-reminder delivery history with schedule, amount, worker status, provider delivery status, attempt count, and timestamps.
 
@@ -27,10 +27,10 @@ The document never contains:
 - Stripe checkout, payment-intent, or provider-reference identifiers.
 - Resend provider IDs, webhook event IDs, recipient addresses, raw diagnostics, claim tokens, or delivery error codes.
 - Idempotency operation IDs, migration hashes, or internal reconciliation events.
-- Browser-local ledgers, permissions, alert-delivery deduplication state, or service-worker data.
+- Subscription lists stored only on this device, permissions, alert-delivery deduplication state, or service-worker data.
 - Bank or card credentials; Outflow does not collect them.
 
-The browser rejects malformed envelopes and any response containing a prohibited private-service key. Local ledgers remain available through canonical CSV and the [Ledger Backup Contract](ledger-backup.md).
+The browser rejects malformed envelopes and any response containing a prohibited private-service key. Lists on this device remain available through canonical CSV and the [backup contract](ledger-backup.md).
 
 ## Verification
 

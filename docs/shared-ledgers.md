@@ -1,4 +1,4 @@
-# Shared Ledger Access
+# Shared Subscription List Access
 
 **Status:** Implemented contract and protected provider acceptance; external staging deployment pending
 
@@ -51,4 +51,4 @@ The database contract independently verifies owner/editor/viewer RLS, owner inva
 
 ## Current Boundary
 
-The browser can list cloud ledger access, manage its email-private shared display name, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime and protected provider acceptance are implemented, but no passing external staging run is recorded and the default build remains fully local. A test-address pass proves the deployed invitation path and one-use acceptance; delivery to human mailbox providers remains a release check. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.
+The browser can list synchronized subscription-list access, manage its email-private shared display name, open a synchronized list, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime and protected provider acceptance are implemented, but no passing external staging run is recorded and the default build remains fully local. A test-address pass proves the deployed invitation path and one-use acceptance; delivery to human mailbox providers remains a release check. See [Subscription List Synchronization](cloud-sync.md) for revision and conflict behavior.

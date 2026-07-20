@@ -15,9 +15,9 @@ The view is part of the same responsive, base-path-portable application shell as
 The policy distinguishes the exact current release from optional hosted capabilities:
 
 - The public GitHub Pages build is guest-only and has no Supabase browser configuration. Subscription records remain in browser storage, while GitHub Pages may process ordinary web-request metadata as the host.
-- Local and native notification payloads are limited to the subscription, amount, date, and ledger. Account identifiers and provider credentials are excluded.
+- Local and native notification payloads are limited to the subscription, amount, date, and list name. Account identifiers and provider credentials are excluded.
 - A configured account build sends an email address only for an explicit passwordless-link request. Sign-in does not upload a guest workspace; **Create cloud copy** is a separate action.
-- The account disclosure covers cloud subscriptions and ledgers, roles, invitation state, display-name attribution, synchronization revisions, notification preferences and history, hosted-calendar metadata, and the strict browser write-recovery record.
+- The account disclosure covers synced subscription lists, roles, invitation state, display-name attribution, synchronization revisions, notification preferences and history, hosted-calendar metadata, and the strict browser write-recovery record.
 - Hosted email, private calendar feeds, and one-time Stripe Checkout are described separately, including recipient processing, private feed URLs, limited entitlement/reconciliation records, and the fact that Outflow does not receive full card details or create recurring product subscriptions.
 - GitHub Pages, Supabase, Resend, and Stripe are named with their narrow product purposes. The policy states that Outflow has no advertising, behavioral tracking, data brokerage, direct bank connections, or sale of personal data.
 - User choices map to implemented controls: local use without an account, CSV/backup/calendar export, independent notification settings, sign-out, free account export, calendar revocation, member removal, cloud-account deletion, and local-storage removal.

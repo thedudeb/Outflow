@@ -7,6 +7,7 @@ const read = (path) => readFileSync(new URL(path, root), "utf8");
 
 test("customer-facing product copy uses subscription-list language", () => {
   const app = read("src/App.jsx");
+  const document = read("index.html");
   const retiredPhrases = [
     "Ledger controls",
     "Local ledgers",
@@ -20,14 +21,21 @@ test("customer-facing product copy uses subscription-list language", () => {
     "cloud ledger access",
     "local ledger data",
     "local browser ledgers",
+    " / rev ",
+    "cloud revision",
+    "Cloud changed at revision",
+    "Synchronized revision",
   ];
 
   retiredPhrases.forEach((phrase) => assert.ok(!app.includes(phrase), `retired phrase remains: ${phrase}`));
+  assert.ok(!document.includes("One clear ledger"), "retired social-preview copy remains");
+  assert.ok((document.match(/One clear view of every recurring charge/g) || []).length === 2, "social previews must use the current product language");
   [
     "Subscription lists",
     "On this device",
     "Synced lists",
     "Manage ${ledgerMeta.name} subscriptions",
+    " / version {cloudLedger.revision}",
   ].forEach((phrase) => assert.ok(app.includes(phrase), `preferred phrase is missing: ${phrase}`));
 });
 

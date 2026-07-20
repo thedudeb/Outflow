@@ -7,15 +7,15 @@ Outflow keeps browser device alerts and account email reminders as independent c
 1. Every account has a private `notification_preferences` row. Email is disabled by default.
 2. The user explicitly enables email, chooses an IANA timezone, and separately decides whether paused schedules may send.
 3. Each subscription's `reminder_lead_days` controls both charge and trial timing. Rules contain up to 12 unique whole-day values from 0 through 365, including Pro custom values. A shared subscription uses the same lead-day rules for each eligible member; each member controls their own email channel and paused-schedule preference.
-4. `claim_due_email_notifications` expands due charge and trial events in the user's local date, advances stale recurring charge dates without changing the ledger revision, and inserts a unique durable delivery record. Monthly and yearly advancement preserves the original calendar anchor while clamping to the last valid day, matching the browser ledger for month-end and leap-day schedules.
-5. The delivery row freezes the user-visible subscription and ledger fields at scheduling time, so provider retries keep the same payload even if the live record changes.
+4. `claim_due_email_notifications` expands due charge and trial events in the user's local date, advances stale recurring charge dates without changing the list version, and inserts a unique durable delivery record. Monthly and yearly advancement preserves the original calendar anchor while clamping to the last valid day, matching the browser schedule for month-end and leap-day cases.
+5. The delivery row freezes the user-visible subscription and list fields at scheduling time, so provider retries keep the same payload even if the live record changes.
 6. A service-role worker claims rows with `FOR UPDATE SKIP LOCKED`. Concurrent workers cannot claim the same row, abandoned claims become eligible again after 15 minutes, and failed sends use bounded backoff for at most five attempts.
 7. Resend receives `outflow-reminder/<delivery-id>` in the `Idempotency-Key` header. A database completion requires the matching worker claim token, so an old worker cannot overwrite a newer attempt.
 8. A successful Resend API response marks the delivery `accepted`, not delivered. The independently authenticated `resend-webhook` function records delivered, delayed, failed, bounced, complained, and suppressed provider events against the opaque Resend message ID.
 9. Bounce, complaint, and suppression events immediately disable the account's email channel. The UI receives that preference change over RLS-filtered Realtime, explains the bounded reason, and offers an explicit Pro-gated resume action without changing local device alerts.
 10. Every authenticated worker invocation records one de-identified aggregate run. A service-only health RPC and opt-in hourly workflow detect stale or mismatched deployments, completion errors, retry exhaustion, stuck claims, failure spikes, and suppression growth under the [reminder operations contract](reminder-operations.md).
 
-Delivery content is limited to subscription name, amount and currency, billing or trial date, ledger name and kind, and an Outflow link. Provider response bodies, subjects, recipient addresses, and bounce diagnostics are not stored in the provider-event ledger.
+Delivery content is limited to subscription name, amount and currency, billing or trial date, list name and type, and an Outflow link. Provider response bodies, subjects, recipient addresses, and bounce diagnostics are not stored in the provider-event audit log.
 
 The isolated database contract verifies leap and non-leap month ends, consecutive monthly advances after clamping, consecutive leap-day yearly advances, and unchanged weekly behavior through `npm run test:account-foundation`. GitHub Actions applies every migration to a temporary PostgreSQL cluster and runs this contract on every pull request and push to `main`.
 
@@ -26,13 +26,13 @@ The isolated database contract verifies leap and non-leap month ends, consecutiv
 - Authenticated and anonymous clients cannot read delivery rows or execute claim/completion functions.
 - Provider events require a current Svix timestamp and a valid HMAC signature over the exact raw request body. At-least-once deliveries are deduplicated by both `svix-id` and a bounded logical event fingerprint; only service role can call the recording function.
 - The scheduled function uses a server-only Supabase secret and requires a separate, high-entropy `OUTFLOW_CRON_SECRET` on every delivery call. Its aggregate health action requires a different `OUTFLOW_OPERATIONS_SECRET`.
-- Claims recheck email opt-in, Pro status, ledger membership, and paused-schedule policy. A refund, membership removal, subscription deletion, opt-out, or account deletion therefore stops new sends without browser cooperation.
+- Claims recheck email opt-in, Pro status, list membership, and paused-schedule policy. A refund, membership removal, subscription deletion, opt-out, or account deletion therefore stops new sends without browser cooperation.
 
 ## Automated Browser Contract
 
 `npm run test:account-service` runs the configured account UI against a stateful PostgREST-compatible fixture at desktop and narrow mobile widths. It verifies that a Pro user can enable email, include paused schedules, choose an IANA timezone, save the exact RPC payload, and recover the authoritative settings after reload without changing serialized local device-alert settings.
 
-The same contract simulates a refund while email remains opted in. The channel becomes visibly **Suspended**, unavailable sub-rules are locked, and the master email control remains available so the user can opt out. Saving that opt-out succeeds without Pro and still leaves local device alerts untouched. A separate four-engine flow injects an authoritative preference change over Realtime, requires the visible **Suppressed** state, verifies that the email toggle is locked, resumes through the dedicated RPC, and proves both the local ledger and device-alert settings remain byte-for-byte unchanged.
+The same contract simulates a refund while email remains opted in. The channel becomes visibly **Suspended**, unavailable sub-rules are locked, and the master email control remains available so the user can opt out. Saving that opt-out succeeds without Pro and still leaves local device alerts untouched. A separate four-engine flow injects an authoritative preference change over Realtime, requires the visible **Suppressed** state, verifies that the email toggle is locked, resumes through the dedicated RPC, and proves both the list on this device and device-alert settings remain byte-for-byte unchanged.
 
 ## Protected Provider Contract
 

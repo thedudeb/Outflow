@@ -1,10 +1,10 @@
 # Outflow Internal Calendar Contract
 
-Outflow's free dashboard includes a billing calendar and a date-ordered 30-day upcoming timeline. Both surfaces derive from the active ledger's recurring schedule and remain available without an account.
+Outflow's free dashboard includes a billing calendar and a date-ordered 30-day upcoming timeline. Both surfaces derive from the active subscription list's recurring schedule and remain available without an account.
 
 ## Schedule Scope
 
-- Only subscriptions in the active ledger are considered; personal and household/team records are never combined.
+- Only subscriptions in the active list are considered; personal and household/team records are never combined.
 - Paused subscriptions remain visible in the subscription list but are excluded from the calendar, upcoming timeline, next charge, and forecast schedule.
 - Weekly, monthly, and yearly occurrences use the recurrence rules in [free-core.md](free-core.md), including month-end and leap-day clamping.
 - Currency totals remain separated by ISO currency code. The calendar never implies exchange-rate conversion.
@@ -31,7 +31,7 @@ Outflow's free dashboard includes a billing calendar and a date-ordered 30-day u
 
 `npm run test:e2e` verifies the internal calendar and timeline in desktop and mobile Chromium. `npm run test:browser-compatibility` repeats the complete calendar and timeline contract in desktop Chromium, Firefox, and WebKit. Together, the contracts prove that:
 
-- Empty ledgers report zero calendar events and an explicit empty 30-day timeline.
+- Empty lists report zero calendar events and an explicit empty 30-day timeline.
 - Weekly, monthly, and yearly subscriptions produce exact current/next-month totals and date order.
 - Calendar date selection exposes the matching debit details.
 - Month navigation and the today control update month and selected-day state consistently.

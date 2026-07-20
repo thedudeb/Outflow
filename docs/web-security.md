@@ -19,6 +19,6 @@ The `no-referrer` policy is delivered through `<meta name="referrer">`, which is
 
 ## Automated Contract
 
-`npm run test:web-security` verifies source construction, exact configured origins, invalid-origin rejection, native scheme isolation, early build injection, and documentation/CI wiring. `npm run test:pwa` and `npm run test:pwa:pages` execute the generated policy at root and repository paths while proving installation, offline behavior, and CSV, iCalendar, and full-ledger downloads. The post-deployment `npm run test:web-deployment` gate requires the exact public policy and referrer setting in both desktop and mobile Chromium before the release is accepted.
+`npm run test:web-security` verifies source construction, exact configured origins, invalid-origin rejection, native scheme isolation, early build injection, and documentation/CI wiring. `npm run test:pwa` and `npm run test:pwa:pages` execute the generated policy at root and repository paths while proving installation, offline behavior, and CSV, iCalendar, and full-list downloads. The post-deployment `npm run test:web-deployment` gate requires the exact public policy and referrer setting in both desktop and mobile Chromium before the release is accepted.
 
 Playwright execution proves the tested browser can load and operate the current application under the policy. It does not prove support in every browser, prevent compromised same-origin code from reading local data, provide CSP violation reporting, or supply response-only protections unavailable on the current host.

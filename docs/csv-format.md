@@ -35,7 +35,7 @@ Outflow exports UTF-8 CSV with one subscription per row. Export remains part of 
 - Files may be up to 2 MB and 1,000 rows per import.
 - Imports require a preview and explicit confirmation.
 - Spreadsheet-formula prefixes are escaped during export.
-- Imports never connect to a bank or transmit ledger data to an external service.
+- Imports never connect to a bank or transmit subscription data to an external service.
 
 ## Automated Portability Contract
 

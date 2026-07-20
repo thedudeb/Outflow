@@ -1,6 +1,6 @@
 # Outflow Local Workspace Contract
 
-Outflow stores up to 12 isolated local ledgers in a versioned browser workspace. The workspace supports one personal ledger plus optional household and team ledgers without requiring an account or implying that browser-local data is synchronized.
+Outflow stores up to 12 isolated subscription lists in a versioned browser workspace. The workspace supports one personal list plus optional household and team lists without requiring an account or implying that data on this device is synchronized.
 
 ## Envelope
 
@@ -26,7 +26,7 @@ The workspace is stored under `outflow:workspace`:
 }
 ```
 
-Every ledger has its own subscription array. Dashboard totals, forecasts, alerts, CSV operations, backups, calendar views, and calendar exports read only from the active ledger; Outflow never combines personal and household/team totals implicitly.
+Every list has its own subscription array. Dashboard totals, forecasts, alerts, CSV operations, backups, calendar views, and calendar exports read only from the active list; Outflow never combines personal and household/team totals implicitly.
 
 Workspace loading requires a supported schema version, exactly one personal ledger, unique ASCII-safe ledger IDs, unique ASCII-safe subscription IDs within each ledger, no more than 12 ledgers, and no more than 500 valid subscriptions per ledger. The envelope is rejected as a unit when any of those invariants fail.
 
@@ -38,9 +38,9 @@ If a stored workspace cannot be validated, Outflow attempts the legacy migration
 
 ## Local Collaboration Boundary
 
-- Household and team ledgers are explicitly marked `Local` and `local only`.
-- New local household/team ledgers start empty and can be switched from the ledger controls.
-- Non-personal ledgers require a two-step confirmation before deletion; the personal ledger cannot be deleted locally.
+- Household and team lists are explicitly marked `On this device`.
+- New household/team lists start empty and can be switched from the subscription-list controls.
+- Non-personal lists require a two-step confirmation before deletion; the personal list cannot be deleted locally.
 - Local records attribute user changes to `Local guest`; automatic billing-date advances are attributed to `Outflow`.
 - There are no invitations, remote members, permissions, cloud backups, or synchronization claims in this milestone.
 

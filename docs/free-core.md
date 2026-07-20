@@ -1,6 +1,6 @@
 # Outflow Free-Core Contract
 
-Outflow's free local tracker must remain fully usable without an account. Subscription records are stored in the active browser ledger and support weekly, monthly, and yearly schedules, metadata, one device or trial reminder lead time, pausing, and local persistence. New Free records use USD; records that already contain another supported currency or multiple reminder rules are retained rather than downgraded or rewritten.
+Outflow's free local tracker must remain fully usable without an account. Subscription records are stored in the active list on this device and support weekly, monthly, and yearly schedules, metadata, one device or trial reminder lead time, pausing, and local persistence. New Free records use USD; records that already contain another supported currency or multiple reminder rules are retained rather than downgraded or rewritten.
 
 ## Recurrence Rules
 

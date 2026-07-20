@@ -1,6 +1,6 @@
 # Outflow Installable-Web And Offline Contract
 
-Outflow's responsive web experience is an installable progressive web app. The guest tracker and browser-local ledgers can relaunch and remain editable without a network connection after the production service worker finishes its first install.
+Outflow's responsive web experience is an installable progressive web app. The guest tracker and subscription lists on this device can relaunch and remain editable without a network connection after the production service worker finishes its first install.
 
 The public guest build is released to `https://thedudeb.github.io/Outflow/`. It contains no Supabase or provider configuration, so accounts, cloud writes, purchases, hosted calendars, and email delivery remain absent from that artifact. Subscription data stays in the browser origin's local storage. Its direct [privacy and data-control view](https://thedudeb.github.io/Outflow/?view=privacy) describes that current boundary and the separate behavior of optional hosted services.
 
@@ -26,7 +26,7 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 - Same-origin shell assets use the installed cache and can populate it after successful online requests.
 - Subscription data remains in the versioned localStorage workspace rather than in the service-worker cache. Offline edits therefore use the same validation and persistence path as online local edits.
 - Landing, privacy, and tracker URLs all relaunch from the cached shell, and the dashboard visibly reports online/offline state.
-- The service worker never handles cloud data or queues network requests. The signed-in application can retain one strict, account-bound subscription snapshot per cloud ledger for idempotent foreground retry under the explicit persistence and conflict boundary in [cloud-sync.md](cloud-sync.md).
+- The service worker never handles cloud data or queues network requests. The signed-in application can retain one strict, account-bound subscription snapshot per synchronized list for idempotent foreground retry under the explicit persistence and conflict boundary in [cloud-sync.md](cloud-sync.md).
 
 ## Automated Production Contract
 
@@ -39,8 +39,8 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 - A local subscription survives an offline reload, a second subscription can be added offline, and both survive another reload.
 - The cached shell can open the complete privacy and data-control view, navigate from tracker to landing, and return while fully offline.
 - Returning the browser online updates the visible connection state.
-- The root and repository-path documents enforce the exact provider-free guest CSP and `no-referrer` policy without blocking install, offline relaunch, navigation, local edits, or CSV, iCalendar, and full-ledger downloads.
+- The root and repository-path documents enforce the exact provider-free guest CSP and `no-referrer` policy without blocking install, offline relaunch, navigation, local edits, or CSV, iCalendar, and full-list downloads.
 
 GitHub Actions runs the root PWA and cache contracts on every pull request and push to `main` before the broader development-server browser suite. After that exact `main` Quality run succeeds, **Deploy web** checks out its immutable commit, repeats the repository-path cache and browser contract, uploads only `dist`, and publishes that tested artifact through the protected `github-pages` environment. Pull-request and failed Quality runs cannot deploy.
 
-After publication, a second fresh-browser job tests the actual HTTPS Pages URL in desktop and mobile Chromium. It requires the landing page, direct privacy URL, and tracker to render without horizontal document overflow or browser errors; requires the policy to identify the guest-only release and its no-bank/no-tracking/no-sale boundary; resolves the manifest identity/start/scope within `/Outflow/`; verifies the hosted worker uses that same index and manifest boundary; observes the installed worker at the exact deployment scope; confirms the active ledger is visibly personal/local with a guest account state; and proves one local edit survives a hosted-page reload. The job receives only the public deployment URL and no account, provider, or repository credential.
+After publication, a second fresh-browser job tests the actual HTTPS Pages URL in desktop and mobile Chromium. It requires the landing page, direct privacy URL, and tracker to render without horizontal document overflow or browser errors; requires the policy to identify the guest-only release and its no-bank/no-tracking/no-sale boundary; resolves the manifest identity/start/scope within `/Outflow/`; verifies the hosted worker uses that same index and manifest boundary; observes the installed worker at the exact deployment scope; confirms the active list is visibly personal and on this device with a guest account state; and proves one local edit survives a hosted-page reload. The job receives only the public deployment URL and no account, provider, or repository credential.

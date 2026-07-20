@@ -16,9 +16,9 @@ Local notifications are evaluated while Outflow is running. They are best-effort
 
 ## Content And Deduplication
 
-Notification content is limited to the subscription name, amount and currency, billing or trial date, and active ledger name, kind, storage status, and paused state. It does not include tags, account identity, other subscriptions, totals, or unrelated financial details.
+Notification content is limited to the subscription name, amount and currency, billing or trial date, and active list name, type, storage status, and paused state. It does not include tags, account identity, other subscriptions, totals, or unrelated financial details.
 
-Every due reminder receives a stable identifier containing its ledger, subscription, event type, date, and lead time. Outflow stores the latest 200 successful identifiers and does not redeliver them after a reload. An in-flight claim prevents asynchronous native delivery from duplicating during a React remount. The internal identifier is not included in native OS payloads; browser delivery uses it only as the Notification API dedupe tag. Malformed local deduplication data resets safely, and one failed notification does not prevent later due reminders from being attempted.
+Every due reminder receives a stable identifier containing its internal list ID, subscription, event type, date, and lead time. Outflow stores the latest 200 successful identifiers and does not redeliver them after a reload. An in-flight claim prevents asynchronous native delivery from duplicating during a React remount. The internal identifier is not included in native OS payloads; browser delivery uses it only as the Notification API dedupe tag. Malformed local deduplication data resets safely, and one failed notification does not prevent later due reminders from being attempted.
 
 ## Permission States
 
@@ -32,7 +32,7 @@ Every due reminder receives a stable identifier containing its ledger, subscript
 `npm run test:e2e` verifies the local device-alert behavior in desktop and mobile Chromium. The contract proves that:
 
 - Permission grants and denials produce the correct persisted setting and accessible status.
-- Charge and trial notifications contain only the documented fields and active-ledger context.
+- Charge and trial notifications contain only the documented fields and active-list context.
 - Malformed deduplication state recovers, successful reminders are recorded, and reloads do not duplicate delivery.
 - Paused schedules deliver only after explicit opt-in.
 - Global disablement stops browser delivery while in-app reminders continue.
