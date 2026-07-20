@@ -187,7 +187,10 @@ test("the Android native boundary is private, immediate-notification-only, and C
   );
   assert.match(quality, /android:\n\s+runs-on: ubuntu-latest/);
   assert.match(quality, /NDK_HOME: \/usr\/local\/lib\/android\/sdk\/ndk\/27\.2\.12479018/);
-  assert.match(quality, /"\$ANDROID_HOME\/cmdline-tools\/latest\/bin\/sdkmanager" "platforms;android-36" "build-tools;36\.0\.0" "ndk;27\.2\.12479018"/);
+  assert.match(quality, /"\$ANDROID_HOME\/cmdline-tools\/latest\/bin\/sdkmanager"/);
+  assert.match(quality, /"platforms;android-36"/);
+  assert.match(quality, /"build-tools;36\.0\.0"/);
+  assert.match(quality, /"ndk;27\.2\.12479018"/);
   assert.match(quality, /rustup target add aarch64-linux-android/);
   assert.match(quality, /npm run mobile:android:build/);
   assert.match(quality, /npm run check:mobile:android-bundle/);
