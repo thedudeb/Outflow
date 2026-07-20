@@ -178,10 +178,14 @@ test("browser-sync report records only fixed viewport evidence", () => {
   });
   const report = reportFor("desktop-chromium");
 
-  assert.match(report, /PASS\*\* \(10 browser-visible checks\)/);
+  assert.match(report, /PASS\*\* \(13 browser-visible checks\)/);
+  assert.match(report, /PASS \/ durable write persistence/);
+  assert.match(report, /PASS \/ exact operation reload replay/);
+  assert.match(report, /PASS \/ durable write cleanup/);
   assert.match(report, /PASS \/ browser conflict rejection/);
   assert.match(report, /PASS \/ Realtime disconnect visibility/);
   assert.match(report, /PASS \/ synchronized final state/);
+  assert.match(report, /background synchronization while the app is closed/);
   assert.match(report, /branded Safari behavior/);
   assert.match(report, /screenshots, traces, and videos/);
   assert.doesNotMatch(report, /sb_(?:publishable|secret)_|@example\.com|Bearer\s|refresh-|access-/i);
@@ -232,6 +236,14 @@ test("browser-sync workflow is manual, protected, main-only, and artifact-free",
 
   assert.match(spec, /browser\.newContext/);
   assert.match(spec, /localStorage\.setItem\(storageKey/);
+  assert.match(spec, /ownerPage\.route\("\*\*\/rest\/v1\/rpc\/replace_ledger_snapshot"/);
+  assert.match(spec, /route\.abort\("failed"\)/);
+  assert.match(spec, /outflow:cloud-write-outbox:v1/);
+  assert.match(spec, /Buffer\.byteLength\(serializedQueuedWrite, "utf8"\)/);
+  assert.match(spec, /subscriptions\)\.toEqual\(ownerWriteAttempts\[0\]\.subscriptions_payload\)/);
+  assert.match(spec, /ownerWriteAttempts\[1\]\)\.toEqual\(ownerWriteAttempts\[0\]\)/);
+  assert.match(spec, /ownerPage\.reload/);
+  assert.match(spec, /recoveredOutbox\?\.operations \?\? \[\]\)\.toEqual\(\[\]\)/);
   assert.match(spec, /class AcceptanceWebSocket extends NativeWebSocket/);
   assert.match(spec, /dropChanges\(true\)/);
   assert.match(spec, /\.disconnect\(\)/);

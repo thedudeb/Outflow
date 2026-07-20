@@ -19,7 +19,7 @@ The broader local-ledger, PWA, and accessibility suites remain intentionally sco
 
 ## Protected Hosted Matrix
 
-After **Staging Account Plane** passes, **Staging Browser Sync** repeats the visible synchronization sequence against the deployed application and provisioned project in all four profiles. Every profile creates isolated owner/editor browser contexts and must show hosted refresh, `stale`, `conflict`, `offline`, reconnect catch-up, and final `synced` states.
+After **Staging Account Plane** passes, **Staging Browser Sync** repeats the visible synchronization sequence against the deployed application and provisioned project in all four profiles. Every profile creates isolated owner/editor browser contexts, aborts one pre-service write, proves its credential-free recovery record survives reload and replays the exact immutable operation once before cleanup, and must then show hosted refresh, `stale`, `conflict`, `offline`, reconnect catch-up, and final `synced` states.
 
 The workflow installs pinned Playwright Chromium, Firefox, and WebKit builds from the locked Node dependency. It runs serially; retries, traces, screenshots, videos, and downloads are disabled so each fixed summary maps to one fresh synthetic fixture without retaining credentials or identity-bearing artifacts.
 

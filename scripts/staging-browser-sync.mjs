@@ -5,6 +5,9 @@ import { resolveAccountAcceptanceConfig } from "./check-staging-account-plane.mj
 export const browserSyncCheckNames = Object.freeze([
   "verified browser sessions",
   "isolated shared ledger open",
+  "durable write persistence",
+  "exact operation reload replay",
+  "durable write cleanup",
   "hosted Realtime refresh",
   "stale edit preservation",
   "stale refresh recovery",
@@ -225,9 +228,9 @@ export function buildBrowserSyncReport({
     "",
     checks,
     "",
-    "Scope: two isolated browser contexts used real deployed UI, authenticated hosted data, and hosted Realtime. The harness suppressed one incoming database event to exercise server conflict rejection, and closed only the tested browser's Realtime WebSocket to exercise visible disconnect and authoritative reconnect catch-up.",
+    "Scope: two isolated browser contexts used real deployed UI, authenticated hosted data, and hosted Realtime. The harness aborted one owner write before it reached the service, then proved bounded browser persistence, exact immutable replay after reload, server application, and local cleanup. It also suppressed one incoming database event to exercise server conflict rejection, and closed only the tested browser's Realtime WebSocket to exercise visible disconnect and authoritative reconnect catch-up.",
     "",
-    "Excluded: session credentials, identities, row identifiers, operation identifiers, database payloads, Realtime frames, screenshots, traces, and videos. This pass does not prove general network outage recovery, branded Safari behavior, assistive-technology compatibility, or production availability.",
+    "Excluded: session credentials, identities, row identifiers, operation identifiers, database payloads, Realtime frames, screenshots, traces, and videos. This pass does not prove background synchronization while the app is closed, prolonged offline multi-edit merging, branded Safari behavior, assistive-technology compatibility, or production availability.",
     "",
   ].join("\n");
 }
