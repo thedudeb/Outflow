@@ -128,10 +128,74 @@ const networkSecurity = `<?xml version="1.0" encoding="utf-8"?>
 const activity = `package com.thedudeb.outflow
 
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.material.snackbar.Snackbar
+import com.google.android.play.core.appupdate.AppUpdateManager
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.InstallStateUpdatedListener
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.InstallStatus
+import com.google.android.play.core.install.model.UpdateAvailability
 
 class MainActivity : TauriActivity() {
+  private lateinit var appUpdateManager: AppUpdateManager
+  private var updatePromptedThisSession = false
+  private var updateReadySnackbar: Snackbar? = null
+  private val updateLauncher = registerForActivityResult(
+    ActivityResultContracts.StartIntentSenderForResult()
+  ) { }
+  private val updateListener = InstallStateUpdatedListener { state ->
+    if (state.installStatus() == InstallStatus.DOWNLOADED) showUpdateReady()
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    appUpdateManager = AppUpdateManagerFactory.create(this)
+    appUpdateManager.registerListener(updateListener)
+  }
+
+  override fun onResume() {
+    super.onResume()
+    checkForPlayUpdate()
+  }
+
+  override fun onDestroy() {
+    updateReadySnackbar?.dismiss()
+    appUpdateManager.unregisterListener(updateListener)
+    super.onDestroy()
+  }
+
+  private fun checkForPlayUpdate() {
+    if (BuildConfig.DEBUG) return
+    appUpdateManager.appUpdateInfo.addOnSuccessListener { info ->
+      if (info.installStatus() == InstallStatus.DOWNLOADED) {
+        showUpdateReady()
+        return@addOnSuccessListener
+      }
+      if (
+        !updatePromptedThisSession &&
+        info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE &&
+        info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE)
+      ) {
+        updatePromptedThisSession = true
+        runCatching {
+          appUpdateManager.startUpdateFlowForResult(
+            info,
+            updateLauncher,
+            AppUpdateOptions.newBuilder(AppUpdateType.FLEXIBLE).build()
+          )
+        }
+      }
+    }
+  }
+
+  private fun showUpdateReady() {
+    if (updateReadySnackbar?.isShown == true || isFinishing || isDestroyed) return
+    updateReadySnackbar = Snackbar
+      .make(findViewById(android.R.id.content), "Outflow update ready", Snackbar.LENGTH_INDEFINITE)
+      .setAction("Restart") { appUpdateManager.completeUpdate() }
+    updateReadySnackbar?.show()
   }
 }
 `;
@@ -193,14 +257,18 @@ const pluginsBlock = `plugins {
     id("rust")
 }
 `;
+const playUpdateDependency = `    implementation("com.google.android.play:app-update:2.1.0")
+`;
 const cleanGeneratedGradle = generatedGradle
   .replaceAll(releaseSigningValues, "")
   .replaceAll(releaseSigningConfig, "")
-  .replaceAll(releaseSigningAssignment, "");
+  .replaceAll(releaseSigningAssignment, "")
+  .replaceAll(playUpdateDependency, "");
 const normalizedGradle = cleanGeneratedGradle
   .replace(pluginsBlock, `${pluginsBlock}\n${releaseSigningValues}`)
   .replace("android {\n", `android {\n${releaseSigningConfig}`)
   .replace('        getByName("release") {\n', releaseBuildSigning)
+  .replace("dependencies {\n", `dependencies {\n${playUpdateDependency}`)
   .replace(
     "packaging {                jniLibs.keepDebugSymbols",
     "packaging {\n                jniLibs.keepDebugSymbols",
@@ -251,4 +319,5 @@ assert.match(manifest, /android:allowBackup="false"/);
 assert.match(normalizedGradle, /packaging \{\n\s+jniLibs\.keepDebugSymbols/);
 assert.match(normalizedGradle, /OUTFLOW_ANDROID_KEYSTORE_PATH/);
 assert.match(normalizedGradle, /signingConfig = signingConfigs\.getByName\("outflowRelease"\)/);
+assert.match(normalizedGradle, /com\.google\.android\.play:app-update:2\.1\.0/);
 console.log("Generated the hardened Outflow Android project");

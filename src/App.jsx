@@ -77,6 +77,7 @@ import {
   checkForMacosUpdate,
   installMacosUpdate,
   isMacosNativeRuntime,
+  startPwaUpdateChecks,
 } from "./appUpdates";
 
 const STORAGE_KEY = "outflow:subscriptions";
@@ -1264,6 +1265,9 @@ function useInstallableApp() {
   const reloadForUpdate = useRef(false);
 
   useEffect(() => {
+    let disposed = false;
+    let stopPwaUpdateChecks = () => {};
+    let hadServiceWorkerController = Boolean(navigator.serviceWorker?.controller);
     const handleOnline = () => setOnline(true);
     const handleOffline = () => setOnline(false);
     const handleInstallPrompt = (event) => {
@@ -1275,8 +1279,10 @@ function useInstallableApp() {
       setStandalone(true);
     };
     const handleControllerChange = () => {
+      const shouldReload = reloadForUpdate.current || hadServiceWorkerController;
+      hadServiceWorkerController = true;
       setOfflineReady(Boolean(navigator.serviceWorker.controller));
-      if (reloadForUpdate.current) window.location.reload();
+      if (shouldReload) window.location.reload();
     };
 
     window.addEventListener("online", handleOnline);
@@ -1287,6 +1293,8 @@ function useInstallableApp() {
     if (!nativeApp && import.meta.env.PROD && "serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).then((registration) => {
+        if (disposed) return;
+        stopPwaUpdateChecks = startPwaUpdateChecks(registration);
         if (registration.waiting) setWaitingWorker(registration.waiting);
         navigator.serviceWorker.ready.then(() => setOfflineReady(Boolean(navigator.serviceWorker.controller)));
         registration.addEventListener("updatefound", () => {
@@ -1299,11 +1307,13 @@ function useInstallableApp() {
     }
 
     return () => {
+      disposed = true;
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
       navigator.serviceWorker?.removeEventListener("controllerchange", handleControllerChange);
+      stopPwaUpdateChecks();
     };
   }, [nativeApp]);
 
@@ -1470,6 +1480,9 @@ function PrivacyPage({ onHome, onOpen }) {
           </p>
           <p>
             The macOS client checks GitHub Releases for signed updates after launch. That request includes the current app version, operating system, and processor architecture, and GitHub may process standard request information such as your IP address. An update is downloaded and installed only after you choose the update control.
+          </p>
+          <p>
+            Installed web apps check this website for a newer cached release when they launch, reconnect, regain focus, and periodically while open. Android release builds ask Google Play whether an approved update is available and use Google Play to download it only after you accept its update prompt. Outflow receives update availability and installation status, but does not retain an update history. iPhone and iPad updates remain managed by the App Store or TestFlight; the app does not download executable replacement code.
           </p>
         </PrivacySection>
 

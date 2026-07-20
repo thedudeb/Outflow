@@ -18,7 +18,9 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 - Changes to same-path files such as `manifest.webmanifest`, `index.html`, or an icon therefore create a new cache version instead of retaining stale install metadata.
 - The service worker registers inside the configured public base and precaches the application shell, all generated JavaScript/CSS chunks, manifest, icons, and social image within that same scope before installation completes.
 - Activation deletes older Outflow cache versions and claims open clients.
+- The installed app requests a worker update when it launches, returns online, regains browser focus, becomes visible after suspension, and once per hour while it remains open. Failed and offline checks are silent and do not disturb the cached release.
 - A newly installed worker waits when an existing worker controls the app. Outflow exposes an update command, sends `SKIP_WAITING` only after the user chooses it, and reloads after the new worker takes control.
+- A chosen update reloads the current tab after activation; other open Outflow tabs reload when they observe that the controlling worker changed, preventing mixed release versions across one browser session.
 
 ## Offline Boundary
 
@@ -33,6 +35,7 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 `npm run test:pwa` rebuilds Outflow at the origin root and launches the production preview before testing desktop and mobile Chromium. `npm run test:pwa:pages` repeats the same browser contract at `/Outflow/`, and `npm run test:pwa-cache` separately verifies deterministic content fingerprinting plus public-base validation. Together, the contracts prove that:
 
 - Stable-path HTML, manifest, and icon content changes invalidate the cache version.
+- The update-check controller is covered for launch, reconnect, focus, visibility, hourly polling, offline suppression, failure containment, and listener/timer cleanup.
 - The production manifest exposes the required identity, scope, display mode, colors, and icon declarations.
 - The generated worker activates at root scope and installs exactly one content-versioned Outflow cache.
 - Every URL declared by the generated precache exists in the installed browser cache.

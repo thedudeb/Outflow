@@ -27,6 +27,12 @@ The versioned [native store disclosure draft](native-store-disclosures.md) recor
 
 The draft answer is **No** for collection or sharing of required user data types and **Other** for the Financial features declaration, scoped to local subscription and recurring-charge tracking. It claims neither an independent security review nor a Families badge. These are operator inputs for an exact local guest candidate, not a Play Console submission or policy acceptance.
 
+## Google Play Updates
+
+Release builds include Google Play Core `app-update` 2.1.0 and request a flexible update at most once per process session. Google Play owns update availability, user consent, package download, signature verification, and installation. After Play reports that a download is complete, Outflow shows a persistent **Restart** action and calls Play to complete the update. Debug builds do not request updates, and a package not installed through Google Play cannot use this delivery path.
+
+Before production rollout, upload successively higher version codes to Play internal app sharing or an internal test track and verify acceptance, cancellation, background download, restart, local-data retention, and recovery after process termination on real phones and tablets. The flow must remain optional for ordinary releases; reserve a future immediate flow for a separately reviewed critical compatibility or security requirement.
+
 ## Signing Boundary
 
 The generated Gradle project reads a release signing identity only from a complete environment tuple:
@@ -83,7 +89,7 @@ npm run check:mobile:android-release
 ```
 
 5. Retain the matching R8 mapping file with the release and upload the AAB through a protected Play Console path. Never publish the APK/AAB or mapping file as a public CI artifact.
-6. Review the [native store disclosure draft](native-store-disclosures.md) against the exact candidate, set its privacy-policy URL in Play Console, submit the candidate-specific Data safety and Financial features answers, then confirm Play App Signing enrollment, package identity, version code, target API, remaining app-content declarations, pre-launch results, upgrade behavior, and staged rollout controls before promotion.
+6. Review the [native store disclosure draft](native-store-disclosures.md) against the exact candidate, set its privacy-policy URL in Play Console, submit the candidate-specific Data safety and Financial features answers, then confirm Play App Signing enrollment, package identity, version code, target API, remaining app-content declarations, pre-launch results, flexible in-app update behavior, and staged rollout controls before promotion.
 
 ## Remaining Acceptance
 

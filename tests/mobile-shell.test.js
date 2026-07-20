@@ -124,6 +124,14 @@ test("the generated Android target preserves Outflow identity and mobile coverag
   assert.doesNotMatch(manifest, /LEANBACK|android\.software\.leanback/);
   assert.match(activity, /class MainActivity : TauriActivity\(\)/);
   assert.match(activity, /super\.onCreate\(savedInstanceState\)/);
+  assert.match(activity, /AppUpdateManagerFactory\.create\(this\)/);
+  assert.match(activity, /AppUpdateType\.FLEXIBLE/);
+  assert.match(activity, /UpdateAvailability\.UPDATE_AVAILABLE/);
+  assert.match(activity, /BuildConfig\.DEBUG/);
+  assert.match(activity, /Outflow update ready/);
+  assert.match(activity, /setAction\("Restart"\)/);
+  assert.doesNotMatch(activity, /AppUpdateType\.IMMEDIATE/);
+  assert.equal((gradle.match(/com\.google\.android\.play:app-update:2\.1\.0/g) || []).length, 1);
   assert.doesNotMatch(activity, /enableEdgeToEdge/);
   assert.match(strings, /<string name="app_name">"Outflow"<\/string>/);
   assert.match(colors, /<color name="outflow_background">#FF08090A<\/color>/);
@@ -147,7 +155,7 @@ test("the Android launcher catalog is complete and generated from Outflow artwor
   });
 });
 
-test("the Android native boundary is private, immediate-notification-only, and CI built", () => {
+test("the Android native boundary is private, store-updated, and CI built", () => {
   const packageJson = JSON.parse(read("package.json"));
   const capability = JSON.parse(read("src-tauri/capabilities/main-notifications.json"));
   const manifest = read("src-tauri/gen/android/app/src/main/AndroidManifest.xml");
@@ -160,6 +168,7 @@ test("the Android native boundary is private, immediate-notification-only, and C
   const releaseInspector = read("scripts/check-android-release.mjs");
   const signingHarness = read("scripts/check-android-signing-path.mjs");
   const gradle = read("src-tauri/gen/android/app/build.gradle.kts");
+  const activity = read("src-tauri/gen/android/app/src/main/java/com/thedudeb/outflow/MainActivity.kt");
   const wrapperProperties = read("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties");
   const wrapperJar = readFileSync(new URL("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar", root));
   const quality = read(".github/workflows/quality.yml");
@@ -197,6 +206,13 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.match(initializer, /execFileSync\(tauri, \["android", "init", "--ci"/);
   assert.match(initializer, /generated Android compile SDK changed/);
   assert.match(initializer, /Generated the hardened Outflow Android project/);
+  assert.match(initializer, /com\.google\.android\.play:app-update:2\.1\.0/);
+  assert.match(initializer, /AppUpdateManagerFactory/);
+  assert.match(activity, /registerListener\(updateListener\)/);
+  assert.match(activity, /unregisterListener\(updateListener\)/);
+  assert.match(activity, /updatePromptedThisSession/);
+  assert.match(activity, /startUpdateFlowForResult/);
+  assert.match(activity, /completeUpdate\(\)/);
   assert.match(inspector, /Signer #1 certificate DN: .*CN=Android Debug/);
   assert.match(inspector, /"-P", "16"/);
   assert.match(releaseInspector, /release-readiness APK must remain unsigned/);

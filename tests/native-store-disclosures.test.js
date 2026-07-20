@@ -29,6 +29,8 @@ test("store disclosure validation fails closed on broader capabilities or unsupp
     (value) => { value.googlePlay.dataSafety.independentSecurityReview = true; },
     (value) => { value.googlePlay.financialFeatures.selections = []; },
     (value) => { value.sourceEvidence.dependencyLockSha256 = "unreviewed"; },
+    (value) => { value.sourceEvidence.androidGradleSha256 = "unreviewed"; },
+    (value) => { value.releaseCapabilities.storeManagedUpdates = false; },
     (value) => { value.reviewTriggers.pop(); },
     (value) => { value.unreviewed = true; },
   ];
@@ -96,6 +98,10 @@ test("release documentation preserves the draft and exact-candidate boundary", (
   assert.match(guide, /Data safety.*No/);
   assert.match(guide, /Financial features.*Other/);
   assert.match(guide, /exact signed candidate/);
+  assert.match(guide, /Google Play Core/);
+  assert.match(android, /flexible in-app update/);
+  assert.match(ios, /App Store Updates/);
+  assert.match(ios, /does not download or execute a replacement application bundle/);
   assert.match(ios, /native-store-disclosures\.md/);
   assert.match(android, /native-store-disclosures\.md/);
   assert.match(native, /check:mobile:store-disclosures/);

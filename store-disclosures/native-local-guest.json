@@ -16,6 +16,7 @@
   },
   "sourceEvidence": {
     "dependencyLockSha256": "57169b24ed3536bc8dfdc52fb718cf1155d8b7f47e4e50961016cf1d44d1bb5c",
+    "androidGradleSha256": "57644f477841e93308e84cddf14f19a0570895cf8de66f93ed6f07997243051a",
     "iosPrivacyManifestSha256": "37f23fa7aabe84ee3c9a1f162c2c036612e5142aa6e3ce1dfc711161572d3131",
     "androidManifestSha256": "5fd46fa993942621d525c2d726585f21b99a71e257392176fbad4fde7ef7f8cf",
     "androidNetworkSecuritySha256": "dea35ebed76536c24c13f74036f02dc874f944147cb3a49c2ad0550f71e3e0c7"
@@ -29,7 +30,8 @@
     "analytics": false,
     "advertising": false,
     "tracking": false,
-    "bankConnections": false
+    "bankConnections": false,
+    "storeManagedUpdates": true
   },
   "apple": {
     "appPrivacy": {
@@ -66,7 +68,9 @@
   ],
   "sources": {
     "appleAppPrivacy": "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy",
+    "appleReviewGuidelines": "https://developer.apple.com/app-store/review/guidelines/",
     "googlePlayDataSafety": "https://support.google.com/googleplay/android-developer/answer/10787469",
-    "googlePlayFinancialFeatures": "https://support.google.com/googleplay/android-developer/answer/13849271"
+    "googlePlayFinancialFeatures": "https://support.google.com/googleplay/android-developer/answer/13849271",
+    "googlePlayInAppUpdates": "https://developer.android.com/guide/playcore/in-app-updates"
   }
 }

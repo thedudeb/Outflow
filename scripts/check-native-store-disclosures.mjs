@@ -22,6 +22,7 @@ const expectedCapabilities = {
   advertising: false,
   tracking: false,
   bankConnections: false,
+  storeManagedUpdates: true,
 };
 
 const expectedReviewTriggers = [
@@ -36,8 +37,10 @@ const expectedReviewTriggers = [
 
 const expectedSources = {
   appleAppPrivacy: "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy",
+  appleReviewGuidelines: "https://developer.apple.com/app-store/review/guidelines/",
   googlePlayDataSafety: "https://support.google.com/googleplay/android-developer/answer/10787469",
   googlePlayFinancialFeatures: "https://support.google.com/googleplay/android-developer/answer/13849271",
+  googlePlayInAppUpdates: "https://developer.android.com/guide/playcore/in-app-updates",
 };
 
 const expectedFinancialDescription = "Local subscription and recurring-charge tracking only; no bank connection, payment execution, lending, financial advice, investing, insurance, credit reporting, or money transfer.";
@@ -82,9 +85,9 @@ export function validateNativeStoreDisclosures(value, expectedApp = {}) {
   }
 
   if (!exactKeys(value.sourceEvidence, [
-    "dependencyLockSha256", "iosPrivacyManifestSha256", "androidManifestSha256", "androidNetworkSecuritySha256",
+    "dependencyLockSha256", "androidGradleSha256", "iosPrivacyManifestSha256", "androidManifestSha256", "androidNetworkSecuritySha256",
   ]) || Object.values(value.sourceEvidence || {}).some((hash) => !/^[a-f0-9]{64}$/.test(hash))) {
-    errors.push("native store disclosures: source evidence must contain the four exact SHA-256 pins.");
+    errors.push("native store disclosures: source evidence must contain the five exact SHA-256 pins.");
   }
 
   if (!same(value.releaseCapabilities, expectedCapabilities)) errors.push("native store disclosures: guest release capabilities changed.");
@@ -162,6 +165,7 @@ export function inspectNativeStoreDisclosureSources(cwd = process.cwd(), env = p
   const sha256 = (sourcePath) => createHash("sha256").update(readFileSync(resolve(cwd, sourcePath))).digest("hex");
   const sourceHashes = {
     dependencyLockSha256: sha256("package-lock.json"),
+    androidGradleSha256: sha256("src-tauri/gen/android/app/build.gradle.kts"),
     iosPrivacyManifestSha256: sha256("src-tauri/PrivacyInfo.xcprivacy"),
     androidManifestSha256: sha256("src-tauri/gen/android/app/src/main/AndroidManifest.xml"),
     androidNetworkSecuritySha256: sha256("src-tauri/gen/android/app/src/main/res/xml/network_security_config.xml"),

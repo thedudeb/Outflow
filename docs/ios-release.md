@@ -4,6 +4,10 @@ Outflow can build an App Store Connect IPA through the pinned Tauri CLI and insp
 
 Passing these checks proves the protected signing pathway and one exact IPA. It does not upload to App Store Connect, establish TestFlight or App Store acceptance, or replace real-device and accessibility acceptance.
 
+## App Store Updates
+
+iPhone and iPad executable updates are delivered only through TestFlight or the App Store, including users who enable automatic app updates in iOS. The bundled web interface is versioned with the reviewed native binary; Outflow does not download or execute a replacement application bundle, JavaScript bundle, or native module after review. This preserves Apple's self-contained-app boundary. A future in-app store-page shortcut requires Outflow's numeric App Store ID and must only open the approved App Store listing.
+
 ## Signing Boundary
 
 The production path uses the manual signing inputs supported by Tauri:
@@ -92,6 +96,6 @@ Because this is a public repository, the workflow uploads no IPA, archive, certi
 3. Add the two variables and three secrets to the protected `ios-production` GitHub environment.
 4. Dispatch `iOS Production Signing Acceptance` from the exact `main` commit and review the bounded hash evidence.
 5. Retrieve or rebuild the same candidate only through a protected operator environment, repeat `npm run check:mobile:ios-release`, and upload it to App Store Connect without publishing it as a general CI artifact.
-6. Review the [native store disclosure draft](native-store-disclosures.md) against the exact candidate, set its policy and privacy-choices URLs in App Store Connect, publish the candidate-specific app-level answer, then complete signed upgrade, real-device, notification, VoiceOver, text-scaling, configured-service, TestFlight, and staged-release checks before promotion.
+6. Review the [native store disclosure draft](native-store-disclosures.md) against the exact candidate, set its policy and privacy-choices URLs in App Store Connect, publish the candidate-specific app-level answer, then complete signed App Store/TestFlight update, local-data retention, real-device, notification, VoiceOver, text-scaling, configured-service, and staged-release checks before promotion.
 
 See Tauri's official [iOS code-signing guide](https://v2.tauri.app/distribute/sign/ios/) and [CLI reference](https://v2.tauri.app/reference/cli/) for the supported signing variables and export options. Apple's [privacy manifest documentation](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files), [required-reason API guidance](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api), and [App Store privacy details](https://developer.apple.com/app-store/app-privacy-details/) define the disclosure boundary.
