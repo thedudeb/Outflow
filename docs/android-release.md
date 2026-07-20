@@ -46,6 +46,8 @@ Providing any subset fails Gradle configuration before packaging. Values are not
 
 `.github/workflows/android-release.yml` is a manual, `main`-only production upload-key acceptance path. Its `android-production` environment must have deployment-branch protection and required reviewers before credentials are added.
 
+Run `npm run check:github-environments` before dispatch. The shared readiness contract verifies that this environment exists, allows exactly `main`, requires review, and contains every variable and secret name used below without requesting any secret value.
+
 Configure these environment variables:
 
 ```text

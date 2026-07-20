@@ -62,6 +62,8 @@ The versioned [native store disclosure draft](native-store-disclosures.md) recor
 
 `.github/workflows/ios-release.yml` is a manual, `main`-only acceptance path. Configure deployment-branch protection and required reviewers on the `ios-production` environment before adding credentials.
 
+Run `npm run check:github-environments` before dispatch. The shared readiness contract verifies that this environment exists, allows exactly `main`, requires review, and contains every variable and secret name used below without requesting any secret value.
+
 Configure these environment variables:
 
 ```text

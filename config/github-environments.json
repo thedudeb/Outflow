@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "repository": "thedudeb/Outflow",
+  "environments": {
+    "staging": {
+      "allowedBranches": ["main"],
+      "minimumReviewers": 1,
+      "variables": [
+        "OUTFLOW_ALLOWED_ORIGINS",
+        "OUTFLOW_APP_URL",
+        "OUTFLOW_INVITE_FROM",
+        "OUTFLOW_OPERATIONS_ASSIGNEE",
+        "OUTFLOW_OPERATIONS_ENABLED",
+        "OUTFLOW_REMINDER_FROM",
+        "OUTFLOW_STRIPE_PRO_PRICE_ID",
+        "OUTFLOW_SUPABASE_PROJECT_REF",
+        "OUTFLOW_SUPABASE_URL"
+      ],
+      "secrets": [
+        "OUTFLOW_CRON_SECRET",
+        "OUTFLOW_OPERATIONS_SECRET",
+        "OUTFLOW_RESEND_API_KEY",
+        "OUTFLOW_RESEND_WEBHOOK_SECRET",
+        "OUTFLOW_STRIPE_SECRET_KEY",
+        "OUTFLOW_STRIPE_WEBHOOK_SECRET",
+        "OUTFLOW_SUPABASE_ACCESS_TOKEN",
+        "OUTFLOW_SUPABASE_DB_PASSWORD",
+        "OUTFLOW_SUPABASE_PUBLISHABLE_KEY",
+        "OUTFLOW_SUPABASE_SECRET_KEY"
+      ]
+    },
+    "macos-production": {
+      "allowedBranches": ["main"],
+      "minimumReviewers": 1,
+      "variables": [
+        "OUTFLOW_APPLE_API_ISSUER",
+        "OUTFLOW_APPLE_API_KEY",
+        "OUTFLOW_MACOS_SIGNING_IDENTITY",
+        "OUTFLOW_MACOS_TEAM_ID"
+      ],
+      "secrets": [
+        "OUTFLOW_APPLE_API_PRIVATE_KEY",
+        "OUTFLOW_APPLE_CERTIFICATE",
+        "OUTFLOW_APPLE_CERTIFICATE_PASSWORD"
+      ]
+    },
+    "ios-production": {
+      "allowedBranches": ["main"],
+      "minimumReviewers": 1,
+      "variables": [
+        "OUTFLOW_IOS_DISTRIBUTION_CERT_SHA256",
+        "OUTFLOW_IOS_TEAM_ID"
+      ],
+      "secrets": [
+        "OUTFLOW_IOS_CERTIFICATE_BASE64",
+        "OUTFLOW_IOS_CERTIFICATE_PASSWORD",
+        "OUTFLOW_IOS_MOBILE_PROVISION_BASE64"
+      ]
+    },
+    "android-production": {
+      "allowedBranches": ["main"],
+      "minimumReviewers": 1,
+      "variables": [
+        "OUTFLOW_ANDROID_KEY_ALIAS",
+        "OUTFLOW_ANDROID_UPLOAD_CERT_SHA256"
+      ],
+      "secrets": [
+        "OUTFLOW_ANDROID_KEYSTORE_BASE64",
+        "OUTFLOW_ANDROID_KEYSTORE_PASSWORD",
+        "OUTFLOW_ANDROID_KEY_PASSWORD"
+      ]
+    }
+  }
+}

@@ -4,6 +4,8 @@
 
 Use this runbook for a non-production environment before accounts, hosted calendars, email, or purchases are enabled publicly. Guest mode does not depend on these services.
 
+Before entering provider settings, configure the protected `staging` environment and run `npm run check:github-environments`. The read-only [GitHub Environment Readiness Contract](github-environment-readiness.md) verifies the exact setting-name inventory, `main` deployment restriction, and required-reviewer boundary without requesting secret values.
+
 ## 1. Local Release Checks
 
 Install Node dependencies, install Deno 2.8.1, and run:

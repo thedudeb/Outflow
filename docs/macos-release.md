@@ -53,6 +53,8 @@ Run `npm run check:desktop:release-environment` before building. The preflight r
 
 `.github/workflows/macos-release.yml` is a manual, `main`-only production path. Its `macos-production` environment must have deployment-branch protection and required reviewers before credentials are added.
 
+Run `npm run check:github-environments` before dispatch. The shared readiness contract verifies that this environment exists, allows exactly `main`, requires review, and contains every variable and secret name used below without requesting any secret value.
+
 Configure these environment variables:
 
 ```text
