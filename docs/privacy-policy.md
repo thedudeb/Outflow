@@ -30,6 +30,7 @@ This page describes implemented product behavior, not a blanket claim about an u
 - `npm run test:a11y` scans the full privacy view at desktop and mobile sizes and includes it in the 320 CSS-pixel reflow contract.
 - `npm run test:pwa` and `npm run test:pwa:pages` open the policy from the cached application shell while the browser is fully offline.
 - `npm run test:web-deployment` opens the exact hosted privacy URL after deployment, requires the guest-only status and core promises, checks its repository contact and page title, and rejects horizontal overflow or browser errors.
+- `npm run test:web-security` enforces the build-generated provider-free guest CSP, exact-origin configured-service boundary, and `no-referrer` policy; production-preview and post-deployment browser gates prove the policy remains active without breaking local or offline use.
 - `npm run test:mobile:store-disclosures` and `npm run check:mobile:store-disclosures` bind the [draft native store answers](native-store-disclosures.md) to this policy version, the local guest capability set, package identity, iOS privacy manifest, Android permissions and network policy, and absent hosted configuration.
 
 ## Store Procedure

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { webContentSecurityPolicy } from "../../vite.config.js";
 
 const deploymentUrl = new URL(process.env.OUTFLOW_DEPLOYMENT_URL || "https://thedudeb.github.io/Outflow/");
 const trackerUrl = new URL("#app", deploymentUrl);
@@ -27,6 +28,8 @@ test("the published landing page and install assets use one repository-path scop
   await page.goto(deploymentUrl.href, { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Outflow", exact: true })).toBeVisible();
+  await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", webContentSecurityPolicy());
+  await expect(page.locator('meta[name="referrer"]')).toHaveAttribute("content", "no-referrer");
   const landingLayout = await layoutState(page);
   expect(landingLayout.documentWidth).toBeLessThanOrEqual(landingLayout.viewportWidth);
 

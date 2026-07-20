@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
 export function cacheVersion(entries) {
@@ -23,6 +23,72 @@ export function normalizePublicBase(value = "/") {
     throw new Error("OUTFLOW_PUBLIC_BASE must be an absolute path without a query or fragment.");
   }
   return `${candidate.replace(/\/{2,}/g, "/").replace(/\/$/, "")}/`;
+}
+
+function configuredSupabaseSources(value) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return [];
+  try {
+    const url = new URL(candidate);
+    if (
+      url.protocol !== "https:"
+      || url.username
+      || url.password
+      || url.pathname !== "/"
+      || url.search
+      || url.hash
+      || !/^[a-z0-9-]+\.supabase\.co$/i.test(url.hostname)
+    ) throw new Error("invalid");
+    return [url.origin, `wss://${url.host}`];
+  } catch {
+    throw new Error("VITE_SUPABASE_URL must be an exact hosted Supabase HTTPS origin before building web security policy.");
+  }
+}
+
+export function webContentSecurityPolicy(environment = {}) {
+  const nativeBuild = Boolean(environment.TAURI_ENV_PLATFORM);
+  const connectSources = ["'self'", ...configuredSupabaseSources(environment.VITE_SUPABASE_URL)];
+  const imageSources = ["'self'", "blob:", "data:"];
+  if (nativeBuild) {
+    connectSources.push("ipc:", "http://ipc.localhost");
+    imageSources.push("asset:", "http://asset.localhost");
+  }
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    `connect-src ${connectSources.join(" ")}`,
+    "font-src 'self'",
+    "form-action 'self'",
+    `img-src ${imageSources.join(" ")}`,
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self'",
+  ].join("; ");
+}
+
+export function outflowWebSecurity(environment = {}) {
+  return {
+    name: "outflow-web-security",
+    apply: "build",
+    enforce: "pre",
+    transformIndexHtml() {
+      const policy = webContentSecurityPolicy(environment);
+      return [
+        {
+          tag: "meta",
+          attrs: { "http-equiv": "Content-Security-Policy", content: policy },
+          injectTo: "head-pre",
+        },
+        {
+          tag: "meta",
+          attrs: { name: "referrer", content: "no-referrer" },
+          injectTo: "head-pre",
+        },
+      ];
+    },
+  };
 }
 
 function outflowServiceWorker() {
@@ -125,26 +191,31 @@ self.addEventListener("fetch", (event) => {
   };
 }
 
-const publicBase = normalizePublicBase(process.env.OUTFLOW_PUBLIC_BASE);
-const tauriDevHost = process.env.TAURI_DEV_HOST;
-
-export default defineConfig({
-  base: publicBase,
-  plugins: [react(), outflowServiceWorker()],
-  envPrefix: ["VITE_", "TAURI_ENV_*"],
-  server: {
-    port: 5173,
-    strictPort: true,
-    host: tauriDevHost || false,
-    hmr: tauriDevHost
-      ? {
-          protocol: "ws",
-          host: tauriDevHost,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      ignored: ["**/src-tauri/**"],
+export default defineConfig(({ mode }) => {
+  const environment = { ...loadEnv(mode, process.cwd(), ""), ...process.env };
+  const publicBase = normalizePublicBase(environment.OUTFLOW_PUBLIC_BASE);
+  const tauriDevHost = environment.TAURI_DEV_HOST;
+  return {
+    base: publicBase,
+    plugins: [outflowWebSecurity({
+      VITE_SUPABASE_URL: environment.VITE_SUPABASE_URL,
+      TAURI_ENV_PLATFORM: environment.TAURI_ENV_PLATFORM,
+    }), react(), outflowServiceWorker()],
+    envPrefix: ["VITE_", "TAURI_ENV_*"],
+    server: {
+      port: 5173,
+      strictPort: true,
+      host: tauriDevHost || false,
+      hmr: tauriDevHost
+        ? {
+            protocol: "ws",
+            host: tauriDevHost,
+            port: 1421,
+          }
+        : undefined,
+      watch: {
+        ignored: ["**/src-tauri/**"],
+      },
     },
-  },
+  };
 });

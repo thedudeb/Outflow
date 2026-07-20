@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { webContentSecurityPolicy } from "../../vite.config.js";
 
 const publicBase = process.env.OUTFLOW_PWA_BASE || "/";
 const publicPath = (path = "") => `${publicBase}${path}`;
@@ -33,9 +34,19 @@ async function addSubscription(page, name, amount) {
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
 }
 
+async function expectDownload(page, action, filename) {
+  const downloadPromise = page.waitForEvent("download");
+  await action();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(filename);
+  expect(await download.path()).not.toBeNull();
+}
+
 test("production metadata and the generated cache satisfy the installable-web contract", async ({ page }) => {
   await page.goto(`${publicBase}#app`);
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", webContentSecurityPolicy());
+  await expect(page.locator('meta[name="referrer"]')).toHaveAttribute("content", "no-referrer");
   const worker = await waitForOfflineControl(page);
   expect(worker).toEqual({ active: "activated", scope: new URL(publicBase, page.url()).href });
   await expect(page.getByText("Offline ready", { exact: true })).toBeVisible();
@@ -111,4 +122,32 @@ test("a local ledger can relaunch, mutate, and navigate while fully offline", as
 
   await context.setOffline(false);
   await expect(page.getByText("Online", { exact: true })).toBeVisible();
+});
+
+test("production security policy preserves CSV, calendar, and backup downloads", async ({ page }) => {
+  await page.goto(`${publicBase}#app`);
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+
+  await expectDownload(
+    page,
+    () => page.getByRole("button", { name: "Export CSV", exact: true }).click(),
+    /^outflow-subscriptions-\d{4}-\d{2}-\d{2}\.csv$/,
+  );
+
+  await page.getByRole("button", { name: "Export calendar", exact: true }).click();
+  const calendarDialog = page.getByRole("dialog", { name: "Calendar export" });
+  await expectDownload(
+    page,
+    () => calendarDialog.getByRole("button", { name: "Download .ics", exact: true }).click(),
+    /^outflow-personal-calendar\.ics$/,
+  );
+  await expect(calendarDialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Open Personal ledger controls", exact: true }).click();
+  const ledgerDialog = page.getByRole("dialog", { name: "Ledger controls" });
+  await expectDownload(
+    page,
+    () => ledgerDialog.getByRole("button", { name: "Export full ledger", exact: true }).click(),
+    /^outflow-personal-backup-\d{4}-\d{2}-\d{2}\.json$/,
+  );
 });

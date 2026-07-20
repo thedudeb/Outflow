@@ -10,6 +10,7 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 - Theme and background colors match the dark application shell.
 - PNG icons are available at 192 and 512 pixels, including a maskable 512-pixel declaration, with a separate Apple touch icon in the document metadata.
 - The browser install prompt is retained only after `beforeinstallprompt`, shown as an explicit command, and cleared after acceptance or `appinstalled`.
+- Production HTML carries the build-generated [public web security policy](web-security.md) and `no-referrer` metadata before application resources; both remain in the cached offline shell.
 
 ## Cache And Update Lifecycle
 
@@ -38,6 +39,7 @@ The public guest build is released to `https://thedudeb.github.io/Outflow/`. It 
 - A local subscription survives an offline reload, a second subscription can be added offline, and both survive another reload.
 - The cached shell can open the complete privacy and data-control view, navigate from tracker to landing, and return while fully offline.
 - Returning the browser online updates the visible connection state.
+- The root and repository-path documents enforce the exact provider-free guest CSP and `no-referrer` policy without blocking install, offline relaunch, navigation, local edits, or CSV, iCalendar, and full-ledger downloads.
 
 GitHub Actions runs the root PWA and cache contracts on every pull request and push to `main` before the broader development-server browser suite. After that exact `main` Quality run succeeds, **Deploy web** checks out its immutable commit, repeats the repository-path cache and browser contract, uploads only `dist`, and publishes that tested artifact through the protected `github-pages` environment. Pull-request and failed Quality runs cannot deploy.
 
