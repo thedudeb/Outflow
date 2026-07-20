@@ -95,6 +95,12 @@ test("landing page meets the automated WCAG A and AA gate", async ({ page }) => 
   await expectNoWcagViolations(page);
 });
 
+test("privacy and data controls meet the automated WCAG A and AA gate", async ({ page }) => {
+  await page.goto("/?view=privacy");
+  await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
+  await expectNoWcagViolations(page);
+});
+
 test("tracker dashboard meets the automated WCAG A and AA gate", async ({ page }) => {
   await openTracker(page);
   await expectNoWcagViolations(page);
@@ -120,7 +126,11 @@ test("landing page and tracker reflow without document overflow at 320 CSS pixel
   await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
   await expectDocumentToReflow(page);
 
-  await page.getByRole("button", { name: "Open tracker", exact: true }).click();
+  await page.goto("/?view=privacy");
+  await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
+  await expectDocumentToReflow(page);
+
+  await page.getByRole("button", { name: "Open tracker", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await expectDocumentToReflow(page);
 

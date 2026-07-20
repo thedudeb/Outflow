@@ -83,6 +83,9 @@ const WORKSPACE_KEY = "outflow:workspace";
 const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
+const PRIVACY_VIEW = "privacy";
+const PRIVACY_POLICY_VERSION = "2026-07-20";
+const privacyPolicyHref = `${import.meta.env.BASE_URL}?view=${PRIVACY_VIEW}`;
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -163,6 +166,11 @@ const availableNotificationTimezones = notificationTimezones();
 
 function isTrackerHash(hash = window.location.hash) {
   return hash === "#app" || hash.startsWith("#app?");
+}
+
+function currentView(location = window.location) {
+  if (isTrackerHash(location.hash)) return "tracker";
+  return new URLSearchParams(location.search).get("view") === PRIVACY_VIEW ? PRIVACY_VIEW : "landing";
 }
 
 function readInviteToken() {
@@ -1300,6 +1308,194 @@ function useInstallableApp() {
   };
 }
 
+function PrivacySection({ code, title, children }) {
+  return (
+    <section aria-labelledby={`privacy-${code}`} className="grid border-b border-zinc-800 lg:grid-cols-[180px_minmax(0,1fr)]">
+      <div className="border-b border-zinc-800 px-4 py-4 font-mono text-[10px] font-black uppercase text-amber-300 lg:border-b-0 lg:border-r lg:px-6 lg:py-6">
+        {code}
+      </div>
+      <div className="min-w-0 px-4 py-6 sm:px-6 lg:px-8">
+        <h2 id={`privacy-${code}`} className="text-xl font-black uppercase text-zinc-100 sm:text-2xl">{title}</h2>
+        <div className="mt-4 grid gap-4 text-sm leading-6 text-zinc-400">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+function PrivacyPage({ onHome, onOpen }) {
+  useEffect(() => {
+    const priorTitle = document.title;
+    const description = document.querySelector('meta[name="description"]');
+    const priorDescription = description?.getAttribute("content") || "";
+    document.title = "Privacy and data controls | Outflow";
+    description?.setAttribute("content", "How Outflow stores local subscription data and handles optional account, reminder, calendar, and payment services.");
+    return () => {
+      document.title = priorTitle;
+      description?.setAttribute("content", priorDescription);
+    };
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-[#08090a] text-zinc-100" data-policy-version={PRIVACY_POLICY_VERSION}>
+      <nav className="border-b border-zinc-800 bg-black">
+        <div className="mx-auto flex min-h-14 max-w-[1180px] flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6">
+          <button type="button" onClick={onHome} className="text-lg font-black uppercase text-white">Outflow</button>
+          <div className="flex items-center gap-2">
+            <a href="#privacy-choices" className="hidden px-3 py-2 font-mono text-[10px] font-black uppercase text-zinc-400 hover:text-white sm:block">
+              Your choices
+            </a>
+            <button type="button" onClick={onOpen} className="border border-amber-400 bg-amber-400 px-3 py-2 text-xs font-black uppercase text-black hover:bg-amber-300">
+              Open tracker
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <header className="border-b border-zinc-800 bg-[#0c0d0e]">
+        <div className="mx-auto max-w-[1180px] px-4 py-12 sm:px-6 sm:py-16">
+          <div className="font-mono text-[10px] font-black uppercase text-amber-300">Policy / {PRIVACY_POLICY_VERSION}</div>
+          <h1 className="mt-3 max-w-4xl text-4xl font-black uppercase leading-tight text-white sm:text-6xl">Privacy and data controls</h1>
+          <p className="mt-5 max-w-3xl text-base leading-7 text-zinc-400 sm:text-lg">
+            Outflow is a local-first subscription tracker maintained by the developer listed as <span className="font-bold text-zinc-200">thedudeb</span>. This policy explains what stays on your device, what optional services process when enabled, and how you control your data.
+          </p>
+          <div className="mt-8 grid border border-zinc-700 font-mono text-[10px] font-black uppercase sm:grid-cols-3">
+            <div className="border-b border-zinc-700 px-3 py-3 text-emerald-300 sm:border-b-0 sm:border-r">No bank connections</div>
+            <div className="border-b border-zinc-700 px-3 py-3 text-emerald-300 sm:border-b-0 sm:border-r">No ads or tracking</div>
+            <div className="px-3 py-3 text-emerald-300">No sale of personal data</div>
+          </div>
+        </div>
+      </header>
+
+      <section aria-label="Current release status" className={`border-b px-4 py-4 ${cloudConfigured ? "border-cyan-900 bg-cyan-950/20" : "border-amber-900 bg-amber-950/20"}`}>
+        <div className="mx-auto max-w-[1132px] font-mono text-xs uppercase leading-5">
+          <span className={cloudConfigured ? "text-cyan-300" : "text-amber-300"}>Current build / </span>
+          <span className="text-zinc-300">
+            {cloudConfigured
+              ? "Optional account services are configured. Data is transmitted only for the account actions described below."
+              : "Guest-only. Account, synchronization, hosted email, hosted calendar, and purchase services are not configured in this public release."}
+          </span>
+        </div>
+      </section>
+
+      <article className="mx-auto max-w-[1180px] border-x border-zinc-800 bg-black">
+        <PrivacySection code="01" title="Local guest data">
+          <p>
+            You can use Outflow without an account. Subscription names, amounts, currencies, billing cycles and dates, trial dates, categories, tags, color labels, pause state, reminder rules, local ledgers, and local preferences are stored in this browser or application sandbox. Outflow does not transmit those records to an account service unless you create an account and separately choose to create a cloud copy.
+          </p>
+          <p>
+            Browser and native device notifications are generated from local records. The operating system or browser necessarily receives the notification title and body to display it. Outflow limits that content to the subscription, amount, billing date, and ledger and does not include account identifiers or service credentials.
+          </p>
+          <p>
+            The public website is hosted through GitHub Pages. Like any website host, it may process standard request information such as IP address, browser type, requested path, and request time. Outflow does not add analytics, advertising pixels, or cross-site tracking to the current build.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="02" title="Optional account and shared data">
+          <p>
+            When account services are available, requesting a passwordless link sends your email address to Supabase for authentication and to its configured email provider. Signing in alone does not upload a guest ledger. A cloud copy is created only after you select that action.
+          </p>
+          <p>
+            A cloud account can store your email-linked account identifier, optional display name, ledgers, subscriptions, roles, invitations, creator and updater attribution, synchronization revisions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-ledger members can see subscription data, roles, and display-name attribution for ledgers they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
+          </p>
+          <p>
+            One bounded pending cloud write may be retained in the browser for retry. It is tied to the account and ledger but excludes email addresses, session credentials, provider responses, and server secrets.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="03" title="Email, calendars, and payments">
+          <p>
+            If you enable hosted email reminders, Outflow processes the selected subscription, amount, due date, ledger name, reminder timing, timezone, and recipient account email to deliver the message. Delivery status, retry state, and bounded bounce or complaint status may be retained so duplicate or unwanted email is not sent. Raw provider diagnostics are not exposed to the browser.
+          </p>
+          <p>
+            If you publish a hosted calendar, Outflow creates a private feed URL. Anyone or any calendar client with that URL can read the selected ledger schedule, so you should treat it like a password and revoke or rotate it if exposed. Downloaded CSV, backup, and calendar files are created at your request and are controlled by you after download.
+          </p>
+          <p>
+            Direct-web Pro uses Stripe-hosted Checkout for a one-time payment. Payment-card details are entered with Stripe and are not collected by the Outflow application. Outflow retains entitlement status and limited transaction references needed to activate, restore, refund, prevent duplicate fulfillment, and reconcile a lifetime purchase. Outflow does not create a recurring product subscription.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="04" title="Service providers and disclosure">
+          <p>Outflow uses or plans to use the following processors only for the named product functions:</p>
+          <ul className="grid border border-zinc-800 sm:grid-cols-2">
+            {[
+              ["GitHub Pages", "Public web hosting", "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"],
+              ["Supabase", "Authentication, database, synchronization, and server functions", "https://supabase.com/privacy"],
+              ["Resend", "Passwordless, invitation, and reminder email", "https://resend.com/legal/privacy-policy"],
+              ["Stripe", "Hosted one-time payment and payment events", "https://stripe.com/privacy"],
+            ].map(([name, purpose, href]) => (
+              <li key={name} className="border-b border-zinc-800 p-3 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 sm:[&:nth-last-child(-n+2)]:border-b-0">
+                <a href={href} className="font-bold text-zinc-200 underline decoration-zinc-700 underline-offset-4 hover:text-amber-300">{name}</a>
+                <span className="mt-1 block font-mono text-[10px] uppercase leading-4 text-zinc-600">{purpose}</span>
+              </li>
+            ))}
+          </ul>
+          <p>
+            Native app stores and operating-system services may separately process installation, purchase, crash, or notification information under their own terms. Outflow may disclose information when required by law, to protect users or the service, or during a business transfer subject to appropriate confidentiality. Outflow does not sell personal data, run behavioral advertising, or disclose subscription records to data brokers.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="05" title="Retention and security">
+          <p>
+            Local guest data remains until you delete records, clear site or application data, uninstall the app, or restore a replacement workspace. Cloud account data remains while the account is active and is deleted through the account-deletion flow, subject to limited records that must be retained for security, fraud prevention, legal obligations, payment reconciliation, or provider-event deduplication.
+          </p>
+          <p>
+            De-identified reminder-operation summaries are designed to expire after 30 days. Invitation and private calendar credentials are stored as protected one-way values where supported, and server-only provider credentials are not shipped to the browser. Network transport uses HTTPS in hosted releases, and cloud data access is constrained by authenticated row-level authorization.
+          </p>
+          <p>
+            No system can guarantee absolute security. Do not place bank credentials, card numbers, passwords, or unrelated sensitive information in subscription names, categories, tags, ledger names, or shared display names.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="06" title="Your choices">
+          <div id="privacy-choices" className="scroll-mt-20">
+            <ul className="grid gap-2">
+              {[
+                "Use the complete guest tracker without creating an account.",
+                "Export subscriptions as CSV, download a ledger backup, or export a calendar file.",
+                "Disable device and email notifications independently and control reminder timing per subscription.",
+                "Sign out without deleting local browser ledgers.",
+                "Download a free account-data archive when signed in.",
+                "Revoke hosted calendar links, remove shared members, and delete cloud account data from Account / Pro controls.",
+                "Clear browser or application storage to remove local data from that installation.",
+              ].map((choice) => (
+                <li key={choice} className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 border-b border-zinc-900 pb-2 last:border-b-0">
+                  <span aria-hidden="true" className="font-mono text-amber-300">+</span>
+                  <span>{choice}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p>
+            Deleting a cloud account does not delete independent local ledgers on your devices. Clear those installations separately when desired. Payment processors, app stores, or email providers may retain records under their own legal obligations and privacy policies.
+          </p>
+        </PrivacySection>
+
+        <PrivacySection code="07" title="Children, changes, and contact">
+          <p>
+            Outflow is a general subscription-management tool and is not directed to children under 13. Do not use the account service if you are below the minimum age required to consent to online services where you live.
+          </p>
+          <p>
+            This policy may change when Outflow adds a data flow, provider, platform, or legal requirement. Material changes will update the effective date and should be reviewed before the changed service is enabled. Store privacy labels and data-safety answers must describe the exact release and may provide additional platform-specific detail.
+          </p>
+          <p>
+            For privacy questions or product-data concerns, contact the developer through the <a href="https://github.com/thedudeb/Outflow/issues" className="font-bold text-zinc-200 underline decoration-zinc-700 underline-offset-4 hover:text-amber-300">Outflow repository</a>. Do not place account email addresses, private invitation links, calendar feed URLs, payment details, or other sensitive information in a public report.
+          </p>
+        </PrivacySection>
+      </article>
+
+      <footer className="border-t border-zinc-800 bg-[#0c0d0e]">
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-3 px-4 py-6 text-xs uppercase text-zinc-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span><b className="text-zinc-300">Outflow</b> / Effective July 20, 2026</span>
+          <div className="flex gap-4">
+            <button type="button" onClick={onHome} className="font-black text-zinc-400 hover:text-white">Home</button>
+            <button type="button" onClick={onOpen} className="font-black text-amber-300 hover:text-amber-200">Open tracker</button>
+          </div>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
 function LandingPage({ onOpen, pwa }) {
   const previewSubscriptions = seedSubscriptions.filter((subscription) => !subscription.paused).slice(0, 4);
 
@@ -1449,9 +1645,12 @@ function LandingPage({ onOpen, pwa }) {
       </section>
 
       <footer className="border-t border-zinc-800 bg-black">
-        <div className="mx-auto flex max-w-[1560px] items-center justify-between px-4 py-5 text-xs uppercase text-zinc-600 sm:px-6">
+        <div className="mx-auto flex max-w-[1560px] flex-col gap-3 px-4 py-5 text-xs uppercase text-zinc-600 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <span className="font-black text-zinc-300">Outflow</span>
-          <span>Recurring debit monitor</span>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <a href={privacyPolicyHref} className="font-black text-zinc-400 hover:text-amber-300">Privacy and data controls</a>
+            <span>Recurring debit monitor</span>
+          </div>
         </div>
       </footer>
     </main>
@@ -5212,6 +5411,10 @@ function Tracker({ onExit, pwa }) {
               )}
 
             </div>
+            <footer className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3 font-mono text-[9px] uppercase leading-4 text-zinc-600 sm:flex-row sm:items-center sm:justify-between">
+              <span>{cloudConfigured ? "Account actions follow the published data boundary" : "Guest records remain on this installation"}</span>
+              <a href={privacyPolicyHref} className="shrink-0 font-black text-amber-300 hover:text-amber-200">Privacy and data controls</a>
+            </footer>
           </section>
         </div>
       )}
@@ -5952,11 +6155,11 @@ function Tracker({ onExit, pwa }) {
 }
 
 function App() {
-  const [trackerOpen, setTrackerOpen] = useState(() => isTrackerHash());
+  const [view, setView] = useState(currentView);
   const pwa = useInstallableApp();
 
   useEffect(() => {
-    const syncView = () => setTrackerOpen(isTrackerHash());
+    const syncView = () => setView(currentView());
     window.addEventListener("popstate", syncView);
     window.addEventListener("hashchange", syncView);
     return () => {
@@ -5966,18 +6169,26 @@ function App() {
   }, []);
 
   function navigateToTracker() {
-    window.history.pushState(null, "", "#app");
-    setTrackerOpen(true);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("view");
+    url.hash = "app";
+    window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    setView("tracker");
     window.scrollTo(0, 0);
   }
 
   function navigateHome() {
-    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
-    setTrackerOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("view");
+    url.hash = "";
+    window.history.pushState(null, "", `${url.pathname}${url.search}`);
+    setView("landing");
     window.scrollTo(0, 0);
   }
 
-  return trackerOpen ? <Tracker onExit={navigateHome} pwa={pwa} /> : <LandingPage onOpen={navigateToTracker} pwa={pwa} />;
+  if (view === "tracker") return <Tracker onExit={navigateHome} pwa={pwa} />;
+  if (view === PRIVACY_VIEW) return <PrivacyPage onHome={navigateHome} onOpen={navigateToTracker} />;
+  return <LandingPage onOpen={navigateToTracker} pwa={pwa} />;
 }
 
 export default App;

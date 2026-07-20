@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const deploymentUrl = new URL(process.env.OUTFLOW_DEPLOYMENT_URL || "https://thedudeb.github.io/Outflow/");
 const trackerUrl = new URL("#app", deploymentUrl);
+const privacyUrl = new URL("?view=privacy", deploymentUrl);
 const manifestUrl = new URL("manifest.webmanifest", deploymentUrl);
 const workerUrl = new URL("sw.js", deploymentUrl);
 
@@ -43,6 +44,23 @@ test("the published landing page and install assets use one repository-path scop
   const workerSource = await workerResponse.text();
   expect(workerSource).toContain(`const INDEX_URL = ${JSON.stringify(`${deploymentUrl.pathname}index.html`)}`);
   expect(workerSource).toContain(JSON.stringify(`${deploymentUrl.pathname}manifest.webmanifest`));
+  expect(failures).toEqual([]);
+});
+
+test("the published privacy policy is direct, responsive, and matches the guest release", async ({ page }) => {
+  const failures = collectBrowserFailures(page);
+  await page.goto(privacyUrl.href, { waitUntil: "domcontentloaded" });
+
+  await expect(page).toHaveTitle("Privacy and data controls | Outflow");
+  await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Current release status" })).toContainText("Guest-only");
+  await expect(page.getByText("No bank connections", { exact: true })).toBeVisible();
+  await expect(page.getByText("No ads or tracking", { exact: true })).toBeVisible();
+  await expect(page.getByText("No sale of personal data", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Outflow repository", exact: true })).toHaveAttribute("href", "https://github.com/thedudeb/Outflow/issues");
+
+  const layout = await layoutState(page);
+  expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
   expect(failures).toEqual([]);
 });
 

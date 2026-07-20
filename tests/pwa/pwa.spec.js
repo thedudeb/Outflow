@@ -99,6 +99,10 @@ test("a local ledger can relaunch, mutate, and navigate while fully offline", as
   await expect(page.getByRole("article").filter({ hasText: "Offline Workspace" })).toHaveCount(1);
   await expect(page.getByRole("article").filter({ hasText: "Offline Change" })).toHaveCount(1);
 
+  await page.goto(`${publicBase}?view=privacy`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Current release status" })).toContainText("Guest-only");
+
   await page.goto(publicBase, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: "Open tracker", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open tracker", exact: true }).click();

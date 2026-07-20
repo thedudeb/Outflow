@@ -75,8 +75,8 @@ npm run check:mobile:android-release
 ```
 
 5. Retain the matching R8 mapping file with the release and upload the AAB through a protected Play Console path. Never publish the APK/AAB or mapping file as a public CI artifact.
-6. Confirm Play App Signing enrollment, package identity, version code, target API, data-safety declarations, app-content declarations, pre-launch results, upgrade behavior, and staged rollout controls before promotion.
+6. Set `https://thedudeb.github.io/Outflow/?view=privacy` as the Play privacy-policy URL, reconcile its version with the exact candidate's network/provider behavior and Data safety answers, then confirm Play App Signing enrollment, package identity, version code, target API, app-content declarations, pre-launch results, upgrade behavior, and staged rollout controls before promotion.
 
 ## Remaining Acceptance
 
-Production readiness still requires an operator-owned upload key, Play Console configuration, signed in-place upgrade and rollback testing, phone/tablet real-device coverage, notification permission and delivery checks, configured-service callback/sync checks, TalkBack and text-scaling review, background-behavior decisions, privacy disclosures, and Play policy acceptance. The default Quality workflow intentionally uses no production signing material and uploads no mobile artifact.
+Production readiness still requires an operator-owned upload key, Play Console configuration, signed in-place upgrade and rollback testing, phone/tablet real-device coverage, notification permission and delivery checks, configured-service callback/sync checks, TalkBack and text-scaling review, background-behavior decisions, candidate-specific privacy/Data safety acceptance, and Play policy acceptance. The default Quality workflow intentionally uses no production signing material and uploads no mobile artifact.
