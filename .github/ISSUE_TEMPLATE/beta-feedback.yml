@@ -1,0 +1,82 @@
+name: Beta feedback
+description: Report an Outflow beta problem or product observation without including private financial data.
+title: "[Beta]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing Outflow. Do not include subscription names, amounts, account exports, email addresses, access codes, calendar URLs, credentials, or screenshots containing private financial data.
+  - type: dropdown
+    id: feedback_type
+    attributes:
+      label: Feedback type
+      options:
+        - Something is broken
+        - Something is confusing
+        - Accessibility problem
+        - Product idea
+        - Positive feedback
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Web browser
+        - Installed PWA
+        - macOS client
+        - iPhone or iPad
+        - Android phone or tablet
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser, operating system, and Outflow version
+      description: Use general device information only. Do not include account or financial data.
+      placeholder: Safari 20 / macOS 27 / Outflow 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: candidate
+    attributes:
+      label: Candidate commit or beta date
+      description: Enter the commit shown by the beta operator, or the date you tested.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What were you trying to do?
+      description: Describe the workflow with generic examples only.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include reproducible steps when possible, but remove all private values and links.
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - I could not continue
+        - I continued with a workaround
+        - It slowed me down or confused me
+        - It did not block me
+    validations:
+      required: true
+  - type: textarea
+    id: accessibility
+    attributes:
+      label: Accessibility context
+      description: Optional. Name assistive technology, input method, zoom, text size, contrast, motion, or orientation settings that were active.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed account details, financial data, access codes, credentials, and private links from this report.
+          required: true

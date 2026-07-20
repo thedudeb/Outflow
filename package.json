@@ -53,6 +53,7 @@
     "test:app-updates": "node --test tests/app-updates.test.js",
     "test:service-status": "node --test tests/service-status.test.js tests/maintenance-mode.test.js",
     "test:beta-access": "node --test tests/beta-access.test.js",
+    "test:beta-readiness": "node --test tests/beta-readiness.test.js",
     "test:desktop-shell": "node --test tests/desktop-shell.test.js",
     "test:desktop-release": "node --test tests/macos-release.test.js",
     "check:desktop:release": "node scripts/check-macos-release.mjs",
@@ -78,6 +79,7 @@
     "test:pwa:pages": "OUTFLOW_PUBLIC_BASE=/Outflow/ npm run build && OUTFLOW_PWA_BASE=/Outflow/ playwright test --config=playwright.pwa.config.js",
     "test:a11y": "playwright test tests/e2e/accessibility.spec.js",
     "test:accessibility-contract": "node --test tests/accessibility-contract.test.js",
+    "test:release-version-policy": "node --test tests/release-version-policy.test.js",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },

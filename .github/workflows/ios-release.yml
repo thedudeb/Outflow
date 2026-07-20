@@ -42,6 +42,7 @@ jobs:
           npm run test:mobile:store-disclosures
           npm run test:mobile:ios-privacy
           npm run test:mobile:ios-release
+          npm run test:release-version-policy
           npm run check:mobile:store-disclosures
           npm run check:mobile:ios-privacy
       - name: Build and inspect unsigned simulator baseline

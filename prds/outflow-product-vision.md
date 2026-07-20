@@ -54,6 +54,16 @@ The product will remain deliberately narrower than a general personal-finance pl
 - Deliver obvious user value; track qualitative feedback, recommendation intent, support themes, and reports of avoided surprise charges.
 - Establish numeric launch and one-year targets after beta usage provides a credible baseline.
 
+### Closed Beta Decision Gate
+
+- Invite 10 to 20 testers and require at least 10 to complete a two-week observation window.
+- At least 70% should report tracking or importing three subscriptions and successfully reading their next-30-day schedule; at least 60% should report meaningful use on three distinct days.
+- At least 80% should complete second-device synchronization plus one export or restore workflow without operator correction.
+- At least 70% should report clearer visibility into upcoming recurring charges, and at least 50% should consider the one-time Pro purchase.
+- Expand only with at least 95% successful scheduled service checks and no unresolved Blocker or Major security, privacy, authorization, data-loss, payment-state, or accessibility defects.
+
+Measure these criteria through beta-code redemption, opt-in check-ins, issue outcomes, and aggregate service health. Do not inspect subscription content or add third-party behavioral tracking for beta measurement.
+
 ## Solution Overview
 
 - Preserve the no-account local tracker as the free entry point and periodically prompt, but never force, users to create an account.
@@ -163,6 +173,6 @@ The product will remain deliberately narrower than a general personal-finance pl
 
 ## Open Questions
 
-- What numeric activation, retention, and Pro-conversion targets should be set after the beta baseline is available?
+- What public-launch and one-year activation, retention, and Pro-conversion targets should replace the closed-beta thresholds after a credible baseline is available?
 - How should one-time Pro purchases transfer across app stores and direct web purchases?
 - Which currencies and locales should be supported in the first multi-currency release?

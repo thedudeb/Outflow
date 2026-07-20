@@ -57,6 +57,7 @@ jobs:
           npm run test:app-updates
           npm run test:desktop-shell
           npm run test:desktop-release
+          npm run test:release-version-policy
       - name: Materialize private notarization key
         env:
           OUTFLOW_APPLE_API_PRIVATE_KEY: ${{ secrets.OUTFLOW_APPLE_API_PRIVATE_KEY }}

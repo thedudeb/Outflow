@@ -59,6 +59,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:accessibility-contract
+      - run: npm run test:release-version-policy
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:account-prompts
       - run: npm run test:feature-access
@@ -84,6 +85,7 @@ jobs:
       - run: npm run test:app-updates
       - run: npm run test:service-status
       - run: npm run test:beta-access
+      - run: npm run test:beta-readiness
       - run: npm run test:desktop-shell
       - run: npm run test:pwa
       - run: npm run test:e2e

@@ -50,6 +50,7 @@ jobs:
           npm run test:mobile-shell
           npm run test:mobile:store-disclosures
           npm run test:mobile:android-release
+          npm run test:release-version-policy
           npm run check:mobile:store-disclosures
       - name: Build and inspect unsigned baseline
         run: |
