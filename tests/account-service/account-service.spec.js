@@ -857,16 +857,24 @@ test("administrator creates limited beta codes and tracks tester redemption", as
       }],
     }],
   };
+  if (page.viewportSize()?.width < 640) {
+    await page.setViewportSize({ width: 320, height: 720 });
+  }
   await seedStoredSession(page, storedSession(adminUser));
   await installCloudFixture(page, { verifiedUser: adminUser, betaState });
 
   await page.goto("/?view=admin");
   await expect(page.getByRole("heading", { name: "Beta codes", exact: true })).toBeVisible();
+  const skipLink = page.getByRole("link", { name: "Skip to main content", exact: true });
+  await skipLink.focus();
+  await expect(skipLink).toBeVisible();
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Admin console", exact: true })).toBeFocused();
   await expect(page.getByText("Avery Owner", { exact: true })).toBeVisible();
-  const testerEmail = page.viewportSize().width < 640
-    ? page.locator("span.sm\\:hidden", { hasText: "owner@example.com" })
-    : page.locator("span.hidden.sm\\:block", { hasText: "owner@example.com" });
-  await expect(testerEmail).toBeVisible();
+  const redemptionTable = page.getByRole("table", { name: "Founding cohort beta code redemptions", exact: true });
+  await expect(redemptionTable.getByRole("columnheader")).toHaveText(["Tester", "Account", "Redeemed"]);
+  await expect(redemptionTable.getByRole("cell", { name: "owner@example.com", exact: true })).toBeVisible();
   await expect(page.getByText("Used / 1 of 20", { exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Internal label", exact: true }).fill("Newsletter beta");

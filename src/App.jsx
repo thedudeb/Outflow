@@ -1161,6 +1161,17 @@ function LiveMessage({ kind = "status", className = "", children, ...props }) {
   );
 }
 
+function SkipLink() {
+  return (
+    <a
+      href="#main-content"
+      className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:border focus:border-amber-400 focus:bg-black focus:px-4 focus:py-3 focus:text-sm focus:font-black focus:uppercase focus:text-amber-300"
+    >
+      Skip to main content
+    </a>
+  );
+}
+
 function DialogOverlay({ children, onClose, closeDisabled = false }) {
   function closeFromBackdrop(event) {
     if (event.target === event.currentTarget && !closeDisabled) onClose();
@@ -1448,7 +1459,7 @@ function useAppServiceStatus() {
 function ServiceStatusLoading() {
   return (
     <main className="grid min-h-screen place-items-center bg-[#08090a] px-4 text-zinc-100">
-      <LiveMessage className="border border-zinc-800 bg-black px-5 py-4 font-mono text-xs uppercase text-zinc-500">
+      <LiveMessage id="main-content" tabIndex={-1} className="border border-zinc-800 bg-black px-5 py-4 font-mono text-xs uppercase text-zinc-500">
         Checking service availability...
       </LiveMessage>
     </main>
@@ -1466,7 +1477,7 @@ function MaintenancePage() {
 
   return (
     <main className="grid min-h-screen place-items-center bg-black px-5 text-zinc-100">
-      <h1 className="max-w-3xl text-center font-mono text-xl font-black uppercase leading-relaxed text-amber-300 sm:text-3xl">
+      <h1 id="main-content" tabIndex={-1} className="max-w-3xl text-center font-mono text-xl font-black uppercase leading-relaxed text-amber-300 sm:text-3xl">
         {MAINTENANCE_MESSAGE}
       </h1>
     </main>
@@ -1711,7 +1722,7 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
       <div className="mx-auto max-w-[980px] px-4 py-8 sm:px-6 sm:py-12">
         <header className="border-b border-zinc-800 pb-6">
           <div className="font-mono text-[10px] font-black uppercase text-amber-300">Restricted operations</div>
-          <h1 className="mt-2 text-3xl font-black uppercase text-white sm:text-5xl">Admin console</h1>
+          <h1 id="main-content" tabIndex={-1} className="mt-2 text-3xl font-black uppercase text-white sm:text-5xl">Admin console</h1>
         </header>
 
         {!cloudConfigured && (
@@ -1872,11 +1883,11 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
                   const unavailable = Boolean(code.disabledAt || expired || code.remaining === 0);
                   const status = code.disabledAt ? "Disabled" : expired ? "Expired" : code.remaining === 0 ? "Full" : "Active";
                   return (
-                    <article key={code.id} className="border-b border-zinc-800 last:border-b-0">
+                    <article key={code.id} aria-labelledby={`beta-code-${code.id}`} className="border-b border-zinc-800 last:border-b-0">
                       <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-sm font-black uppercase text-zinc-200">{code.label}</h3>
+                            <h3 id={`beta-code-${code.id}`} className="text-sm font-black uppercase text-zinc-200">{code.label}</h3>
                             <span className={`border px-1.5 py-0.5 font-mono text-[9px] font-black uppercase ${unavailable ? "border-zinc-700 text-zinc-500" : "border-emerald-800 text-emerald-300"}`}>{status}</span>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase text-zinc-600">
@@ -1896,21 +1907,35 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
                         </button>
                       </div>
                       <div className="border-t border-zinc-900 bg-zinc-950/60">
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] border-b border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase text-zinc-700 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto] sm:px-6">
-                          <span>Tester</span><span className="hidden sm:block">Account</span><span>Redeemed</span>
-                        </div>
-                        {code.redemptions.length ? code.redemptions.map((redemption) => (
-                          <div key={`${code.id}-${redemption.userId || redemption.redeemedAt}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-zinc-900 px-4 py-2 text-xs last:border-b-0 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto] sm:px-6">
-                            <span className="min-w-0 text-zinc-300">
-                              <span className="block truncate">{redemption.displayName || (redemption.userId ? "Unnamed tester" : "Deleted account")}</span>
-                              <span className="mt-0.5 block truncate font-mono text-[9px] text-zinc-600 sm:hidden">{redemption.email || "Personal data removed"}</span>
-                            </span>
-                            <span className="hidden truncate font-mono text-[10px] text-zinc-500 sm:block">{redemption.email || "Personal data removed"}</span>
-                            <time className="whitespace-nowrap font-mono text-[10px] text-zinc-600" dateTime={redemption.redeemedAt}>{new Date(redemption.redeemedAt).toLocaleDateString()}</time>
-                          </div>
-                        )) : (
-                          <div className="px-4 py-3 font-mono text-[10px] uppercase text-zinc-700 sm:px-6">No redemptions yet</div>
-                        )}
+                        <table className="w-full table-fixed text-left">
+                          <caption className="sr-only">{code.label} beta code redemptions</caption>
+                          <thead className="font-mono text-[9px] uppercase text-zinc-700">
+                            <tr className="border-b border-zinc-900">
+                              <th scope="col" className="w-[32%] px-2 py-2 font-normal sm:px-6">Tester</th>
+                              <th scope="col" className="w-[43%] px-2 py-2 font-normal">Account</th>
+                              <th scope="col" className="w-[25%] px-2 py-2 text-right font-normal sm:px-6">Redeemed</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {code.redemptions.length ? code.redemptions.map((redemption) => (
+                              <tr key={`${code.id}-${redemption.userId || redemption.redeemedAt}`} className="border-b border-zinc-900 text-xs last:border-b-0">
+                                <td className="break-words px-2 py-2 text-zinc-300 sm:px-6">
+                                  {redemption.displayName || (redemption.userId ? "Unnamed tester" : "Deleted account")}
+                                </td>
+                                <td className="break-all px-2 py-2 font-mono text-[10px] text-zinc-500">
+                                  {redemption.email || "Personal data removed"}
+                                </td>
+                                <td className="px-2 py-2 text-right sm:px-6">
+                                  <time className="font-mono text-[10px] text-zinc-600" dateTime={redemption.redeemedAt}>{new Date(redemption.redeemedAt).toLocaleDateString()}</time>
+                                </td>
+                              </tr>
+                            )) : (
+                              <tr>
+                                <td colSpan={3} className="px-4 py-3 font-mono text-[10px] uppercase text-zinc-700 sm:px-6">No redemptions yet</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </article>
                   );
@@ -1980,7 +2005,7 @@ function PrivacyPage({ onHome, onOpen }) {
       <header className="border-b border-zinc-800 bg-[#0c0d0e]">
         <div className="mx-auto max-w-[1180px] px-4 py-12 sm:px-6 sm:py-16">
           <div className="font-mono text-[10px] font-black uppercase text-amber-300">Policy / {PRIVACY_POLICY_VERSION}</div>
-          <h1 className="mt-3 max-w-4xl text-4xl font-black uppercase leading-tight text-white sm:text-6xl">Privacy and data controls</h1>
+          <h1 id="main-content" tabIndex={-1} className="mt-3 max-w-4xl text-4xl font-black uppercase leading-tight text-white sm:text-6xl">Privacy and data controls</h1>
           <p className="mt-5 max-w-3xl text-base leading-7 text-zinc-400 sm:text-lg">
             Outflow is a local-first subscription tracker maintained by the developer listed as <span className="font-bold text-zinc-200">thedudeb</span>. This policy explains what stays on your device, what optional services process when enabled, and how you control your data.
           </p>
@@ -2186,7 +2211,7 @@ function LandingPage({ onOpen, pwa }) {
               <span className="h-3 w-1 bg-amber-400" />
               Personal recurring debit monitor
             </div>
-            <h1 className="text-[48px] font-black uppercase leading-[0.9] text-white min-[360px]:text-6xl sm:text-8xl lg:text-9xl">Outflow</h1>
+            <h1 id="main-content" tabIndex={-1} className="text-[48px] font-black uppercase leading-[0.9] text-white min-[360px]:text-6xl sm:text-8xl lg:text-9xl">Outflow</h1>
             <p className="mt-4 max-w-2xl text-base leading-6 text-zinc-300 sm:mt-6 sm:text-xl sm:leading-7">
               Know what is leaving your account, how much it costs, and exactly when it lands. One clear view of every recurring charge.
             </p>
@@ -4498,7 +4523,7 @@ function Tracker({ onExit, pwa }) {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-300">cashflow console</div>
-                <h1 className="mt-1 text-3xl font-black uppercase leading-none tracking-[0.14em] text-zinc-50">Outflow</h1>
+                <h1 id="main-content" tabIndex={-1} className="mt-1 text-3xl font-black uppercase leading-none tracking-[0.14em] text-zinc-50">Outflow</h1>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <button
@@ -6906,14 +6931,25 @@ function App() {
     window.scrollTo(0, 0);
   }
 
-  if (view !== ADMIN_VIEW && service.loading) return <ServiceStatusLoading />;
-  if (view !== ADMIN_VIEW && service.status.maintenanceEnabled) return <MaintenancePage />;
+  let content;
+  if (view !== ADMIN_VIEW && service.loading) content = <ServiceStatusLoading />;
+  else if (view !== ADMIN_VIEW && service.status.maintenanceEnabled) content = <MaintenancePage />;
   if (view === ADMIN_VIEW) {
-    return <AdminConsole serviceStatus={service.status} onStatusChange={service.applyStatus} onHome={navigateHome} />;
+    content = <AdminConsole serviceStatus={service.status} onStatusChange={service.applyStatus} onHome={navigateHome} />;
+  } else if (!content && view === "tracker") {
+    content = <Tracker onExit={navigateHome} pwa={pwa} />;
+  } else if (!content && view === PRIVACY_VIEW) {
+    content = <PrivacyPage onHome={navigateHome} onOpen={navigateToTracker} />;
+  } else if (!content) {
+    content = <LandingPage onOpen={navigateToTracker} pwa={pwa} />;
   }
-  if (view === "tracker") return <Tracker onExit={navigateHome} pwa={pwa} />;
-  if (view === PRIVACY_VIEW) return <PrivacyPage onHome={navigateHome} onOpen={navigateToTracker} />;
-  return <LandingPage onOpen={navigateToTracker} pwa={pwa} />;
+
+  return (
+    <>
+      <SkipLink />
+      {content}
+    </>
+  );
 }
 
 export default App;

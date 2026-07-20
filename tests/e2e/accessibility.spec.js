@@ -89,21 +89,41 @@ async function expectDialogInsideViewport(page, dialog) {
   expect(geometry.bottom, details).toBeLessThanOrEqual(geometry.viewportHeight + 1);
 }
 
+async function expectKeyboardBypass(page, headingName) {
+  await page.keyboard.press("Tab");
+  const skipLink = page.getByRole("link", { name: "Skip to main content", exact: true });
+  await expect(skipLink).toBeVisible();
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: headingName, level: 1 })).toBeFocused();
+}
+
 test("landing page meets the automated WCAG A and AA gate", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
   await expectNoWcagViolations(page);
+  await expectKeyboardBypass(page, "Outflow");
 });
 
 test("privacy and data controls meet the automated WCAG A and AA gate", async ({ page }) => {
   await page.goto("/?view=privacy");
   await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
   await expectNoWcagViolations(page);
+  await expectKeyboardBypass(page, "Privacy and data controls");
+});
+
+test("admin console meets the automated WCAG A and AA gate", async ({ page }) => {
+  await page.goto("/?view=admin");
+  await expect(page.getByRole("heading", { name: "Admin console", level: 1 })).toBeVisible();
+  await expectNoWcagViolations(page);
+  await expectKeyboardBypass(page, "Admin console");
 });
 
 test("tracker dashboard meets the automated WCAG A and AA gate", async ({ page }) => {
-  await openTracker(page);
+  await page.goto("/#app");
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await expectNoWcagViolations(page);
+  await expectKeyboardBypass(page, "Outflow");
 });
 
 for (const dialogCase of dialogs) {
@@ -130,7 +150,11 @@ test("landing page and tracker reflow without document overflow at 320 CSS pixel
   await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
   await expectDocumentToReflow(page);
 
-  await page.getByRole("button", { name: "Open tracker", exact: true }).first().click();
+  await page.goto("/?view=admin");
+  await expect(page.getByRole("heading", { name: "Admin console", level: 1 })).toBeVisible();
+  await expectDocumentToReflow(page);
+
+  await page.goto("/#app");
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await expectDocumentToReflow(page);
 
