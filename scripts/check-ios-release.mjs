@@ -12,6 +12,7 @@ import {
   readProvisioningProfile,
   validateProvisioningProfile,
 } from "./ios-release-lib.mjs";
+import { inspectIosPrivacyManifest, validateIosRequiredReasonSymbols } from "./check-ios-privacy.mjs";
 
 assert.equal(process.platform, "darwin", "signed iOS artifacts must be inspected on macOS");
 
@@ -33,6 +34,8 @@ const run = (command, args, options = {}) => execFileSync(command, args, {
   ...options,
 });
 const directory = mkdtempSync(join(tmpdir(), "outflow-ios-release-"));
+const sourcePrivacy = inspectIosPrivacyManifest("src-tauri/PrivacyInfo.xcprivacy");
+assert.deepEqual(sourcePrivacy.errors, [], "source iOS privacy manifest violates the guest-build boundary");
 
 try {
   const entries = run("/usr/bin/unzip", ["-Z1", ipaPath]).trim().split("\n").filter(Boolean);
@@ -50,12 +53,16 @@ try {
   assert.equal(String(info.CFBundleVersion), `0.1.0.${expectedBuildNumber}`);
   assert.equal(info.MinimumOSVersion, "14.0");
   assert.deepEqual(info.CFBundleSupportedPlatforms, ["iPhoneOS"]);
+  const bundledPrivacy = inspectIosPrivacyManifest(join(appPath, "PrivacyInfo.xcprivacy"));
+  assert.deepEqual(bundledPrivacy.errors, [], "signed IPA privacy manifest violates the guest-build boundary");
 
   const executablePath = join(appPath, info.CFBundleExecutable);
   assert.equal(existsSync(executablePath), true, "Outflow executable is missing");
   assert.ok(statSync(executablePath).size > 1_000_000, "Outflow executable is unexpectedly small");
   assert.ok(statSync(join(appPath, "Assets.car")).size > 1_000, "Outflow compiled assets are unexpectedly small");
   assertMachOArm64(executablePath);
+  const symbols = run("/usr/bin/nm", ["-u", executablePath]);
+  assert.deepEqual(validateIosRequiredReasonSymbols(symbols), [], "signed IPA required-reason APIs do not match the privacy manifest");
 
   run("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
   const details = spawnSync("/usr/bin/codesign", ["-dvvv", appPath], { encoding: "utf8" });

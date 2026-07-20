@@ -43,6 +43,19 @@ src-tauri/gen/apple/build/arm64/Outflow.ipa
 
 The inspector rejects unsafe or ambiguous ZIP structure, requires one `Payload/Outflow.app`, verifies production identifier/version/platform/minimum OS metadata, checks the ARM64 executable and compiled assets, runs strict deep `codesign` verification, and requires the exact Team ID and independently pinned signing certificate. It also checks the signed entitlements and embedded App Store profile against the same narrow allowlist and expiry policy.
 
+## Privacy Manifest
+
+The canonical `src-tauri/PrivacyInfo.xcprivacy` is copied into the root of every Simulator app and App Store Connect IPA. It declares:
+
+- no tracking;
+- no tracking domains;
+- no off-device data collection in the current local guest build;
+- file-metadata access inside the app container under Apple's approved `C617.1` reason.
+
+`npm run check:mobile:ios-privacy` parses the source property list and rejects additional keys, tracking, domains, collected-data declarations, additional required-reason categories, or any reason other than `C617.1`. The Simulator and signed-IPA inspectors independently parse the bundled copy and enforce the same contract. The generated binary imports the `stat`/`fstat`/`lstat` family for bundled and sandboxed files; it does not currently import the UserDefaults, system-boot-time, disk-space, or active-keyboard required-reason APIs checked during this acceptance.
+
+This disclosure is intentionally scoped to the service-unconfigured native guest build. The App Store release builder rejects Supabase browser configuration from the process environment and every production Vite environment-file layer, reporting field names without values. Before enabling account, synchronization, shared-ledger, hosted-calendar, email, or purchase services in a native release, review actual webview traffic and update both the manifest and App Store Connect privacy answers. Apple states that on-device-only data is not collected, while data collected through app web traffic must be declared. A public privacy-policy URL and final App Store Connect answers remain operator release requirements.
+
 ## Protected GitHub Workflow
 
 `.github/workflows/ios-release.yml` is a manual, `main`-only acceptance path. Configure deployment-branch protection and required reviewers on the `ios-production` environment before adding credentials.
@@ -75,6 +88,6 @@ Because this is a public repository, the workflow uploads no IPA, archive, certi
 3. Add the two variables and three secrets to the protected `ios-production` GitHub environment.
 4. Dispatch `iOS Production Signing Acceptance` from the exact `main` commit and review the bounded hash evidence.
 5. Retrieve or rebuild the same candidate only through a protected operator environment, repeat `npm run check:mobile:ios-release`, and upload it to App Store Connect without publishing it as a general CI artifact.
-6. Complete signed upgrade, real-device, notification, VoiceOver, text-scaling, configured-service, privacy-disclosure, TestFlight, and staged-release checks before promotion.
+6. Complete signed upgrade, real-device, notification, VoiceOver, text-scaling, configured-service, public privacy-policy, App Store Connect disclosure, TestFlight, and staged-release checks before promotion.
 
-See Tauri's official [iOS code-signing guide](https://v2.tauri.app/distribute/sign/ios/) and [CLI reference](https://v2.tauri.app/reference/cli/) for the supported signing variables and export options.
+See Tauri's official [iOS code-signing guide](https://v2.tauri.app/distribute/sign/ios/) and [CLI reference](https://v2.tauri.app/reference/cli/) for the supported signing variables and export options. Apple's [privacy manifest documentation](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files), [required-reason API guidance](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api), and [App Store privacy details](https://developer.apple.com/app-store/app-privacy-details/) define the disclosure boundary.

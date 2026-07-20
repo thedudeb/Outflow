@@ -14,6 +14,7 @@ test("the generated iOS target preserves Outflow identity and mobile coverage", 
   const info = read("src-tauri/gen/apple/outflow_iOS/Info.plist");
   const main = read("src-tauri/gen/apple/Sources/outflow/main.mm");
   const launchScreen = read("src-tauri/gen/apple/LaunchScreen.storyboard");
+  const privacyManifest = read("src-tauri/PrivacyInfo.xcprivacy");
 
   assert.equal(config.productName, "Outflow");
   assert.equal(config.identifier, "com.thedudeb.outflow");
@@ -32,6 +33,9 @@ test("the generated iOS target preserves Outflow identity and mobile coverage", 
   assert.match(main, /ffi::start_app\(\)/);
   assert.match(launchScreen, /red="0\.031372549019607843" green="0\.035294117647058823" blue="0\.039215686274509803"/);
   assert.doesNotMatch(launchScreen, /systemBackgroundColor|white="1"/);
+  assert.match(privacyManifest, /NSPrivacyTracking/);
+  assert.match(privacyManifest, /<false\/>/);
+  assert.match(privacyManifest, /C617\.1/);
 });
 
 test("the iOS app icon catalog is complete and generated from Outflow artwork", () => {
@@ -65,6 +69,7 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.equal(packageJson.scripts["mobile:ios:build"], "tauri ios build --ci --debug --target aarch64-sim --no-sign");
   assert.equal(packageJson.scripts["mobile:ios:release"], "node scripts/build-ios-release.mjs");
   assert.equal(packageJson.scripts["check:mobile:ios-bundle"], "node scripts/check-ios-bundle.mjs");
+  assert.equal(packageJson.scripts["check:mobile:ios-privacy"], "node scripts/check-ios-privacy.mjs");
   assert.equal(packageJson.scripts["check:mobile:ios-release"], "node scripts/check-ios-release.mjs");
   assert.equal(packageJson.scripts["check:mobile:ios-release-environment"], "node scripts/check-ios-release-environment.mjs");
   assert.equal(packageJson.scripts["test:mobile:ios-release"], "node --test tests/ios-release.test.js");
@@ -86,6 +91,8 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.match(quality, /rustup target add aarch64-apple-ios-sim/);
   assert.match(quality, /npm run test:mobile-shell/);
   assert.match(quality, /npm run test:mobile:ios-release/);
+  assert.match(quality, /npm run test:mobile:ios-privacy/);
+  assert.match(quality, /npm run check:mobile:ios-privacy/);
   assert.match(quality, /npm run mobile:ios:build/);
   assert.match(quality, /npm run check:mobile:ios-bundle/);
 });

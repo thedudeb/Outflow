@@ -15,6 +15,7 @@
 		817132BB0F56E6EDD1E4F00F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 28167D347E6AC0EDCA6AE664 /* LaunchScreen.storyboard */; };
 		847D5DEEC1B279A8F08DA00C /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE10CB8A20D4AA66C70FB73E /* WebKit.framework */; };
 		85C7DCDDF54B11005A878AC8 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7126F91EA6878F0C03581A81 /* MetalKit.framework */; };
+		8C23F5814C726FFD95B6EC6A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 4E43A57A74D240491233496C /* PrivacyInfo.xcprivacy */; };
 		A1556BC4AFE8DD0E4FEEC5CF /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = CE38DB3742BE737960B90829 /* libapp.a */; };
 		BBD4068D70FABD35D87E89F1 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3B5D57A490AFF94DA515EFB7 /* UIKit.framework */; };
 		D79B35FD38AB5DEE3B883254 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 788DBF683F900C40CC994792 /* Security.framework */; };
@@ -27,6 +28,7 @@
 		28167D347E6AC0EDCA6AE664 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		3B5D57A490AFF94DA515EFB7 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		3D1CC55BB912B6090EA46DC5 /* outflow_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = outflow_iOS.entitlements; sourceTree = "<group>"; };
+		4E43A57A74D240491233496C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		574BC5EB6E3CF8F40494CF2A /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
 		7126F91EA6878F0C03581A81 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		788DBF683F900C40CC994792 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -111,6 +113,15 @@
 			path = arm64;
 			sourceTree = "<group>";
 		};
+		CC0F156EA299A69A7688AA10 /* src-tauri */ = {
+			isa = PBXGroup;
+			children = (
+				4E43A57A74D240491233496C /* PrivacyInfo.xcprivacy */,
+			);
+			name = "src-tauri";
+			path = ../..;
+			sourceTree = "<group>";
+		};
 		D1A945F2A11A0FE433D7F643 /* src */ = {
 			isa = PBXGroup;
 			children = (
@@ -155,6 +166,7 @@
 				5298E50CFDFBBFD8D67A2D9B /* outflow_iOS */,
 				E4D324E0B41030619D0A26F2 /* Sources */,
 				D1A945F2A11A0FE433D7F643 /* src */,
+				CC0F156EA299A69A7688AA10 /* src-tauri */,
 				17320F93131CD512B2F1D4AE /* Frameworks */,
 				34F1209F1C3F1B5E2EFE6AA1 /* Products */,
 			);
@@ -236,6 +248,7 @@
 			files = (
 				F1EA96CF7EC16D065E6DFF03 /* Assets.xcassets in Resources */,
 				817132BB0F56E6EDD1E4F00F /* LaunchScreen.storyboard in Resources */,
+				8C23F5814C726FFD95B6EC6A /* PrivacyInfo.xcprivacy in Resources */,
 				3CF044EE1E2524709F9C4B4C /* assets in Resources */,
 				A1556BC4AFE8DD0E4FEEC5CF /* libapp.a in Resources */,
 			);

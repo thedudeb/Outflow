@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const tauri = resolve("node_modules/.bin/tauri");
 execFileSync(tauri, ["ios", "init", "--ci", ...process.argv.slice(2)], { stdio: "inherit" });
@@ -35,16 +35,27 @@ assert.ok(!storyboard.includes("systemBackgroundColor"), "system launch color re
 const projectPath = resolve("src-tauri/gen/apple/project.yml");
 const bindingsPath = resolve("src-tauri/gen/apple/Sources/outflow/bindings/bindings.h");
 const xcodeProjectPath = resolve("src-tauri/gen/apple/outflow.xcodeproj/project.pbxproj");
-const project = readFileSync(projectPath, "utf8").replace("VALID_ARCHS: arm64 \n", "VALID_ARCHS: arm64\n");
+const privacyResource = "      - path: ../../PrivacyInfo.xcprivacy\n        buildPhase: resources\n";
+const launchResource = "      - path: LaunchScreen.storyboard\n";
+let project = readFileSync(projectPath, "utf8").replace("VALID_ARCHS: arm64 \n", "VALID_ARCHS: arm64\n");
+if (!project.includes(privacyResource)) {
+  assert.ok(project.includes(launchResource), "generated iOS launch-screen resource changed");
+  project = project.replace(launchResource, `${launchResource}${privacyResource}`);
+}
 const bindings = `${readFileSync(bindingsPath, "utf8").trimEnd()}\n`;
+writeFileSync(projectPath, project);
+execFileSync("xcodegen", ["generate", "--spec", "project.yml"], {
+  cwd: dirname(projectPath),
+  stdio: "inherit",
+});
 const generatedXcodeProject = readFileSync(xcodeProjectPath, "utf8");
 const temporaryGroupIds = generatedXcodeProject.match(/"TEMP_[A-F0-9-]+"/g) || [];
 assert.equal(temporaryGroupIds.length, 1, "generated x86_64 group identifier changed");
 const xcodeProject = generatedXcodeProject.replace(temporaryGroupIds[0], '"TEMP_OUTFLOW_X86_64"');
-writeFileSync(projectPath, project);
 writeFileSync(bindingsPath, bindings);
 writeFileSync(xcodeProjectPath, xcodeProject);
 assert.ok(project.includes("VALID_ARCHS: arm64\n"), "generated iOS architecture setting was not normalized");
+assert.ok(project.includes(privacyResource), "Outflow privacy manifest resource was not applied");
 assert.ok(bindings.endsWith("}\n") && !bindings.endsWith("}\n\n"), "generated mobile binding header was not normalized");
 assert.ok(xcodeProject.includes('"TEMP_OUTFLOW_X86_64"'), "generated Xcode project identifier was not normalized");
-console.log("Generated Outflow iOS project with the dark native launch screen");
+console.log("Generated Outflow iOS project with the dark launch screen and privacy manifest");

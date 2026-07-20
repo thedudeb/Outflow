@@ -39,7 +39,9 @@ jobs:
         run: |
           npm run test:device-notifications
           npm run test:mobile-shell
+          npm run test:mobile:ios-privacy
           npm run test:mobile:ios-release
+          npm run check:mobile:ios-privacy
       - name: Build and inspect unsigned simulator baseline
         run: |
           npm run mobile:ios:build

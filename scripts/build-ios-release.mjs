@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { validateIosGuestBuildInputs } from "./check-ios-privacy.mjs";
 
 assert.equal(process.platform, "darwin", "iOS release artifacts must be built on macOS");
 
 const buildNumber = String(process.env.OUTFLOW_IOS_BUILD_NUMBER || "").trim();
 assert.match(buildNumber, /^[1-9][0-9]{0,17}$/, "OUTFLOW_IOS_BUILD_NUMBER must be a positive, bounded numeric build number");
+
+const viteEnvironmentFiles = [".env", ".env.local", ".env.production", ".env.production.local"]
+  .filter((path) => existsSync(resolve(path)))
+  .map((path) => readFileSync(resolve(path), "utf8"));
+assert.deepEqual(
+  validateIosGuestBuildInputs(process.env, viteEnvironmentFiles),
+  [],
+  "hosted native configuration requires a reviewed privacy manifest before App Store packaging",
+);
 
 const tauri = resolve("node_modules/.bin/tauri");
 const ipaPath = resolve(process.env.OUTFLOW_IOS_RELEASE_IPA_PATH || "src-tauri/gen/apple/build/arm64/Outflow.ipa");
