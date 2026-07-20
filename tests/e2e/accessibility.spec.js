@@ -67,6 +67,38 @@ async function expectDocumentToReflow(page) {
   expect(dimensions.documentWidth, JSON.stringify(dimensions, null, 2)).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
 }
 
+async function expectPointerTargets(page, scope = "main") {
+  const undersized = await page.locator(scope).evaluate((root) => [...root.querySelectorAll("button, input, select, textarea")]
+    .flatMap((control) => {
+      if (!(control instanceof HTMLElement) || control.matches(":disabled, [type='hidden']") || !control.getClientRects().length) return [];
+      const label = control.closest("label");
+      const target = label && label.contains(control) ? label : control;
+      const bounds = target.getBoundingClientRect();
+      if (bounds.width >= 24 && bounds.height >= 24) return [];
+      return [{
+        height: Math.round(bounds.height * 10) / 10,
+        label: control.getAttribute("aria-label") || control.textContent?.trim().replace(/\s+/g, " ").slice(0, 80) || control.getAttribute("name") || control.tagName,
+        tagName: control.tagName,
+        width: Math.round(bounds.width * 10) / 10,
+      }];
+    }));
+
+  expect(undersized, JSON.stringify(undersized, null, 2)).toEqual([]);
+}
+
+async function applyWcagTextSpacing(page) {
+  await page.addStyleTag({
+    content: `
+      :where(p, li, dd, dt, label, button, a, input, select, textarea, span) {
+        letter-spacing: 0.12em !important;
+        line-height: 1.5 !important;
+        word-spacing: 0.16em !important;
+      }
+      p { margin-block-end: 2em !important; }
+    `,
+  });
+}
+
 async function expectDialogInsideViewport(page, dialog) {
   const geometry = await dialog.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
@@ -124,6 +156,41 @@ test("tracker dashboard meets the automated WCAG A and AA gate", async ({ page }
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await expectNoWcagViolations(page);
   await expectKeyboardBypass(page, "Outflow");
+});
+
+test("primary pointer controls meet the WCAG 2.2 minimum target size", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
+  await expectPointerTargets(page);
+
+  await page.goto("/#app");
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expectPointerTargets(page);
+
+  for (const dialogCase of dialogs) {
+    await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
+    await expect(page.getByRole("dialog", { name: dialogCase.title })).toBeVisible();
+    await expectPointerTargets(page, '[role="dialog"]');
+    await page.getByRole("button", { name: dialogCase.close, exact: true }).click();
+  }
+});
+
+test("user text spacing does not clip or horizontally overflow primary workflows", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+
+  await page.goto("/");
+  await applyWcagTextSpacing(page);
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
+  await expectDocumentToReflow(page);
+
+  await page.goto("/#app");
+  await applyWcagTextSpacing(page);
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expectDocumentToReflow(page);
+
+  await page.getByRole("button", { name: "Open optional account controls", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Account / Pro" })).toBeVisible();
+  await expectDocumentToReflow(page);
 });
 
 for (const dialogCase of dialogs) {

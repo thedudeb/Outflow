@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { webContentSecurityPolicy } from "../../vite.config.js";
 
@@ -6,6 +7,18 @@ const trackerUrl = new URL("#app", deploymentUrl);
 const privacyUrl = new URL("?view=privacy", deploymentUrl);
 const manifestUrl = new URL("manifest.webmanifest", deploymentUrl);
 const workerUrl = new URL("sw.js", deploymentUrl);
+const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
+
+function violationSummary(violations) {
+  return violations
+    .map((violation) => `${violation.id}: ${violation.help}\n${violation.nodes.flatMap((node) => node.target).join(", ")}`)
+    .join("\n\n");
+}
+
+async function expectNoWcagViolations(page) {
+  const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+}
 
 function collectBrowserFailures(page) {
   const failures = [];
@@ -28,6 +41,7 @@ test("the published landing page and install assets use one repository-path scop
   await page.goto(deploymentUrl.href, { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Outflow", exact: true })).toBeVisible();
+  await expectNoWcagViolations(page);
   await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute("content", webContentSecurityPolicy());
   await expect(page.locator('meta[name="referrer"]')).toHaveAttribute("content", "no-referrer");
   const landingLayout = await layoutState(page);
@@ -61,6 +75,7 @@ test("the published privacy policy is direct, responsive, and matches the guest 
   await expect(page.getByText("No ads or tracking", { exact: true })).toBeVisible();
   await expect(page.getByText("No sale of personal data", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Outflow repository", exact: true })).toHaveAttribute("href", "https://github.com/thedudeb/Outflow/issues");
+  await expectNoWcagViolations(page);
 
   const layout = await layoutState(page);
   expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
@@ -77,6 +92,7 @@ test("the published guest tracker identifies its boundary and persists a local e
     await expect(ledgerControl).toContainText("Personal / On this device");
   await expect(page.getByRole("button", { name: "Open optional account controls", exact: true })).toContainText("Account / Guest");
   await expect(page.getByText("Offline ready", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expectNoWcagViolations(page);
 
   const workerScope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
   expect(workerScope).toBe(deploymentUrl.href);

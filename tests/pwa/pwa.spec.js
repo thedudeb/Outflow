@@ -1,8 +1,21 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { webContentSecurityPolicy } from "../../vite.config.js";
 
 const publicBase = process.env.OUTFLOW_PWA_BASE || "/";
 const publicPath = (path = "") => `${publicBase}${path}`;
+const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
+
+function violationSummary(violations) {
+  return violations
+    .map((violation) => `${violation.id}: ${violation.help}\n${violation.nodes.flatMap((node) => node.target).join(", ")}`)
+    .join("\n\n");
+}
+
+async function expectNoWcagViolations(page) {
+  const { violations } = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+}
 
 async function waitForOfflineControl(page) {
   return page.evaluate(async () => {
@@ -93,6 +106,27 @@ test("production metadata and the generated cache satisfy the installable-web co
   expect(cacheState.precache.filter((path) => !cacheState.urls.includes(path))).toEqual([]);
 });
 
+test("production landing, privacy, tracker, and offline states meet the WCAG A and AA gate", async ({ page, context }) => {
+  await page.goto(publicBase);
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
+  await expectNoWcagViolations(page);
+
+  await page.goto(`${publicBase}?view=privacy`);
+  await expect(page.getByRole("heading", { name: "Privacy and data controls", level: 1 })).toBeVisible();
+  await expectNoWcagViolations(page);
+
+  await page.goto(`${publicBase}#app`);
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await waitForOfflineControl(page);
+  await expectNoWcagViolations(page);
+
+  await context.setOffline(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Offline", { exact: true })).toBeVisible();
+  await expectNoWcagViolations(page);
+  await context.setOffline(false);
+});
+
 test("a local ledger can relaunch, mutate, and navigate while fully offline", async ({ page, context }) => {
   await page.goto(`${publicBase}#app`);
   await waitForOfflineControl(page);
@@ -102,7 +136,7 @@ test("a local ledger can relaunch, mutate, and navigate while fully offline", as
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
-  await expect(page.getByText("Offline", { exact: true })).toBeVisible();
+  await expect(page.locator('span[role="status"]', { hasText: /^Offline$/ })).toBeVisible();
   await expect(page.getByRole("article").filter({ hasText: "Offline Workspace" })).toHaveCount(1);
 
   await addSubscription(page, "Offline Change", 9);
@@ -121,7 +155,7 @@ test("a local ledger can relaunch, mutate, and navigate while fully offline", as
   await expect(page.getByRole("article").filter({ hasText: "Offline Change" })).toHaveCount(1);
 
   await context.setOffline(false);
-  await expect(page.getByText("Online", { exact: true })).toBeVisible();
+  await expect(page.locator('span[role="status"]', { hasText: /^Online$/ })).toBeVisible();
 });
 
 test("production security policy preserves CSV, calendar, and backup downloads", async ({ page }) => {

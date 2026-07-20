@@ -1379,6 +1379,7 @@ function useInstallableApp() {
   }
 
   async function applyUpdate() {
+    if (["downloading", "restarting"].includes(nativeUpdateStatus)) return;
     if (nativeUpdate) {
       setNativeUpdateStatus("downloading");
       setNativeUpdateProgress(null);
@@ -4700,7 +4701,7 @@ function Tracker({ onExit, pwa }) {
                   <button
                     type="button"
                     onClick={() => openAccountControls("pro-reminders")}
-                    className={`font-mono hover:text-amber-200 ${form.reminderLeadDays.length ? "text-amber-300" : "text-zinc-700"}`}
+                    className={`inline-flex min-h-6 items-center font-mono hover:text-amber-200 ${form.reminderLeadDays.length ? "text-amber-300" : "text-zinc-700"}`}
                   >
                     {form.reminderLeadDays.length ? `${form.reminderLeadDays.length} armed` : "Off"} / Free 1
                   </button>
@@ -4880,7 +4881,7 @@ function Tracker({ onExit, pwa }) {
                   type="button"
                   onClick={() => setLedgerOpen(true)}
                   aria-label={`Manage ${ledgerMeta.name} subscriptions`}
-                  className="flex items-center gap-2 text-zinc-300 hover:text-amber-300"
+                  className="flex min-h-6 items-center gap-2 text-zinc-300 hover:text-amber-300"
                 >
                   <span className={`h-2 w-2 ${
                     usingCloudLedger
@@ -4894,7 +4895,7 @@ function Tracker({ onExit, pwa }) {
                   </span>
                 </button>
                 <span className="text-zinc-700">/</span>
-                <span className={usingCloudLedger
+                <span role="status" aria-live="polite" aria-atomic="true" className={usingCloudLedger
                   ? cloudSyncStatus === "synced" ? "text-emerald-400" : cloudSyncStatus === "offline" ? "text-red-300" : "text-amber-300"
                   : pwa.online ? "text-zinc-600" : "text-red-300"
                 }>
@@ -4930,11 +4931,15 @@ function Tracker({ onExit, pwa }) {
                   <button
                     type="button"
                     onClick={pwa.applyUpdate}
-                    disabled={pwa.updateBusy}
-                    className="border border-cyan-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-cyan-300 hover:border-cyan-400"
+                    aria-disabled={pwa.updateBusy}
+                    aria-busy={pwa.updateBusy}
+                    className="border border-cyan-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-cyan-300 hover:border-cyan-400 aria-disabled:cursor-not-allowed aria-disabled:border-zinc-800 aria-disabled:text-zinc-600"
                   >
                     {pwa.updateLabel}
                   </button>
+                )}
+                {pwa.updateAvailable && (
+                  <LiveMessage className="sr-only">{pwa.updateLabel}</LiveMessage>
                 )}
                 <button
                   type="button"
@@ -5095,7 +5100,7 @@ function Tracker({ onExit, pwa }) {
                     type="button"
                     aria-pressed={forecastHorizon === days}
                     onClick={() => setForecastHorizon(days)}
-                    className={`border-r border-zinc-700 px-2 py-1 font-mono text-[10px] font-black last:border-r-0 ${
+                    className={`min-h-6 border-r border-zinc-700 px-2 py-1 font-mono text-[10px] font-black last:border-r-0 ${
                       forecastHorizon === days ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:text-zinc-100"
                     }`}
                   >
@@ -5187,7 +5192,7 @@ function Tracker({ onExit, pwa }) {
                   type="button"
                   onClick={() => setCalendarExportOpen(true)}
                   aria-label="Export calendar"
-                  className="border border-zinc-700 bg-black px-2 py-1 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-amber-400 hover:text-amber-300"
+                  className="min-h-6 border border-zinc-700 bg-black px-2 py-1 font-mono text-[9px] font-black uppercase text-zinc-400 hover:border-amber-400 hover:text-amber-300"
                 >
                   ICS
                 </button>

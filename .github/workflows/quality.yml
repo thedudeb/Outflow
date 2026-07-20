@@ -58,6 +58,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:accessibility-contract
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:account-prompts
       - run: npm run test:feature-access
@@ -100,6 +101,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:accessibility-contract
       - run: npm run test:device-notifications
       - run: npm run test:app-updates
       - run: npm run test:desktop-shell
@@ -120,6 +122,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:accessibility-contract
       - run: rustup target add aarch64-apple-ios-sim
       - run: npm run test:device-notifications
       - run: npm run test:mobile-shell
@@ -150,6 +153,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - run: npm ci
+      - run: npm run test:accessibility-contract
       - run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-36" \

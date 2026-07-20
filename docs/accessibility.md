@@ -1,8 +1,10 @@
 # Web Accessibility Baseline
 
-**Status:** Automated web gate and interaction baseline implemented; manual screen-reader audit pending
+**Status:** Automated shared-UI and production-web gates implemented; manual platform acceptance pending
 
 Outflow's responsive web experience uses native controls and semantic regions wherever possible. Accessibility remains a release requirement, so individual improvements must be verified as behavior rather than inferred from visual styling or ARIA attributes alone.
+
+The release-candidate procedures for the web/PWA, macOS, iPhone/iPad, and Android products are defined in the [cross-platform accessibility acceptance contract](accessibility-acceptance.md). Native products inherit the shared interface, but they do not inherit a passing platform result until their WebView and OS-controlled surfaces complete that contract.
 
 Every primary view begins with a keyboard-visible skip link that moves focus past repeated navigation and utility controls to the page's level-one heading. Beta tester redemption history uses a named native table with scoped column headers, so tester, account, and redemption-date relationships remain available without relying on the visual grid.
 
@@ -44,6 +46,8 @@ Run `npm run test:a11y` to start an isolated Vite server and execute axe-core th
 
 Coverage includes the landing page, the direct privacy and data-control view, the admin console, the complete tracker dashboard, and the account, calendar export, subscription-list, and alert controls at both viewport sizes. The same command verifies keyboard bypass navigation, document reflow, and dialog containment at 320 CSS pixels, then emulates forced colors plus reduced motion and requires a computed keyboard-focus outline. The configured-service suite additionally scans the populated admin and beta-code controls, Pro-only CSV import dialog, authenticated shared-collaboration panel, published hosted-calendar state, signed-in one-time offer, and armed account-deletion state. It also verifies the tester-history table's accessible name and headers, including reflow at 320 CSS pixels. Any reported violation fails the command with its rule, impact, and affected selectors. GitHub Actions includes both suites on pull requests and pushes to `main` after the production build and unit tests.
 
+Production PWA tests repeat WCAG A/AA scans against the built landing, privacy, tracker, and fully offline states at both root and repository-path scopes. The post-deployment smoke job repeats the scans against the actual HTTPS Pages release. The shared gate also requires 24 by 24 CSS-pixel pointer targets for application controls and verifies primary workflows after the WCAG text-spacing override.
+
 The 320 CSS-pixel checks are an automated reflow proxy for magnified desktop layouts. They do not replace manual browser-zoom verification because browser chrome, text rendering, and assistive-technology combinations are outside the test fixture.
 
 Automated checks cannot prove reading order quality, announcement timing, understandable control labels, or assistive-technology behavior. They are a regression floor, not a substitute for the manual release audit.
@@ -64,7 +68,9 @@ Browser QA covers:
 10. Automated WCAG A/AA scans across desktop, mobile, guest/local, and configured-service surfaces, plus reflow and forced-colors checks, with no violations.
 11. Billing-calendar roving focus, day/week/month keyboard movement, cross-month focus retention, current-date semantics, and short-month clamping at desktop and mobile sizes.
 12. Keyboard bypass links on landing, privacy, tracker, and configured admin views, plus native table semantics for beta tester history.
+13. Minimum pointer-target dimensions and user text-spacing reflow across landing, tracker, and modal workflows.
+14. Production PWA WCAG scans while online and offline, plus WCAG scans of the published HTTPS release.
 
 ## Remaining Release Work
 
-Before describing the web product as accessibility-audited, complete manual screen-reader testing with VoiceOver/Safari and NVDA/Firefox or NVDA/Chrome. Cover dashboard reading order, form validation announcements, dynamic sync and payment status behavior, calendar navigation, browser zoom, and notification-permission flows in addition to the automated gate and dialog matrix above.
+Before describing any product as accessibility-audited, complete the applicable manual runs in the [cross-platform acceptance contract](accessibility-acceptance.md). At minimum, web/PWA requires VoiceOver/Safari and NVDA/Firefox plus Chrome; macOS requires VoiceOver in the signed client; iPhone/iPad requires VoiceOver, Dynamic Type, and Switch Control; Android requires TalkBack, font/display scaling, and Switch Access.

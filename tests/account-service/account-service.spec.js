@@ -824,6 +824,8 @@ test("administrator can enable maintenance, retain console access, and restore t
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "app in maintenance mode thank you for understanding", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open tracker", exact: true })).toHaveCount(0);
+  const maintenanceScan = await new AxeBuilder({ page }).withTags(wcagTags).analyze();
+  expect(maintenanceScan.violations.length, violationSummary(maintenanceScan.violations)).toBe(0);
 
   await page.goto("/?view=admin");
   await expect(page.getByRole("button", { name: "Disable maintenance", exact: true })).toBeVisible();
@@ -1039,7 +1041,7 @@ test("synced list stays isolated, synchronizes one version, and sign-out restore
   const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
   await openStudioCloud(page);
 
-  await expect(page.getByRole("status")).toContainText("Synced list loaded. Changes are protected against conflicting updates.");
+  await expect(page.getByRole("status").filter({ hasText: "Synced list loaded" })).toContainText("Synced list loaded. Changes are protected against conflicting updates.");
   await expect(monthlyOutflow(page)).toContainText("$25.00");
   await expect(monthlyOutflow(page)).not.toContainText("$39.47");
   let cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
@@ -1049,7 +1051,7 @@ test("synced list stays isolated, synchronizes one version, and sign-out restore
   await cloudCard.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("30");
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
+  await expect(page.getByRole("status").filter({ hasText: "Synchronized version 3" })).toContainText("Synchronized version 3.");
   await expect(monthlyOutflow(page)).toContainText("$30.00");
   expect(cloudState.writes).toHaveLength(1);
   expect(cloudState.writes[0]).toMatchObject({
@@ -1098,7 +1100,7 @@ test("failed synced writes survive reload, replay once, fail closed on conflict,
   await page.reload();
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
   await openStudioCloud(page);
-  await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
+  await expect(page.getByRole("status").filter({ hasText: "Synchronized version 3" })).toContainText("Synchronized version 3.");
   cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
   await expect(cloudCard).toContainText("$31.00");
   expect(cloudState.writes).toHaveLength(2);
@@ -1128,7 +1130,7 @@ test("failed synced writes survive reload, replay once, fail closed on conflict,
   expect((await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")))).operations).toEqual([]);
 
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Synced list refreshed.");
+  await expect(page.getByRole("status").filter({ hasText: "Synced list refreshed" })).toContainText("Synced list refreshed.");
   cloudState.replaceMode = "applied";
   cloudState.replaceFailuresRemaining = 1;
   await authoritativeCard.getByRole("button", { name: "Edit", exact: true }).click();
@@ -1192,7 +1194,7 @@ test("account display name stays private and refreshes shared attribution throug
 
     await expect(dialog.getByText("Profile saved. Shared lists now identify you as Avery Ledger.", { exact: true })).toBeVisible();
     await expect(displayName).toHaveValue("Avery Ledger");
-    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.");
+    await expect(peerPage.getByRole("status").filter({ hasText: "Remote changes applied" })).toContainText("Remote changes applied.");
     await expect(peerCard).toContainText("Added by You / Updated by Avery Ledger");
     await expect(peerPage.getByText(fixtureUser.email, { exact: true })).toHaveCount(0);
     expect(cloudState.profileWrites).toEqual([{ userId: fixtureUser.id, displayName: "Avery Ledger" }]);
@@ -1241,11 +1243,11 @@ test("isolated browser clients refresh through Realtime and protect an active st
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("30");
     await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Synchronized version 3.");
+    await expect(page.getByRole("status").filter({ hasText: "Synchronized version 3" })).toContainText("Synchronized version 3.");
 
     realtimeState.emitChange();
     const peerCard = peerPage.getByRole("article").filter({ hasText: "Figma Cloud" });
-    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.");
+    await expect(peerPage.getByRole("status").filter({ hasText: "Remote changes applied" })).toContainText("Remote changes applied.");
     await expect(peerCard).toContainText("$30.00");
     await expect(monthlyOutflow(peerPage)).toContainText("$30.00");
 
@@ -1257,7 +1259,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("35");
     await page.getByRole("button", { name: "Commit changes", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Synchronized version 4.");
+    await expect(page.getByRole("status").filter({ hasText: "Synchronized version 4" })).toContainText("Synchronized version 4.");
 
     realtimeState.emitChange();
     await expect(peerPage.getByRole("alert")).toContainText("Another synced update is available. Finish or cancel the current edit, then refresh.");
@@ -1267,7 +1269,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
 
     await peerPage.getByRole("button", { name: "Clear", exact: true }).click();
     await peerPage.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(peerPage.getByRole("status")).toContainText("Synced list refreshed.");
+    await expect(peerPage.getByRole("status").filter({ hasText: "Synced list refreshed" })).toContainText("Synced list refreshed.");
     await expect(peerCard).toContainText("$35.00");
 
     expect(await realtimeState.disconnect("peer")).toBe(1);
@@ -1281,7 +1283,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
       updated_at: "2026-07-19T14:00:00.000Z",
     }];
 
-    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.", { timeout: 10_000 });
+    await expect(peerPage.getByRole("status").filter({ hasText: "Remote changes applied" })).toContainText("Remote changes applied.", { timeout: 10_000 });
     await expect(peerCard).toContainText("$41.00");
     await expect(monthlyOutflow(peerPage)).toContainText("$41.00");
   } finally {
@@ -1717,6 +1719,12 @@ test("signed-in account redeems a beta code and activates server-backed Pro", as
   await openTracker(page);
   await page.getByRole("button", { name: `Open account controls for ${fixtureUser.email}`, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+
+  const betaDialogScan = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(betaDialogScan.violations.length, violationSummary(betaDialogScan.violations)).toBe(0);
 
   await dialog.getByRole("textbox", { name: "Access code", exact: true }).fill("outflow-abcde-f0123-45678-9abcd");
   await dialog.getByRole("button", { name: "Activate Pro", exact: true }).click();
