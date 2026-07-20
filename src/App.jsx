@@ -1532,6 +1532,7 @@ function Tracker({ onExit, pwa }) {
     }
   });
   const [accountEmail, setAccountEmail] = useState("");
+  const [accountAccessMode, setAccountAccessMode] = useState("create");
   const [accountSession, setAccountSession] = useState(null);
   const [accountProfile, setAccountProfile] = useState({ displayName: "", updatedAt: "" });
   const [accountDisplayName, setAccountDisplayName] = useState("");
@@ -1806,6 +1807,7 @@ function Tracker({ onExit, pwa }) {
   }, []);
 
   useEffect(() => {
+    if (pendingInviteToken || proReturn === "success") setAccountAccessMode("signin");
     if (pendingInviteToken || proReturn) setAccountOpen(true);
   }, [pendingInviteToken, proReturn]);
 
@@ -2294,6 +2296,9 @@ function Tracker({ onExit, pwa }) {
       setAccountPromptContext("");
     }
     if (resolvedContext.startsWith("pro-")) setAccountPromptContext("");
+    if (["activity", "backup", "shared", "install"].includes(resolvedContext)) {
+      setAccountAccessMode("create");
+    }
     setAccountEntryContext(resolvedContext);
     setAccountOpen(true);
   }
@@ -3019,11 +3024,14 @@ function Tracker({ onExit, pwa }) {
     setAccountError("");
     setAccountMessage("");
     try {
-      await requestAccountLink(email);
+      const creatingAccount = accountAccessMode === "create";
+      await requestAccountLink(email, creatingAccount);
       setAccountEmail(email);
-      setAccountMessage("Sign-in link sent. Your local workspace has not been uploaded.");
+      setAccountMessage(creatingAccount
+        ? "Account link sent. Open it to finish creating your account. Your local workspace has not been uploaded."
+        : "Sign-in link sent. Your local workspace has not been uploaded.");
     } catch (error) {
-      setAccountError(error instanceof Error ? error.message : "Outflow could not send the sign-in link.");
+      setAccountError(error instanceof Error ? error.message : "Outflow could not send the account link.");
     } finally {
       setAccountBusy("");
     }
@@ -4645,6 +4653,36 @@ function Tracker({ onExit, pwa }) {
 
               {cloudConfigured && !accountLoading && !accountSession && (
                 <form onSubmit={sendAccountLink} className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <div className="grid grid-cols-2 border border-zinc-700 sm:col-span-2" role="group" aria-label="Account access mode">
+                    <button
+                      type="button"
+                      aria-pressed={accountAccessMode === "create"}
+                      onClick={() => {
+                        setAccountAccessMode("create");
+                        setAccountError("");
+                        setAccountMessage("");
+                      }}
+                      className={`h-9 border-r border-zinc-700 px-3 font-mono text-[10px] font-black uppercase ${
+                        accountAccessMode === "create" ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:text-zinc-100"
+                      }`}
+                    >
+                      Create account
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={accountAccessMode === "signin"}
+                      onClick={() => {
+                        setAccountAccessMode("signin");
+                        setAccountError("");
+                        setAccountMessage("");
+                      }}
+                      className={`h-9 px-3 font-mono text-[10px] font-black uppercase ${
+                        accountAccessMode === "signin" ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:text-zinc-100"
+                      }`}
+                    >
+                      Sign in
+                    </button>
+                  </div>
                   <Field label="Email address">
                     <input
                       type="email"
@@ -4662,14 +4700,20 @@ function Tracker({ onExit, pwa }) {
                     disabled={accountBusy === "link" || !accountEmail.trim()}
                     className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
                   >
-                    {accountBusy === "link" ? "Sending..." : "Email sign-in link"}
+                    {accountBusy === "link"
+                      ? "Sending..."
+                      : accountAccessMode === "create"
+                        ? "Email creation link"
+                        : "Email sign-in link"}
                   </button>
                   <div className="font-mono text-[9px] uppercase text-zinc-700 sm:col-span-2">
                     {pendingInviteToken
                       ? "Sign in with the address that received this private invitation. Local ledger data stays untouched."
                       : proReturn === "success"
                         ? "Sign in to confirm and restore the account entitlement. The return URL does not grant Pro."
-                        : "Creating an account does not upload or remove local ledger data."}
+                        : accountAccessMode === "create"
+                          ? "A new account is created only after you open the email link. Local ledger data stays on this browser."
+                          : "Sign-in mode never creates an account. Local ledger data stays on this browser."}
                   </div>
                 </form>
               )}

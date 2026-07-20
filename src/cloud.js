@@ -63,7 +63,10 @@ export async function verifyAccountSession(session) {
   return { ...session, user: data.user };
 }
 
-export async function requestAccountLink(email) {
+export async function requestAccountLink(email, shouldCreateUser) {
+  if (typeof shouldCreateUser !== "boolean") {
+    throw new Error("Choose whether to create an account or sign in.");
+  }
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");
   const redirect = new URL(window.location.href);
@@ -72,7 +75,7 @@ export async function requestAccountLink(email) {
     email,
     options: {
       emailRedirectTo: redirect.toString(),
-      shouldCreateUser: true,
+      shouldCreateUser,
     },
   });
   if (error) throw error;

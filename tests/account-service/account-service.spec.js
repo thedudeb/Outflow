@@ -706,7 +706,7 @@ async function openStudioCloud(page, email = "owner@example.com") {
   await expect(page.getByRole("button", { name: "Open Studio Cloud ledger controls", exact: true })).toBeVisible();
 }
 
-test("configured guest requests an optional sign-in link without uploading local data", async ({ page }) => {
+test("configured guest explicitly creates or signs in without uploading local data", async ({ page }) => {
   const fixture = await installCloudFixture(page);
   await openTracker(page);
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
@@ -715,16 +715,55 @@ test("configured guest requests an optional sign-in link without uploading local
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Identity Guest");
   await expect(dialog).toContainText("Cloud Ready");
+  await expect(dialog.getByRole("button", { name: "Create account", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+  const dialogGeometry = await dialog.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(dialogGeometry.scrollWidth).toBeLessThanOrEqual(dialogGeometry.clientWidth);
   await dialog.getByRole("textbox", { name: "Email address", exact: true }).fill("OWNER@EXAMPLE.COM");
+  await dialog.getByRole("button", { name: "Email creation link", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("Account link sent. Open it to finish creating your account.");
+
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Sign in", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog).toContainText("Sign-in mode never creates an account.");
+  await dialog.getByRole("textbox", { name: "Email address", exact: true }).fill("RETURNING@EXAMPLE.COM");
   await dialog.getByRole("button", { name: "Email sign-in link", exact: true }).click();
   await expect(dialog.getByRole("status")).toContainText("Sign-in link sent. Your local workspace has not been uploaded.");
 
-  const otp = fixture.traffic.find((request) => request.path.endsWith("/auth/v1/otp"));
-  expect(otp?.body).toMatchObject({ email: "owner@example.com", create_user: true });
-  expect(otp?.body?.code_challenge).toBeTruthy();
+  const otpRequests = fixture.traffic.filter((request) => request.path.endsWith("/auth/v1/otp"));
+  expect(otpRequests).toHaveLength(2);
+  expect(otpRequests[0]?.body).toMatchObject({ email: "owner@example.com", create_user: true });
+  expect(otpRequests[1]?.body).toMatchObject({ email: "returning@example.com", create_user: false });
+  expect(otpRequests.every((request) => request.body?.code_challenge)).toBe(true);
+  expect(otpRequests.every((request) => JSON.stringify(request.body).includes("Netflix") === false)).toBe(true);
   expect(fixture.migrations).toHaveLength(0);
   await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
+});
+
+test("private invitation entry defaults to sign-in without creating an account", async ({ page }) => {
+  const fixture = await installCloudFixture(page);
+  await page.goto(`/#app?invite=${invitationToken}`);
+
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Sign in", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog).toContainText("Sign in with the address that received this private invitation.");
+  await dialog.getByRole("textbox", { name: "Email address", exact: true }).fill("INVITED@EXAMPLE.COM");
+  await dialog.getByRole("button", { name: "Email sign-in link", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("Sign-in link sent. Your local workspace has not been uploaded.");
+
+  const otpRequests = fixture.traffic.filter((request) => request.path.endsWith("/auth/v1/otp"));
+  expect(otpRequests).toHaveLength(1);
+  expect(otpRequests[0]?.body).toMatchObject({ email: "invited@example.com", create_user: false });
+  expect(fixture.migrations).toHaveLength(0);
 });
 
 test("verified sign-in preserves local data until Create cloud copy is selected", async ({ page }) => {

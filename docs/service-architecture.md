@@ -62,7 +62,7 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 ## Account Lifecycle
 
 1. Dismissible account checkpoints can appear after meaningful local activity, backup, sharing, or installation moments. They store only local cadence state and never upload data or block the triggering action. See [Optional Account Onboarding](optional-account-onboarding.md).
-2. A guest requests a passwordless email link. No ledger data is included in that request.
+2. A guest explicitly chooses account creation or returning-user sign-in, then requests a passwordless PKCE email link. Only creation may set `create_user`; sign-in and private-invitation entry fail closed against implicit account creation. No ledger data is included in either request.
 3. A returned or recovered session is accepted only after Supabase Auth verifies its access token and user.
 4. After authentication, the user sees the number of local ledgers and records that can be uploaded.
 5. Upload is explicit. The client calls `migrate_guest_workspace` with the validated versioned workspace.
