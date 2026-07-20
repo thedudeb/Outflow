@@ -1,0 +1,71 @@
+name: iOS Production Signing Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outflow-ios-production-signing
+  cancel-in-progress: false
+
+jobs:
+  signing-acceptance:
+    name: App Store distribution signed IPA verification
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 40
+    environment: ios-production
+    env:
+      OUTFLOW_IOS_EXPECTED_TEAM_ID: ${{ vars.OUTFLOW_IOS_TEAM_ID }}
+      OUTFLOW_IOS_EXPECTED_CERT_SHA256: ${{ vars.OUTFLOW_IOS_DISTRIBUTION_CERT_SHA256 }}
+      OUTFLOW_IOS_EXPECTED_COMMIT: ${{ github.sha }}
+      OUTFLOW_IOS_BUILD_NUMBER: ${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install pinned Apple Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - name: Verify release contracts before secrets
+        run: |
+          npm run test:device-notifications
+          npm run test:mobile-shell
+          npm run test:mobile:ios-release
+      - name: Build and inspect unsigned simulator baseline
+        run: |
+          npm run mobile:ios:build
+          npm run check:mobile:ios-bundle
+      - name: Verify protected signing environment
+        run: npm run check:mobile:ios-release-environment
+        env:
+          IOS_CERTIFICATE: ${{ secrets.OUTFLOW_IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.OUTFLOW_IOS_MOBILE_PROVISION_BASE64 }}
+      - name: Build App Store Connect signed IPA
+        run: npm run mobile:ios:release
+        env:
+          IOS_CERTIFICATE: ${{ secrets.OUTFLOW_IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.OUTFLOW_IOS_MOBILE_PROVISION_BASE64 }}
+      - name: Inspect fingerprint-pinned signed IPA
+        run: npm run check:mobile:ios-release
+      - name: Record bounded release evidence
+        run: |
+          {
+            echo "### iOS signing acceptance"
+            echo
+            echo '```text'
+            shasum -a 256 src-tauri/gen/apple/build/arm64/Outflow.ipa
+            echo '```'
+            echo
+            echo "Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"

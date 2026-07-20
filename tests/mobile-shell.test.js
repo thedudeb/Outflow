@@ -63,7 +63,11 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.equal(packageJson.scripts.tauri, "tauri");
   assert.equal(packageJson.scripts["mobile:ios:init"], "node scripts/init-ios-project.mjs");
   assert.equal(packageJson.scripts["mobile:ios:build"], "tauri ios build --ci --debug --target aarch64-sim --no-sign");
+  assert.equal(packageJson.scripts["mobile:ios:release"], "node scripts/build-ios-release.mjs");
   assert.equal(packageJson.scripts["check:mobile:ios-bundle"], "node scripts/check-ios-bundle.mjs");
+  assert.equal(packageJson.scripts["check:mobile:ios-release"], "node scripts/check-ios-release.mjs");
+  assert.equal(packageJson.scripts["check:mobile:ios-release-environment"], "node scripts/check-ios-release-environment.mjs");
+  assert.equal(packageJson.scripts["test:mobile:ios-release"], "node --test tests/ios-release.test.js");
   assert.deepEqual(capability.permissions, [
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
@@ -81,6 +85,7 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.match(quality, /ios:\n\s+runs-on: macos-latest/);
   assert.match(quality, /rustup target add aarch64-apple-ios-sim/);
   assert.match(quality, /npm run test:mobile-shell/);
+  assert.match(quality, /npm run test:mobile:ios-release/);
   assert.match(quality, /npm run mobile:ios:build/);
   assert.match(quality, /npm run check:mobile:ios-bundle/);
 });
