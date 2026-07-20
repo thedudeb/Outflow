@@ -15,6 +15,11 @@ test("the public web release deploys only a tested successful main artifact", as
   assert.match(source, /actions\/upload-pages-artifact@v4\n\s+with:\n\s+path: dist/);
   assert.match(source, /needs: build/);
   assert.match(source, /environment:\n\s+name: github-pages/);
+  assert.match(source, /outputs:\n\s+page_url: \$\{\{ steps\.deployment\.outputs\.page_url \}\}/);
+  assert.match(source, /smoke:\n\s+needs: deploy/);
+  assert.match(source, /OUTFLOW_DEPLOYMENT_URL: \$\{\{ needs\.deploy\.outputs\.page_url \}\}/);
+  assert.match(source, /npm run test:web-deployment/);
+  assert.equal(source.match(/persist-credentials: false/g)?.length, 2);
   assert.match(source, /permissions:\n\s+contents: read\n\s+pages: write\n\s+id-token: write/);
   assert.doesNotMatch(source, /VITE_SUPABASE|SUPABASE_SECRET|SERVICE_ROLE|STRIPE_|RESEND_/);
   assert.doesNotMatch(source, /^\s{2}push:/m);

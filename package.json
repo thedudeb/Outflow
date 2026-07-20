@@ -31,6 +31,7 @@
     "test:account-service": "playwright test --config=playwright.account.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
+    "test:web-deployment": "playwright test --config=playwright.deployment.config.js",
     "pretest:pwa": "npm run build",
     "test:pwa": "playwright test --config=playwright.pwa.config.js",
     "test:pwa:pages": "OUTFLOW_PUBLIC_BASE=/Outflow/ npm run build && OUTFLOW_PWA_BASE=/Outflow/ playwright test --config=playwright.pwa.config.js",
