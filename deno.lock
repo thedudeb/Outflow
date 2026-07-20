@@ -6,6 +6,8 @@
     "npm:@supabase/supabase-js@2.75.0": "2.75.0",
     "npm:@tauri-apps/cli@2.11.4": "2.11.4",
     "npm:@tauri-apps/plugin-notification@2.3.3": "2.3.3",
+    "npm:@tauri-apps/plugin-process@2.3.1": "2.3.1",
+    "npm:@tauri-apps/plugin-updater@2.10.1": "2.10.1",
     "npm:@vitejs/plugin-react@^4.3.4": "4.7.0_vite@6.4.3",
     "npm:autoprefixer@^10.4.20": "10.5.4_postcss@8.5.20",
     "npm:ics@3.12.0": "3.12.0",
@@ -603,6 +605,18 @@
     },
     "@tauri-apps/plugin-notification@2.3.3": {
       "integrity": "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
+    "@tauri-apps/plugin-process@2.3.1": {
+      "integrity": "sha512-nCa4fGVaDL/B9ai03VyPOjfAHRHSBz5v6F/ObsB73r/dA3MHHhZtldaDMIc0V/pnUw9ehzr2iEG+XkSEyC0JJA==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
+    "@tauri-apps/plugin-updater@2.10.1": {
+      "integrity": "sha512-NFYMg+tWOZPJdzE/PpFj2qfqwAWwNS3kXrb1tm1gnBJ9mYzZ4WDRrwy8udzWoAnfGCHLuePNLY1WVCNHnh3eRA==",
       "dependencies": [
         "@tauri-apps/api"
       ]
@@ -1308,6 +1322,8 @@
         "npm:@supabase/supabase-js@2.75.0",
         "npm:@tauri-apps/cli@2.11.4",
         "npm:@tauri-apps/plugin-notification@2.3.3",
+        "npm:@tauri-apps/plugin-process@2.3.1",
+        "npm:@tauri-apps/plugin-updater@2.10.1",
         "npm:@vitejs/plugin-react@^4.3.4",
         "npm:autoprefixer@^10.4.20",
         "npm:ics@^3.12.0",
