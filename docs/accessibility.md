@@ -6,6 +6,8 @@ Outflow's responsive web experience uses native controls and semantic regions wh
 
 ## Dialog Contract
 
+Every modal can be dismissed with its visible close control, the `Escape` key, or by clicking its backdrop. A click inside the dialog never dismisses it. Backdrop and keyboard dismissal remain disabled while a protected account or hosted-calendar operation is in flight, matching the disabled close control.
+
 Account, calendar export, ledger controls, alert controls, and CSV import share one dialog lifecycle:
 
 - Opening captures the invoking element and moves focus to the dialog's designated initial control.

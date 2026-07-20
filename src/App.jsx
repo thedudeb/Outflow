@@ -1137,6 +1137,22 @@ function LiveMessage({ kind = "status", className = "", children, ...props }) {
   );
 }
 
+function DialogOverlay({ children, onClose, closeDisabled = false }) {
+  function closeFromBackdrop(event) {
+    if (event.target === event.currentTarget && !closeDisabled) onClose();
+  }
+
+  return (
+    <div
+      data-dialog-overlay
+      onClick={closeFromBackdrop}
+      className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6"
+    >
+      {children}
+    </div>
+  );
+}
+
 const dialogFocusableSelector = [
   "a[href]",
   "button:not([disabled])",
@@ -4769,7 +4785,7 @@ function Tracker({ onExit, pwa }) {
       </div>
 
       {accountOpen && (
-        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
+        <DialogOverlay onClose={closeAccountControls} closeDisabled={Boolean(accountBusy)}>
           <section
             ref={accountDialogRef}
             role="dialog"
@@ -5416,11 +5432,11 @@ function Tracker({ onExit, pwa }) {
               <a href={privacyPolicyHref} className="shrink-0 font-black text-amber-300 hover:text-amber-200">Privacy and data controls</a>
             </footer>
           </section>
-        </div>
+        </DialogOverlay>
       )}
 
       {calendarExportOpen && (
-        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
+        <DialogOverlay onClose={closeCalendarExport} closeDisabled={Boolean(calendarFeedBusy)}>
           <section
             ref={calendarDialogRef}
             role="dialog"
@@ -5623,11 +5639,11 @@ function Tracker({ onExit, pwa }) {
               </button>
             </footer>
           </section>
-        </div>
+        </DialogOverlay>
       )}
 
       {ledgerOpen && (
-        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
+        <DialogOverlay onClose={closeLedgerControls}>
           <section
             ref={ledgerDialogRef}
             role="dialog"
@@ -5914,11 +5930,11 @@ function Tracker({ onExit, pwa }) {
               </footer>
             )}
           </section>
-        </div>
+        </DialogOverlay>
       )}
 
       {alertSettingsOpen && (
-        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
+        <DialogOverlay onClose={() => setAlertSettingsOpen(false)}>
           <section
             ref={alertDialogRef}
             role="dialog"
@@ -5998,11 +6014,11 @@ function Tracker({ onExit, pwa }) {
               </div>
             </footer>
           </section>
-        </div>
+        </DialogOverlay>
       )}
 
       {importOpen && (
-        <div className="fixed inset-0 z-50 grid grid-cols-[minmax(0,1fr)] place-items-center bg-black/85 p-3 sm:p-6">
+        <DialogOverlay onClose={closeCsvImport}>
           <section
             ref={csvDialogRef}
             role="dialog"
@@ -6148,7 +6164,7 @@ function Tracker({ onExit, pwa }) {
               </button>
             </footer>
           </section>
-        </div>
+        </DialogOverlay>
       )}
     </main>
   );

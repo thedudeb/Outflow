@@ -1430,7 +1430,14 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   const importButton = page.getByRole("button", { name: "Import CSV / Pro", exact: true });
   await expect(importButton).toBeVisible();
   await importButton.click();
-  const dialog = page.getByRole("dialog", { name: "Import subscriptions" });
+  let dialog = page.getByRole("dialog", { name: "Import subscriptions" });
+  await dialog.click({ position: { x: 2, y: 2 } });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("xpath=..").click({ position: { x: 2, y: 2 } });
+  await expect(dialog).toBeHidden();
+
+  await importButton.click();
+  dialog = page.getByRole("dialog", { name: "Import subscriptions" });
   await dialog.locator('input[type="file"]').setInputFiles(importFixture);
 
   await expect(dialog.getByText(/Ready\s+2/)).toBeVisible();
