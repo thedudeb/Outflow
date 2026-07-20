@@ -10,6 +10,7 @@ import {
   getCloud,
   hostedCalendarFeedUrl,
   publishHostedCalendarFeed,
+  readAppServiceStatus,
   readAccountDataExport,
   readAccountProfile,
   readCloudLedgerAccess,
@@ -23,11 +24,13 @@ import {
   removeCloudLedgerMember,
   replaceCloudLedgerSnapshot,
   requestAccountLink,
+  requestAdminLink,
   revokeCloudLedgerInvitation,
   revokeHostedCalendarFeed,
   saveHostedCalendarFeedOptions,
   saveAccountProfile,
   sendCloudLedgerInvitation,
+  setAppMaintenanceMode,
   saveNotificationPreferences,
   subscribeToCloudLedger,
   subscribeToNotificationPreferences,
@@ -79,6 +82,13 @@ import {
   isMacosNativeRuntime,
   startPwaUpdateChecks,
 } from "./appUpdates";
+import {
+  availableServiceStatus,
+  MAINTENANCE_MESSAGE,
+  readCachedServiceStatus,
+  startServiceStatusChecks,
+  writeCachedServiceStatus,
+} from "./serviceStatus";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -90,8 +100,10 @@ const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
 const PRIVACY_VIEW = "privacy";
+const ADMIN_VIEW = "admin";
 const PRIVACY_POLICY_VERSION = "2026-07-20";
 const privacyPolicyHref = `${import.meta.env.BASE_URL}?view=${PRIVACY_VIEW}`;
+const adminConsoleHref = `${import.meta.env.BASE_URL}?view=${ADMIN_VIEW}`;
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -176,7 +188,8 @@ function isTrackerHash(hash = window.location.hash) {
 
 function currentView(location = window.location) {
   if (isTrackerHash(location.hash)) return "tracker";
-  return new URLSearchParams(location.search).get("view") === PRIVACY_VIEW ? PRIVACY_VIEW : "landing";
+  if (new URLSearchParams(location.search).get("view") === PRIVACY_VIEW) return PRIVACY_VIEW;
+  return new URLSearchParams(location.search).get("view") === ADMIN_VIEW ? ADMIN_VIEW : "landing";
 }
 
 function readInviteToken() {
@@ -1398,6 +1411,319 @@ function useInstallableApp() {
   };
 }
 
+function useAppServiceStatus() {
+  const [state, setState] = useState(() => {
+    const cached = readCachedServiceStatus();
+    return {
+      status: cached || availableServiceStatus,
+      loading: cloudConfigured && navigator.onLine !== false && !cached?.maintenanceEnabled,
+    };
+  });
+
+  function applyStatus(nextStatus) {
+    const status = writeCachedServiceStatus(nextStatus);
+    setState({ status, loading: false });
+  }
+
+  useEffect(() => {
+    if (!cloudConfigured) {
+      setState((current) => ({ ...current, loading: false }));
+      return undefined;
+    }
+    return startServiceStatusChecks({
+      readStatus: readAppServiceStatus,
+      onStatus: applyStatus,
+      onUnavailable: () => setState((current) => ({ ...current, loading: false })),
+    });
+  }, []);
+
+  return { ...state, applyStatus };
+}
+
+function ServiceStatusLoading() {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#08090a] px-4 text-zinc-100">
+      <LiveMessage className="border border-zinc-800 bg-black px-5 py-4 font-mono text-xs uppercase text-zinc-500">
+        Checking service availability...
+      </LiveMessage>
+    </main>
+  );
+}
+
+function MaintenancePage() {
+  useEffect(() => {
+    const priorTitle = document.title;
+    document.title = "Maintenance | Outflow";
+    return () => {
+      document.title = priorTitle;
+    };
+  }, []);
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-black px-5 text-zinc-100">
+      <h1 className="max-w-3xl text-center font-mono text-xl font-black uppercase leading-relaxed text-amber-300 sm:text-3xl">
+        {MAINTENANCE_MESSAGE}
+      </h1>
+    </main>
+  );
+}
+
+function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(cloudConfigured);
+  const [client, setClient] = useState(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [enableArmed, setEnableArmed] = useState(false);
+  const isAdmin = session?.user?.app_metadata?.outflow_role === "admin";
+
+  useEffect(() => {
+    const priorTitle = document.title;
+    document.title = "Admin console | Outflow";
+    return () => {
+      document.title = priorTitle;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cloudConfigured) {
+      setLoading(false);
+      return undefined;
+    }
+    let active = true;
+    let authSubscription;
+    const applySession = async (candidate) => {
+      if (!candidate) {
+        if (active) {
+          setSession(null);
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
+      try {
+        const verified = await verifyAccountSession(candidate);
+        if (active) {
+          setSession(verified);
+          setEmail(verified?.user?.email || "");
+        }
+      } catch {
+        if (active) {
+          setSession(null);
+          setError("The administrator session could not be verified. Sign in again.");
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    getCloud().then(async (cloudClient) => {
+      if (!active || !cloudClient) return;
+      setClient(cloudClient);
+      const { data: listener } = cloudClient.auth.onAuthStateChange((event, candidate) => {
+        if (active && event !== "INITIAL_SESSION") void applySession(candidate);
+      });
+      authSubscription = listener.subscription;
+      const { data, error: sessionError } = await cloudClient.auth.getSession();
+      if (!active) return;
+      if (sessionError) {
+        setError("The administrator session could not be read. Sign in again.");
+        setLoading(false);
+        return;
+      }
+      await applySession(data.session || null);
+    }).catch(() => {
+      if (active) {
+        setError("The administrator service is unavailable.");
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      authSubscription?.unsubscribe();
+    };
+  }, []);
+
+  async function sendSignInLink(event) {
+    event.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || busy) return;
+    setBusy("sign-in");
+    setMessage("");
+    setError("");
+    try {
+      await requestAdminLink(normalizedEmail);
+      setMessage("Administrator sign-in link sent. This does not create a new account.");
+    } catch (signInError) {
+      setError(signInError instanceof Error ? signInError.message : "The administrator sign-in link could not be sent.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function signOut() {
+    if (!client || busy) return;
+    setBusy("sign-out");
+    setMessage("");
+    setError("");
+    try {
+      const { error: signOutError } = await client.auth.signOut();
+      if (signOutError) throw signOutError;
+      setSession(null);
+      setEnableArmed(false);
+    } catch (signOutError) {
+      setError(signOutError instanceof Error ? signOutError.message : "The administrator session could not be closed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeMaintenanceMode(enabled) {
+    if (!isAdmin || busy) return;
+    if (enabled && !enableArmed) {
+      setEnableArmed(true);
+      setMessage("");
+      setError("");
+      return;
+    }
+    setBusy(enabled ? "enable" : "disable");
+    setMessage("");
+    setError("");
+    try {
+      const nextStatus = await setAppMaintenanceMode(enabled);
+      onStatusChange(nextStatus);
+      setEnableArmed(false);
+      setMessage(enabled ? "Maintenance mode enabled." : "Maintenance mode disabled. Outflow is available again.");
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "Maintenance mode could not be changed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#08090a] text-zinc-100">
+      <nav className="border-b border-zinc-800 bg-black">
+        <div className="mx-auto flex min-h-14 max-w-[980px] items-center justify-between gap-3 px-4 py-2 sm:px-6">
+          <button type="button" onClick={onHome} className="text-lg font-black uppercase text-white">Outflow</button>
+          <button type="button" onClick={onHome} className="border border-zinc-700 px-3 py-2 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white">
+            Home
+          </button>
+        </div>
+      </nav>
+
+      <div className="mx-auto max-w-[980px] px-4 py-8 sm:px-6 sm:py-12">
+        <header className="border-b border-zinc-800 pb-6">
+          <div className="font-mono text-[10px] font-black uppercase text-amber-300">Restricted operations</div>
+          <h1 className="mt-2 text-3xl font-black uppercase text-white sm:text-5xl">Admin console</h1>
+        </header>
+
+        {!cloudConfigured && (
+          <LiveMessage kind="alert" className="mt-6 border border-amber-800 bg-amber-950/20 p-4 font-mono text-xs uppercase leading-5 text-amber-300">
+            Cloud services are not configured in this build. Maintenance mode cannot be controlled here.
+          </LiveMessage>
+        )}
+
+        {cloudConfigured && loading && (
+          <LiveMessage className="mt-6 border border-zinc-800 bg-black p-4 font-mono text-xs uppercase text-zinc-500">
+            Verifying administrator session...
+          </LiveMessage>
+        )}
+
+        {cloudConfigured && !loading && !session && (
+          <form onSubmit={sendSignInLink} className="mt-6 grid max-w-xl gap-4 border border-zinc-800 bg-black p-4 sm:p-6">
+            <div>
+              <h2 className="text-lg font-black uppercase text-zinc-100">Administrator sign in</h2>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">Use an existing account with the server-assigned administrator role.</p>
+            </div>
+            <Field label="Email">
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                required
+                className="h-11 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+              />
+            </Field>
+            <button type="submit" disabled={Boolean(busy)} className="h-11 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
+              {busy === "sign-in" ? "Sending..." : "Send sign-in link"}
+            </button>
+          </form>
+        )}
+
+        {cloudConfigured && !loading && session && !isAdmin && (
+          <section className="mt-6 border border-red-900 bg-black p-4 sm:p-6">
+            <h2 className="text-lg font-black uppercase text-red-300">Access denied</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">This verified account does not have the administrator role.</p>
+            <button type="button" onClick={signOut} disabled={Boolean(busy)} className="mt-5 border border-zinc-700 px-4 py-2 text-xs font-black uppercase text-zinc-300 hover:border-zinc-400 hover:text-white disabled:opacity-50">
+              Sign out
+            </button>
+          </section>
+        )}
+
+        {cloudConfigured && !loading && isAdmin && (
+          <section className="mt-6 border border-zinc-700 bg-black">
+            <div className="grid border-b border-zinc-800 font-mono text-[10px] uppercase sm:grid-cols-3">
+              <div className="border-b border-zinc-800 px-4 py-3 sm:border-b-0 sm:border-r">
+                <span className="text-zinc-600">Identity / </span><span className="text-cyan-300">Admin</span>
+              </div>
+              <div className="border-b border-zinc-800 px-4 py-3 sm:border-b-0 sm:border-r">
+                <span className="text-zinc-600">Service / </span>
+                <span className={serviceStatus.maintenanceEnabled ? "text-red-300" : "text-emerald-300"}>
+                  {serviceStatus.maintenanceEnabled ? "Maintenance" : "Available"}
+                </span>
+              </div>
+              <div className="truncate px-4 py-3 text-zinc-400">{session.user.email}</div>
+            </div>
+
+            <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-end">
+              <div>
+                <h2 className="text-xl font-black uppercase text-zinc-100">Maintenance mode</h2>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500">
+                  Blocks the landing page and tracker on configured web and native clients. The admin console stays reachable so maintenance mode can be disabled.
+                </p>
+                {serviceStatus.updatedAt && (
+                  <div className="mt-4 font-mono text-[10px] uppercase text-zinc-600">
+                    Last changed / {new Date(serviceStatus.updatedAt).toLocaleString()}
+                  </div>
+                )}
+              </div>
+
+              {serviceStatus.maintenanceEnabled ? (
+                <button type="button" onClick={() => changeMaintenanceMode(false)} disabled={Boolean(busy)} className="h-12 border border-emerald-400 bg-emerald-400 px-4 text-xs font-black uppercase text-black hover:bg-emerald-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
+                  {busy === "disable" ? "Restoring..." : "Disable maintenance"}
+                </button>
+              ) : (
+                <button type="button" onClick={() => changeMaintenanceMode(true)} disabled={Boolean(busy)} className={`h-12 border px-4 text-xs font-black uppercase ${enableArmed ? "border-red-400 bg-red-400 text-black hover:bg-red-300" : "border-red-800 bg-red-950/30 text-red-300 hover:border-red-500"} disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600`}>
+                  {busy === "enable" ? "Enabling..." : enableArmed ? "Confirm enable" : "Enable maintenance"}
+                </button>
+              )}
+            </div>
+
+            {enableArmed && !serviceStatus.maintenanceEnabled && (
+              <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/20 px-4 py-3 font-mono text-[10px] uppercase leading-5 text-red-300 sm:px-6">
+                This will block customer access. Select Confirm enable to continue.
+              </LiveMessage>
+            )}
+
+            <footer className="flex flex-col gap-3 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <span className="font-mono text-[10px] uppercase text-zinc-600">Changes are recorded in the server audit log</span>
+              <button type="button" onClick={signOut} disabled={Boolean(busy)} className="text-left text-xs font-black uppercase text-zinc-400 hover:text-white disabled:opacity-50">Sign out</button>
+            </footer>
+          </section>
+        )}
+
+        {message && <LiveMessage className="mt-4 border border-emerald-900 bg-emerald-950/20 p-3 font-mono text-xs uppercase text-emerald-300">{message}</LiveMessage>}
+        {error && <LiveMessage kind="alert" className="mt-4 border border-red-900 bg-red-950/20 p-3 font-mono text-xs uppercase text-red-300">{error}</LiveMessage>}
+      </div>
+    </main>
+  );
+}
+
 function PrivacySection({ code, title, children }) {
   return (
     <section aria-labelledby={`privacy-${code}`} className="grid border-b border-zinc-800 lg:grid-cols-[180px_minmax(0,1fr)]">
@@ -1489,6 +1815,9 @@ function PrivacyPage({ onHome, onOpen }) {
         <PrivacySection code="02" title="Optional account and shared data">
           <p>
             When account services are available, requesting a passwordless link sends your email address to Supabase for authentication and to its configured email provider. Signing in alone does not upload subscriptions from this device. A synced copy is created only after you select that action.
+          </p>
+          <p>
+            Configured builds also ask Supabase for a public service-availability flag when they launch, reconnect, regain focus, and periodically while open. That check returns only maintenance state and an update time; it does not include subscription or account data.
           </p>
           <p>
             A cloud account can store your email-linked account identifier, optional display name, subscription lists, subscriptions, roles, invitations, creator and updater attribution, synchronization versions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-list members can see subscription data, roles, and display-name attribution for lists they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
@@ -1745,6 +2074,7 @@ function LandingPage({ onOpen, pwa }) {
           <span className="font-black text-zinc-300">Outflow</span>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
             <a href={privacyPolicyHref} className="font-black text-zinc-400 hover:text-amber-300">Privacy and data controls</a>
+            <a href={adminConsoleHref} className="font-black text-zinc-600 hover:text-zinc-300">Admin</a>
             <span>Recurring debit monitor</span>
           </div>
         </div>
@@ -6254,6 +6584,7 @@ function Tracker({ onExit, pwa }) {
 function App() {
   const [view, setView] = useState(currentView);
   const pwa = useInstallableApp();
+  const service = useAppServiceStatus();
 
   useEffect(() => {
     const syncView = () => setView(currentView());
@@ -6283,6 +6614,11 @@ function App() {
     window.scrollTo(0, 0);
   }
 
+  if (view !== ADMIN_VIEW && service.loading) return <ServiceStatusLoading />;
+  if (view !== ADMIN_VIEW && service.status.maintenanceEnabled) return <MaintenancePage />;
+  if (view === ADMIN_VIEW) {
+    return <AdminConsole serviceStatus={service.status} onStatusChange={service.applyStatus} onHome={navigateHome} />;
+  }
   if (view === "tracker") return <Tracker onExit={navigateHome} pwa={pwa} />;
   if (view === PRIVACY_VIEW) return <PrivacyPage onHome={navigateHome} onOpen={navigateToTracker} />;
   return <LandingPage onOpen={navigateToTracker} pwa={pwa} />;

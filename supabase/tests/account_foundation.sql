@@ -6,6 +6,84 @@ insert into auth.users (id, email) values
 
 set role anon;
 do $$
+declare
+  status jsonb;
+begin
+  status := public.read_app_service_status();
+  if (status ->> 'maintenanceEnabled')::boolean or (status ->> 'schemaVersion')::integer <> 1 then
+    raise exception 'anonymous service status was invalid';
+  end if;
+  begin
+    perform count(*) from public.app_service_status;
+    raise exception 'anonymous client read the private service-status row';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.set_app_maintenance_mode(true);
+    raise exception 'anonymous client changed maintenance mode';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"member"}}', false);
+do $$
+begin
+  begin
+    perform public.set_app_maintenance_mode(true);
+    raise exception 'non-admin account changed maintenance mode';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform count(*) from public.app_service_status_events;
+    raise exception 'authenticated client read the private maintenance audit log';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"admin"}}', false);
+select public.set_app_maintenance_mode(true) as enabled_maintenance_mode;
+select public.set_app_maintenance_mode(true) as idempotent_maintenance_mode;
+reset role;
+do $$
+begin
+  if not (public.read_app_service_status() ->> 'maintenanceEnabled')::boolean then
+    raise exception 'administrator did not enable maintenance mode';
+  end if;
+  if (select count(*) from public.app_service_status_events) <> 1 then
+    raise exception 'idempotent maintenance update wrote an extra audit event';
+  end if;
+end;
+$$;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"admin"}}', false);
+select public.set_app_maintenance_mode(false) as disabled_maintenance_mode;
+reset role;
+do $$
+begin
+  if (public.read_app_service_status() ->> 'maintenanceEnabled')::boolean then
+    raise exception 'administrator did not disable maintenance mode';
+  end if;
+  if (select count(*) from public.app_service_status_events) <> 2 then
+    raise exception 'maintenance changes were not audited';
+  end if;
+end;
+$$;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('request.jwt.claims', '{}', false);
+
+set role anon;
+do $$
 begin
   perform public.save_account_profile('Anonymous');
   raise exception 'anonymous profile write unexpectedly succeeded';

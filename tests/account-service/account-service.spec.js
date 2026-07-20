@@ -29,6 +29,11 @@ const fixtureUser = {
   updated_at: "2026-07-19T12:00:00.000Z",
   is_anonymous: false,
 };
+const adminUser = {
+  ...fixtureUser,
+  email: "admin@example.com",
+  app_metadata: { provider: "email", providers: ["email"], outflow_role: "admin" },
+};
 const invitedUser = {
   ...fixtureUser,
   id: invitedUserId,
@@ -357,6 +362,11 @@ async function seedStoredSession(page, session = storedSession()) {
 async function installCloudFixture(page, {
   verifiedUser = null,
   cloudState = null,
+  maintenanceState = {
+    enabled: false,
+    updatedAt: "2026-07-20T14:00:00.000Z",
+    changes: [],
+  },
   realtimeState = createRealtimeState(),
   realtimeClientId = "fixture-client",
 } = {}) {
@@ -390,6 +400,26 @@ async function installCloudFixture(page, {
         : reply({ message: "Invalid JWT" }, 401);
     }
     if (url.pathname.endsWith("/auth/v1/logout")) return reply({});
+    if (url.pathname.endsWith("/rest/v1/rpc/read_app_service_status")) {
+      return reply({
+        schemaVersion: 1,
+        maintenanceEnabled: maintenanceState.enabled,
+        updatedAt: maintenanceState.updatedAt,
+      });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/set_app_maintenance_mode")) {
+      if (verifiedUser?.app_metadata?.outflow_role !== "admin") {
+        return reply({ message: "Administrator access is required." }, 403);
+      }
+      maintenanceState.enabled = entry.body?.requested_enabled === true;
+      maintenanceState.updatedAt = new Date().toISOString();
+      maintenanceState.changes.push(maintenanceState.enabled);
+      return reply({
+        schemaVersion: 1,
+        maintenanceEnabled: maintenanceState.enabled,
+        updatedAt: maintenanceState.updatedAt,
+      });
+    }
     if (url.pathname.endsWith("/rest/v1/rpc/migrate_guest_workspace")) {
       migrations.push(entry.body);
       const subscriptions = entry.body?.workspace_payload?.ledgers?.flatMap((ledger) => ledger.subscriptions || []) || [];
@@ -691,6 +721,45 @@ function monthlyOutflow(page) {
   return page.getByText("Monthly outflow", { exact: true }).locator("xpath=ancestor::section[1]");
 }
 
+test("administrator can enable maintenance, retain console access, and restore the app", async ({ page }) => {
+  const maintenanceState = {
+    enabled: false,
+    updatedAt: "2026-07-20T14:00:00.000Z",
+    changes: [],
+  };
+  await seedStoredSession(page, storedSession(adminUser));
+  await installCloudFixture(page, { verifiedUser: adminUser, maintenanceState });
+
+  await page.goto("/?view=admin");
+  await expect(page.getByRole("heading", { name: "Admin console", exact: true })).toBeVisible();
+  await expect(page.getByText("Service / Available", { exact: true })).toBeVisible();
+  const { violations } = await new AxeBuilder({ page })
+    .include("main")
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations, violationSummary(violations)).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  await page.getByRole("button", { name: "Enable maintenance", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Confirm enable", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm enable", exact: true }).click();
+  await expect(page.getByText("Maintenance mode enabled.", { exact: true })).toBeVisible();
+  expect(maintenanceState.changes).toEqual([true]);
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "app in maintenance mode thank you for understanding", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open tracker", exact: true })).toHaveCount(0);
+
+  await page.goto("/?view=admin");
+  await expect(page.getByRole("button", { name: "Disable maintenance", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Disable maintenance", exact: true }).click();
+  await expect(page.getByText("Maintenance mode disabled. Outflow is available again.", { exact: true })).toBeVisible();
+  expect(maintenanceState.changes).toEqual([true, false]);
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Open tracker", exact: true })).toBeVisible();
+});
+
 function violationSummary(violations) {
   return violations
     .map((violation) => `${violation.id}: ${violation.help}\n${violation.nodes.flatMap((node) => node.target).join(", ")}`)
@@ -815,7 +884,11 @@ test("forged stored session is rejected and cleared without touching the list on
   await expect(dialog.getByRole("alert")).toContainText("Your account session could not be verified. Sign in again; subscriptions on this device were not changed.");
   await expect(dialog).toContainText("Identity Guest");
   expect(fixture.migrations).toHaveLength(0);
-  expect(fixture.traffic.filter((request) => request.path.includes("/rest/v1/"))).toHaveLength(0);
+  const accountDataRequests = fixture.traffic.filter((request) =>
+    request.path.includes("/rest/v1/")
+    && !request.path.endsWith("/rest/v1/rpc/read_app_service_status"),
+  );
+  expect(accountDataRequests).toHaveLength(0);
 });
 
 test("synced list stays isolated, synchronizes one version, and sign-out restores device totals", async ({ page }) => {

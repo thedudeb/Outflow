@@ -1,3 +1,5 @@
+import { sanitizeServiceStatus } from "./serviceStatus";
+
 const projectUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
 const publishableKey = String(
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "",
@@ -79,6 +81,40 @@ export async function requestAccountLink(email, shouldCreateUser) {
     },
   });
   if (error) throw error;
+}
+
+export async function requestAdminLink(email) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const redirect = new URL(window.location.href);
+  redirect.searchParams.set("view", "admin");
+  redirect.hash = "";
+  const { error } = await cloud.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: redirect.toString(),
+      shouldCreateUser: false,
+    },
+  });
+  if (error) throw error;
+}
+
+export async function readAppServiceStatus() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("read_app_service_status");
+  if (error) throw error;
+  return sanitizeServiceStatus(data);
+}
+
+export async function setAppMaintenanceMode(enabled) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("set_app_maintenance_mode", {
+    requested_enabled: enabled === true,
+  });
+  if (error) throw error;
+  return sanitizeServiceStatus(data);
 }
 
 export async function readAccountProfile(userId) {

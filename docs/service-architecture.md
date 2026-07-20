@@ -22,6 +22,7 @@ Outflow's account layer uses Supabase for identity, Postgres data, row-level aut
 - Account deletion runs in an authenticated Edge Function because deleting an Auth user requires a server-only secret.
 - Direct-web Pro uses an authenticated Checkout function and a separate signature-verified Stripe webhook. The browser cannot write billing entitlements; direct-web access is fulfilled only by the webhook.
 - Hosted calendars use database-generated one-time secrets, hashed token storage, service-only resolution, and live Pro/membership checks on every fetch. The public feed endpoint never trusts a ledger identifier from the URL.
+- A public read-only service-status RPC exposes one maintenance boolean and timestamp. Only a verified account with the server-assigned `app_metadata.outflow_role=admin` claim can change it; direct table access and the append-only operator audit log remain private. See [Maintenance Mode](maintenance-mode.md).
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend data security](https://supabase.com/docs/guides/database/secure-data), [Row Level Security](https://supabase.com/features/row-level-security), [database functions](https://supabase.com/docs/guides/database/functions), [Realtime Postgres changes](https://supabase.com/docs/guides/realtime/postgres-changes), and [server-only user deletion](https://supabase.com/docs/reference/javascript/auth-admin-deleteuser).
 

@@ -51,6 +51,7 @@
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
     "test:device-notifications": "node --test tests/device-notifications.test.js",
     "test:app-updates": "node --test tests/app-updates.test.js",
+    "test:service-status": "node --test tests/service-status.test.js tests/maintenance-mode.test.js",
     "test:desktop-shell": "node --test tests/desktop-shell.test.js",
     "test:desktop-release": "node --test tests/macos-release.test.js",
     "check:desktop:release": "node scripts/check-macos-release.mjs",
