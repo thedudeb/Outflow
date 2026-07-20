@@ -15,7 +15,7 @@ jobs:
     name: Provider-backed messaging acceptance
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: staging
 
     steps:
@@ -26,12 +26,75 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.109.1
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
       - name: Verify service contract
         run: npm run test:service-readiness
       - name: Verify messaging-plane harness contract
         run: npm run test:staging-messaging-plane
+      - name: Validate exact-commit deployment contract
+        run: npm run check:staging-messaging-deployment
+        env:
+          SUPABASE_URL: ${{ vars.OUTFLOW_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.OUTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.OUTFLOW_SUPABASE_SECRET_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.OUTFLOW_SUPABASE_DB_PASSWORD }}
+          OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+          OUTFLOW_ALLOWED_ORIGINS: ${{ vars.OUTFLOW_ALLOWED_ORIGINS }}
+          OUTFLOW_INVITE_FROM: ${{ vars.OUTFLOW_INVITE_FROM }}
+          OUTFLOW_REMINDER_FROM: ${{ vars.OUTFLOW_REMINDER_FROM }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          OUTFLOW_ACCEPTANCE_MODE: staging
+          OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
+          RESEND_API_KEY: ${{ secrets.OUTFLOW_RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.OUTFLOW_RESEND_WEBHOOK_SECRET }}
+          OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}
+      - name: Link protected staging project
+        run: supabase link --project-ref "$OUTFLOW_ACCEPTANCE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.OUTFLOW_SUPABASE_DB_PASSWORD }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+      - name: Apply exact repository migrations
+        run: supabase db push --linked --password "$SUPABASE_DB_PASSWORD" --yes
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.OUTFLOW_SUPABASE_DB_PASSWORD }}
+      - name: Configure messaging function runtime
+        run: >-
+          supabase secrets set
+          --project-ref "$OUTFLOW_ACCEPTANCE_PROJECT_REF"
+          "RESEND_API_KEY=$RESEND_API_KEY"
+          "RESEND_WEBHOOK_SECRET=$RESEND_WEBHOOK_SECRET"
+          "OUTFLOW_ALLOWED_ORIGINS=$OUTFLOW_ALLOWED_ORIGINS"
+          "OUTFLOW_APP_URL=$OUTFLOW_APP_URL"
+          "OUTFLOW_INVITE_FROM=$OUTFLOW_INVITE_FROM"
+          "OUTFLOW_REMINDER_FROM=$OUTFLOW_REMINDER_FROM"
+          "OUTFLOW_CRON_SECRET=$OUTFLOW_CRON_SECRET"
+          "OUTFLOW_DEPLOYMENT_COMMIT=$GITHUB_SHA"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
+          RESEND_API_KEY: ${{ secrets.OUTFLOW_RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.OUTFLOW_RESEND_WEBHOOK_SECRET }}
+          OUTFLOW_ALLOWED_ORIGINS: ${{ vars.OUTFLOW_ALLOWED_ORIGINS }}
+          OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
+          OUTFLOW_INVITE_FROM: ${{ vars.OUTFLOW_INVITE_FROM }}
+          OUTFLOW_REMINDER_FROM: ${{ vars.OUTFLOW_REMINDER_FROM }}
+          OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}
+      - name: Deploy exact messaging functions
+        run: >-
+          supabase functions deploy
+          send-ledger-invite send-due-reminders resend-webhook
+          --project-ref "$OUTFLOW_ACCEPTANCE_PROJECT_REF"
+          --use-api
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.OUTFLOW_SUPABASE_ACCESS_TOKEN }}
+          OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
       - name: Run provider-backed messaging acceptance
         run: npm run check:staging-messaging-plane -- --summary-file "$GITHUB_STEP_SUMMARY"
         env:
@@ -41,5 +104,6 @@ jobs:
           OUTFLOW_APP_URL: ${{ vars.OUTFLOW_APP_URL }}
           OUTFLOW_ACCEPTANCE_PROJECT_REF: ${{ vars.OUTFLOW_SUPABASE_PROJECT_REF }}
           OUTFLOW_ACCEPTANCE_MODE: staging
+          OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
           RESEND_API_KEY: ${{ secrets.OUTFLOW_RESEND_API_KEY }}
           OUTFLOW_CRON_SECRET: ${{ secrets.OUTFLOW_CRON_SECRET }}

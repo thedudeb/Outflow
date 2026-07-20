@@ -83,7 +83,16 @@ Deno.serve(async (request) => {
   const cronSecret = Deno.env.get("OUTFLOW_CRON_SECRET") || "";
   const reminderFrom = Deno.env.get("OUTFLOW_REMINDER_FROM") || "";
   const appUrl = Deno.env.get("OUTFLOW_APP_URL") || "";
-  if (!projectUrl || !secretKey || !resendKey || cronSecret.length < 32 || !reminderFrom || !validAppUrl(appUrl)) {
+  const deploymentCommit = Deno.env.get("OUTFLOW_DEPLOYMENT_COMMIT") || "";
+  if (
+    !projectUrl
+    || !secretKey
+    || !resendKey
+    || cronSecret.length < 32
+    || !reminderFrom
+    || !validAppUrl(appUrl)
+    || !/^[a-f0-9]{40}$/.test(deploymentCommit)
+  ) {
     return response({ error: "Email reminders are not configured." }, 503);
   }
 
@@ -183,5 +192,5 @@ Deno.serve(async (request) => {
     else failed += 1;
   }
 
-  return response({ claimed: deliveries.length, sent, failed, completionErrors });
+  return response({ claimed: deliveries.length, sent, failed, completionErrors, deploymentCommit });
 });

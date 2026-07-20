@@ -17,6 +17,7 @@ function validEnvironment() {
     OUTFLOW_INVITE_FROM: "Outflow <invites@outflow.example>",
     OUTFLOW_REMINDER_FROM: "Outflow <reminders@outflow.example>",
     OUTFLOW_CRON_SECRET: "0123456789abcdefghijklmnopqrstuv",
+    OUTFLOW_DEPLOYMENT_COMMIT: "a".repeat(40),
   };
 }
 
@@ -83,6 +84,7 @@ test("wildcards, local production URLs, mismatched browser values, and weak secr
     OUTFLOW_ALLOWED_ORIGINS: "*,http://localhost:5173",
     OUTFLOW_APP_URL: "http://localhost:5173/",
     OUTFLOW_CRON_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    OUTFLOW_DEPLOYMENT_COMMIT: "not-a-commit",
     RESEND_WEBHOOK_SECRET: "not-a-signing-secret",
     VITE_SUPABASE_URL: "https://another-project.supabase.co",
     VITE_STRIPE_SECRET_KEY: "must-never-be-public",
@@ -91,6 +93,7 @@ test("wildcards, local production URLs, mismatched browser values, and weak secr
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_ALLOWED_ORIGINS: wildcard")));
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_APP_URL:")));
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_CRON_SECRET:")));
+  assert.ok(errors.some((error) => error.startsWith("OUTFLOW_DEPLOYMENT_COMMIT:")));
   assert.ok(errors.some((error) => error.startsWith("RESEND_WEBHOOK_SECRET:")));
   assert.ok(errors.some((error) => error.startsWith("VITE_SUPABASE_URL:")));
   assert.ok(errors.some((error) => error.startsWith("VITE_STRIPE_SECRET_KEY:")));

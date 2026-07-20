@@ -7,7 +7,7 @@ export const FUNCTION_POLICIES = Object.freeze({
   "send-ledger-invite": { verifyJwt: true, supabase: ["publishable", "secret"], env: ["SUPABASE_URL", "RESEND_API_KEY", "OUTFLOW_ALLOWED_ORIGINS", "OUTFLOW_APP_URL", "OUTFLOW_INVITE_FROM"] },
   "create-pro-checkout": { verifyJwt: true, supabase: ["publishable"], env: ["SUPABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_PRO_PRICE_ID", "OUTFLOW_ALLOWED_ORIGINS", "OUTFLOW_APP_URL"] },
   "stripe-webhook": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRO_PRICE_ID"] },
-  "send-due-reminders": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_API_KEY", "OUTFLOW_CRON_SECRET", "OUTFLOW_REMINDER_FROM", "OUTFLOW_APP_URL"] },
+  "send-due-reminders": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_API_KEY", "OUTFLOW_CRON_SECRET", "OUTFLOW_REMINDER_FROM", "OUTFLOW_APP_URL", "OUTFLOW_DEPLOYMENT_COMMIT"] },
   "resend-webhook": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_WEBHOOK_SECRET"] },
   "calendar-feed": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL"] },
 });
@@ -238,6 +238,9 @@ export function validateServiceEnvironment(env, { allowLocal = false } = {}) {
   if (values.STRIPE_PRO_PRICE_ID && !/^price_[A-Za-z0-9]{8,}$/.test(values.STRIPE_PRO_PRICE_ID)) errors.push("STRIPE_PRO_PRICE_ID: expected a Stripe Price ID.");
   if (values.OUTFLOW_CRON_SECRET && (values.OUTFLOW_CRON_SECRET.length < 32 || /\s/.test(values.OUTFLOW_CRON_SECRET) || new Set(values.OUTFLOW_CRON_SECRET).size < 12)) {
     errors.push("OUTFLOW_CRON_SECRET: expected at least 32 high-entropy, whitespace-free characters.");
+  }
+  if (values.OUTFLOW_DEPLOYMENT_COMMIT && !/^[a-f0-9]{40}$/.test(values.OUTFLOW_DEPLOYMENT_COMMIT)) {
+    errors.push("OUTFLOW_DEPLOYMENT_COMMIT: expected the exact lowercase Git commit SHA.");
   }
 
   const appUrl = values.OUTFLOW_APP_URL;

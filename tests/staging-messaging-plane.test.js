@@ -8,9 +8,11 @@ import {
   primeResendProviderConflict,
   replayResendDelivery,
   resolveMessagingAcceptanceConfig,
+  resolveMessagingDeploymentConfig,
   schedulerStatusMatches,
   waitForResendDelivery,
   waitForResendEvent,
+  workersDeliveredExactlyOnce,
 } from "../scripts/check-staging-messaging-plane.mjs";
 
 const projectRef = "abcdefghijklmnopqrst";
@@ -18,6 +20,7 @@ const publishableKey = `sb_publishable_${"p".repeat(24)}`;
 const secretKey = `sb_secret_${"s".repeat(24)}`;
 const resendKey = `re_${"r".repeat(24)}`;
 const cronSecret = "acceptance-cron-secret-0123456789-ABCDEFG";
+const deploymentCommit = "a".repeat(40);
 
 function environment(overrides = {}) {
   return {
@@ -29,6 +32,7 @@ function environment(overrides = {}) {
     OUTFLOW_ACCEPTANCE_MODE: "staging",
     RESEND_API_KEY: resendKey,
     OUTFLOW_CRON_SECRET: cronSecret,
+    OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: deploymentCommit,
     ...overrides,
   };
 }
@@ -41,6 +45,8 @@ const checks = [
   "private invitation acceptance",
   "active reminder delivery",
   "provider reminder delivery",
+  "concurrent worker isolation",
+  "concurrent provider delivery",
   "paused reminder exclusion",
   "durable reminder retry",
   "retry provider delivery",
@@ -64,6 +70,7 @@ test("messaging-plane configuration binds provider access to one protected stagi
   assert.equal(valid.projectRef, projectRef);
   assert.equal(valid.appOrigin, "https://staging.outflow.example");
   assert.equal(valid.resendKey, resendKey);
+  assert.equal(valid.expectedDeploymentCommit, deploymentCommit);
 
   const invalid = resolveMessagingAcceptanceConfig(environment({
     SUPABASE_URL: "https://production.example.com",
@@ -71,12 +78,43 @@ test("messaging-plane configuration binds provider access to one protected stagi
     OUTFLOW_ACCEPTANCE_MODE: "production",
     RESEND_API_KEY: "invalid",
     OUTFLOW_CRON_SECRET: "repeated-repeated-repeated-repeated",
+    OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: "not-a-commit",
   }));
   assert.match(invalid.errors.join("\n"), /SUPABASE_URL/);
   assert.match(invalid.errors.join("\n"), /OUTFLOW_APP_URL/);
   assert.match(invalid.errors.join("\n"), /literal value staging/);
   assert.match(invalid.errors.join("\n"), /RESEND_API_KEY/);
   assert.match(invalid.errors.join("\n"), /OUTFLOW_CRON_SECRET/);
+  assert.match(invalid.errors.join("\n"), /OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT/);
+});
+
+test("messaging deployment preflight requires bounded exact-project deployment credentials", () => {
+  const valid = resolveMessagingDeploymentConfig(environment({
+    SUPABASE_ACCESS_TOKEN: "supabase-access-token-0123456789-ABCDEFG",
+    SUPABASE_DB_PASSWORD: "Database-Password-0123456789!",
+    RESEND_WEBHOOK_SECRET: `whsec_${"w".repeat(24)}`,
+    OUTFLOW_ALLOWED_ORIGINS: "https://staging.outflow.example",
+    OUTFLOW_INVITE_FROM: "Outflow <invites@example.test>",
+    OUTFLOW_REMINDER_FROM: "Outflow <reminders@example.test>",
+  }));
+  assert.deepEqual(valid.errors, []);
+  assert.equal(valid.projectRef, projectRef);
+  assert.equal(valid.expectedDeploymentCommit, deploymentCommit);
+
+  const invalid = resolveMessagingDeploymentConfig(environment({
+    SUPABASE_ACCESS_TOKEN: "weak",
+    SUPABASE_DB_PASSWORD: "weak",
+    RESEND_WEBHOOK_SECRET: "invalid",
+    OUTFLOW_ALLOWED_ORIGINS: "https://another.example",
+    OUTFLOW_INVITE_FROM: "invalid",
+    OUTFLOW_REMINDER_FROM: "invalid",
+  }));
+  assert.match(invalid.errors.join("\n"), /SUPABASE_ACCESS_TOKEN/);
+  assert.match(invalid.errors.join("\n"), /SUPABASE_DB_PASSWORD/);
+  assert.match(invalid.errors.join("\n"), /RESEND_WEBHOOK_SECRET/);
+  assert.match(invalid.errors.join("\n"), /OUTFLOW_ALLOWED_ORIGINS/);
+  assert.match(invalid.errors.join("\n"), /OUTFLOW_INVITE_FROM/);
+  assert.match(invalid.errors.join("\n"), /OUTFLOW_REMINDER_FROM/);
 });
 
 test("scheduler status requires the exact redacted Cron and Vault health contract", () => {
@@ -241,12 +279,12 @@ test("reminder worker probe uses only its cron bearer and validates bounded coun
   let request;
   const result = await invokeReminderWorker(config, async (input, init) => {
     request = { input: String(input), init };
-    return new Response(JSON.stringify({ claimed: 2, sent: 1, failed: 1, completionErrors: 0 }), {
+    return new Response(JSON.stringify({ claimed: 2, sent: 1, failed: 1, completionErrors: 0, deploymentCommit }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   });
-  assert.deepEqual(result, { claimed: 2, sent: 1, failed: 1, completionErrors: 0 });
+  assert.deepEqual(result, { claimed: 2, sent: 1, failed: 1, completionErrors: 0, deploymentCommit });
   assert.equal(request.input, `https://${projectRef}.supabase.co/functions/v1/send-due-reminders`);
   assert.equal(new Headers(request.init.headers).get("authorization"), `Bearer ${cronSecret}`);
   assert.deepEqual(JSON.parse(request.init.body), { batchSize: 100 });
@@ -256,7 +294,35 @@ test("reminder worker probe uses only its cron bearer and validates bounded coun
     sent: 0,
     failed: 0,
     completionErrors: 0,
+    deploymentCommit,
   }), { status: 200 })), /assertion failed/);
+
+  await assert.rejects(() => invokeReminderWorker(config, async () => Response.json({
+    claimed: 0,
+    sent: 0,
+    failed: 0,
+    completionErrors: 0,
+    deploymentCommit: "b".repeat(40),
+  })), /deployment commit/);
+});
+
+test("concurrent worker result requires exactly one claim and one successful send", () => {
+  assert.equal(workersDeliveredExactlyOnce([
+    { claimed: 1, sent: 1, failed: 0, completionErrors: 0 },
+    { claimed: 0, sent: 0, failed: 0, completionErrors: 0 },
+  ]), true);
+  assert.equal(workersDeliveredExactlyOnce([
+    { claimed: 0, sent: 0, failed: 0, completionErrors: 0 },
+    { claimed: 1, sent: 1, failed: 0, completionErrors: 0 },
+  ]), true);
+  assert.equal(workersDeliveredExactlyOnce([
+    { claimed: 1, sent: 1, failed: 0, completionErrors: 0 },
+    { claimed: 1, sent: 1, failed: 0, completionErrors: 0 },
+  ]), false);
+  assert.equal(workersDeliveredExactlyOnce([
+    { claimed: 1, sent: 0, failed: 1, completionErrors: 0 },
+    { claimed: 0, sent: 0, failed: 0, completionErrors: 0 },
+  ]), false);
 });
 
 test("provider replay uses the deployed delivery key and requires the original message ID", async () => {
@@ -353,11 +419,14 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
   assert.match(report, /PASS \/ provider invitation delivery/);
   assert.match(report, /PASS \/ cron scheduler registration/);
   assert.match(report, /PASS \/ durable reminder retry/);
+  assert.match(report, /PASS \/ concurrent worker isolation/);
   assert.match(report, /PASS \/ provider API failure/);
   assert.match(report, /invalid-idempotent-request 409/);
   assert.match(report, /PASS \/ provider suppression/);
   assert.match(report, /PASS \/ complaint suppression/);
   assert.match(report, /Provider-originated signed bounce and complaint/);
+  assert.match(report, /exact-commit worker attestation/);
+  assert.match(report, /Two simultaneous worker calls/);
   assert.match(report, /exact hourly Supabase Cron job/);
   assert.match(report, /does not prove delivery to a human inbox/);
   assert.doesNotMatch(report, /@resend\.dev|re_[A-Za-z0-9_-]+|Bearer |11111111-1111|#app\?invite=/);
@@ -377,15 +446,26 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   ]);
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /environment: staging/);
+  assert.match(workflow, /supabase\/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520/);
+  assert.match(workflow, /version: 2\.109\.1/);
+  assert.match(workflow, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.OUTFLOW_SUPABASE_ACCESS_TOKEN \}\}/);
+  assert.match(workflow, /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.OUTFLOW_SUPABASE_DB_PASSWORD \}\}/);
   assert.match(workflow, /RESEND_API_KEY: \$\{\{ secrets\.OUTFLOW_RESEND_API_KEY \}\}/);
+  assert.match(workflow, /RESEND_WEBHOOK_SECRET: \$\{\{ secrets\.OUTFLOW_RESEND_WEBHOOK_SECRET \}\}/);
   assert.match(workflow, /OUTFLOW_CRON_SECRET: \$\{\{ secrets\.OUTFLOW_CRON_SECRET \}\}/);
   assert.match(workflow, /SUPABASE_SECRET_KEY: \$\{\{ secrets\.OUTFLOW_SUPABASE_SECRET_KEY \}\}/);
+  assert.match(workflow, /supabase db push --linked --password "\$SUPABASE_DB_PASSWORD" --yes/);
+  assert.match(workflow, /"OUTFLOW_DEPLOYMENT_COMMIT=\$GITHUB_SHA"/);
+  assert.match(workflow, /send-ledger-invite send-due-reminders resend-webhook/);
+  assert.match(workflow, /OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: \$\{\{ github\.sha \}\}/);
+  assert.doesNotMatch(workflow, /functions deploy[^\n]*--prune/);
   assert.doesNotMatch(workflow, /pull_request:|push:/);
   assert.match(script, /delivered\+outflow-invite-\$\{suffix\}@resend\.dev/);
   assert.match(script, /delivered\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /bounced\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /complained\+outflow-reminder-\$\{suffix\}@resend\.dev/);
   assert.match(script, /resend_409_invalid_idempotent_request/);
+  assert.match(script, /Promise\.all\(\[\s*invokeReminderWorker\(config, fetchImpl\),\s*invokeReminderWorker\(config, fetchImpl\),/);
   assert.match(script, /admin\.rpc\("reminder_scheduler_status", \{ expected_project_ref: config\.projectRef \}\)/);
   assert.match(script, /notification_provider_events/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);

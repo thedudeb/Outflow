@@ -15,6 +15,8 @@ const expectedCheckNames = Object.freeze([
   "private invitation acceptance",
   "active reminder delivery",
   "provider reminder delivery",
+  "concurrent worker isolation",
+  "concurrent provider delivery",
   "paused reminder exclusion",
   "durable reminder retry",
   "retry provider delivery",
@@ -72,6 +74,7 @@ export function resolveMessagingAcceptanceConfig(env) {
   const mode = String(env.OUTFLOW_ACCEPTANCE_MODE || "").trim();
   const resendKey = String(env.RESEND_API_KEY || "").trim();
   const cronSecret = String(env.OUTFLOW_CRON_SECRET || "").trim();
+  const expectedDeploymentCommit = String(env.OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT || "").trim();
   const { publishableKey, secretKey } = resolveSupabaseKeys(env, errors);
 
   if (!hostedProjectOrigin(projectUrl)) {
@@ -95,6 +98,9 @@ export function resolveMessagingAcceptanceConfig(env) {
   if (!highEntropySecret(cronSecret)) {
     errors.push("OUTFLOW_CRON_SECRET: expected a high-entropy secret of at least 32 characters.");
   }
+  if (!/^[a-f0-9]{40}$/.test(expectedDeploymentCommit)) {
+    errors.push("OUTFLOW_EXPECTED_DEPLOYMENT_COMMIT: expected the exact lowercase Git commit SHA.");
+  }
 
   return {
     errors,
@@ -105,7 +111,51 @@ export function resolveMessagingAcceptanceConfig(env) {
     secretKey,
     resendKey,
     cronSecret,
+    expectedDeploymentCommit,
   };
+}
+
+function validSender(value) {
+  return /^[^<>\r\n]{1,80}\s<[^@\s<>]+@[^@\s<>]+>$/.test(value);
+}
+
+export function resolveMessagingDeploymentConfig(env) {
+  const acceptance = resolveMessagingAcceptanceConfig(env);
+  const errors = [...acceptance.errors];
+  const accessToken = String(env.SUPABASE_ACCESS_TOKEN || "").trim();
+  const databasePassword = String(env.SUPABASE_DB_PASSWORD || "");
+  const webhookSecret = String(env.RESEND_WEBHOOK_SECRET || "").trim();
+  const allowedOrigins = String(env.OUTFLOW_ALLOWED_ORIGINS || "").split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const inviteFrom = String(env.OUTFLOW_INVITE_FROM || "").trim();
+  const reminderFrom = String(env.OUTFLOW_REMINDER_FROM || "").trim();
+
+  if (!highEntropySecret(accessToken)) {
+    errors.push("SUPABASE_ACCESS_TOKEN: expected a high-entropy deployment token.");
+  }
+  if (
+    databasePassword.length < 12
+    || databasePassword.length > 256
+    || /[\r\n]/.test(databasePassword)
+    || new Set(databasePassword).size < 8
+  ) {
+    errors.push("SUPABASE_DB_PASSWORD: expected a bounded high-entropy database password.");
+  }
+  if (!/^whsec_[A-Za-z0-9+/_=-]{16,}$/.test(webhookSecret)) {
+    errors.push("RESEND_WEBHOOK_SECRET: expected a Resend webhook signing secret.");
+  }
+  if (
+    !allowedOrigins.length
+    || allowedOrigins.some((origin) => !exactHttpsOrigin(origin) || new URL(origin).origin !== origin)
+    || !allowedOrigins.includes(acceptance.appOrigin)
+  ) {
+    errors.push("OUTFLOW_ALLOWED_ORIGINS: expected exact HTTPS origins including the application origin.");
+  }
+  if (!validSender(inviteFrom)) errors.push("OUTFLOW_INVITE_FROM: expected a named invitation sender.");
+  if (!validSender(reminderFrom)) errors.push("OUTFLOW_REMINDER_FROM: expected a named reminder sender.");
+
+  return { errors, projectRef: acceptance.projectRef, expectedDeploymentCommit: acceptance.expectedDeploymentCommit };
 }
 
 function assert(condition, label) {
@@ -385,7 +435,17 @@ export async function invokeReminderWorker(config, fetchImpl = fetch) {
     assert(Number.isInteger(body[field]) && body[field] >= 0 && body[field] <= 100, "reminder worker");
   }
   assert(body.claimed === body.sent + body.failed, "reminder worker");
+  assert(body.deploymentCommit === config.expectedDeploymentCommit, "reminder worker deployment commit");
   return body;
+}
+
+export function workersDeliveredExactlyOnce(workers) {
+  return Array.isArray(workers)
+    && workers.length === 2
+    && workers.every((worker) => worker?.completionErrors === 0)
+    && workers.reduce((total, worker) => total + worker.claimed, 0) === 1
+    && workers.reduce((total, worker) => total + worker.sent, 0) === 1
+    && workers.reduce((total, worker) => total + worker.failed, 0) === 0;
 }
 
 function formattedAcceptanceDate(billingDate) {
@@ -753,6 +813,47 @@ export async function runMessagingPlaneAcceptance(config, { fetchImpl = fetch, s
     ), "provider reminder delivery");
     completed.push("provider reminder delivery");
 
+    const concurrentId = `accept-message-concurrent-${suffix}`;
+    await insertDueSubscription(
+      admin,
+      fixture.ledgerId,
+      ownerUser.id,
+      concurrentId,
+      "Concurrent reminder acceptance",
+      67.89,
+      billingDate,
+    );
+    const concurrentStartedAt = Date.now();
+    const concurrentWorkers = await Promise.all([
+      invokeReminderWorker(config, fetchImpl),
+      invokeReminderWorker(config, fetchImpl),
+    ]);
+    assert(workersDeliveredExactlyOnce(concurrentWorkers), "concurrent worker isolation");
+    const concurrentRows = await deliveryRows(admin, ownerUser.id, [concurrentId]);
+    assert(
+      concurrentRows.length === 1
+        && concurrentRows[0].status === "sent"
+        && concurrentRows[0].attempt_count === 1
+        && typeof concurrentRows[0].provider_message_id === "string",
+      "concurrent worker isolation",
+    );
+    completed.push("concurrent worker isolation");
+    const concurrentMessage = await waitForResendDelivery({
+      resendKey: config.resendKey,
+      recipient: ownerEmail,
+      subjectIncludes: "Concurrent reminder acceptance",
+      providerId: concurrentRows[0].provider_message_id,
+      startedAt: concurrentStartedAt,
+      fetchImpl,
+      sleepImpl,
+    });
+    assert(safeMessageContent(
+      concurrentMessage,
+      ["Concurrent reminder acceptance", "$67.89", formattedAcceptanceDate(billingDate), fixture.ledgerName],
+      [concurrentId, ownerUser.id],
+    ), "concurrent provider delivery");
+    completed.push("concurrent provider delivery");
+
     assert(!initialRows.some((row) => row.subscription_id === fixture.pausedId), "paused reminder exclusion");
     completed.push("paused reminder exclusion");
 
@@ -1055,7 +1156,7 @@ export function buildMessagingPlaneReport({ checks, projectRef, appOrigin, commi
     "",
     ...checks.map((check) => `- PASS / ${check}`),
     "",
-    "This run required the exact hourly Supabase Cron job, named Vault configuration, a successful scheduler run within two hours, and HTTP 200 from its correlated pg_net request before using Resend's synthetic delivered-, bounced-, and complained-address contracts. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
+    "This run required exact-commit worker attestation, the exact hourly Supabase Cron job, named Vault configuration, a successful scheduler run within two hours, and HTTP 200 from its correlated pg_net request before using Resend's synthetic delivered-, bounced-, and complained-address contracts. Two simultaneous worker calls had to produce one durable claim, one attempt, and one delivered provider receipt. Provider-originated signed bounce and complaint events must reach the deployed webhook, update isolated durable event rows, and suppress only the matching synthetic accounts; bounce recovery must also succeed explicitly.",
     "A Resend test-address request primed one unique delivery key with a harmless synthetic payload. The deployed worker then received Resend's documented invalid-idempotent-request 409 for its different canonical payload, persisted only the bounded error class, and retried the same durable delivery under increasing backoff. Scheduler evidence contains only fixed configuration checks, timestamps, and the correlated HTTP status; no acceptance output exposes a scheduler command/endpoint, request/response body, provider identifier, or secret.",
     "This does not prove delivery to a human inbox, an unplanned provider outage, provider diversity, or operational alert delivery.",
     "The report excludes identities, credentials, invitation links, message content, provider identifiers, database rows, and response bodies.",
@@ -1072,7 +1173,19 @@ async function main() {
   const envFile = argumentValue("--env-file");
   const summaryFile = argumentValue("--summary-file");
   const fileEnvironment = envFile ? parseEnvFile(await readFile(resolve(envFile), "utf8")) : {};
-  const config = resolveMessagingAcceptanceConfig({ ...fileEnvironment, ...process.env });
+  const environment = { ...fileEnvironment, ...process.env };
+  if (process.argv.includes("--deployment-preflight")) {
+    const deployment = resolveMessagingDeploymentConfig(environment);
+    if (deployment.errors.length) {
+      for (const error of deployment.errors) console.error(`- ${error}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log("Messaging deployment preflight passed for the protected staging project and exact commit.");
+    return;
+  }
+
+  const config = resolveMessagingAcceptanceConfig(environment);
   if (config.errors.length) {
     for (const error of config.errors) console.error(`- ${error}`);
     process.exitCode = 1;
