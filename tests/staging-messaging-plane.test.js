@@ -8,6 +8,7 @@ import {
   replayResendDelivery,
   resolveMessagingAcceptanceConfig,
   waitForResendDelivery,
+  waitForResendEvent,
 } from "../scripts/check-staging-messaging-plane.mjs";
 
 const projectRef = "abcdefghijklmnopqrst";
@@ -42,6 +43,9 @@ const checks = [
   "retry provider delivery",
   "reminder idempotent replay",
   "paused reminder opt-in",
+  "provider bounce event",
+  "provider suppression",
+  "suppression recovery",
   "email opt-out suspension",
   "refund suspension",
   "synthetic messaging cleanup",
@@ -123,6 +127,39 @@ test("Resend receipt probe correlates an exact synthetic recipient and waits for
   assert.equal(sleeps, 1);
   assert.equal(requests.length, 3);
   assert.ok(requests.every(({ method, headers }) => method === "GET" && headers.get("authorization") === `Bearer ${resendKey}`));
+});
+
+test("Resend event probe waits for the exact synthetic bounce", async () => {
+  const recipient = "bounced+acceptance@resend.dev";
+  const providerId = "11111111-1111-4111-8111-111111111111";
+  let reads = 0;
+  let sleeps = 0;
+  const event = await waitForResendEvent({
+    resendKey,
+    recipient,
+    subjectIncludes: "Bounce acceptance",
+    providerId,
+    expectedEvent: "bounced",
+    startedAt: Date.parse("2026-07-19T12:00:00.000Z"),
+    attempts: 3,
+    sleepImpl: async (milliseconds) => {
+      assert.equal(milliseconds, 1_000);
+      sleeps += 1;
+    },
+    fetchImpl: async () => {
+      reads += 1;
+      return Response.json({
+        id: providerId,
+        to: [recipient],
+        subject: "Bounce acceptance is due today",
+        created_at: "2026-07-19T12:00:01.000Z",
+        last_event: reads === 1 ? "sent" : "bounced",
+      });
+    },
+  });
+  assert.equal(event.last_event, "bounced");
+  assert.equal(reads, 2);
+  assert.equal(sleeps, 1);
 });
 
 test("invitation parser accepts only a private link for the configured application origin", () => {
@@ -219,7 +256,9 @@ test("messaging report is fixed, bounded, and free of recipient and provider dat
   });
   assert.match(report, /PASS \/ provider invitation delivery/);
   assert.match(report, /PASS \/ durable reminder retry/);
+  assert.match(report, /PASS \/ provider suppression/);
   assert.match(report, /first retry failure was injected/);
+  assert.match(report, /provider-originated signed bounce/);
   assert.match(report, /does not prove delivery to a human inbox/);
   assert.doesNotMatch(report, /@resend\.dev|re_[A-Za-z0-9_-]+|Bearer |11111111-1111|#app\?invite=/);
   assert.throws(() => buildMessagingPlaneReport({
@@ -243,5 +282,7 @@ test("messaging workflow confines live credentials to a protected main-ref accep
   assert.doesNotMatch(workflow, /pull_request:|push:/);
   assert.match(script, /delivered\+outflow-invite-\$\{suffix\}@resend\.dev/);
   assert.match(script, /delivered\+outflow-reminder-\$\{suffix\}@resend\.dev/);
+  assert.match(script, /bounced\+outflow-reminder-\$\{suffix\}@resend\.dev/);
+  assert.match(script, /notification_provider_events/);
   assert.doesNotMatch(script, /OUTFLOW_(?:INVITE|REMINDER)_RECIPIENT/);
 });

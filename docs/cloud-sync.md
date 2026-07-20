@@ -25,7 +25,7 @@ Signing in does not synchronize or upload the local workspace. A recovered brows
 
 ## Realtime And Editing
 
-Supabase Realtime watches the active ledger, subscriptions, membership rows, and readable shared-profile updates. Remote events refresh automatically when no local edit is active; profile changes refresh human-readable attribution without advancing the ledger revision. If an edit or write is in progress, Outflow marks the ledger `stale` and requires an explicit refresh so an unfinished form is never silently discarded.
+Supabase Realtime watches the active ledger, subscriptions, membership rows, and readable shared-profile updates. A separate self-filtered account channel watches notification-preference changes so provider suppression can stop and update email controls without a reload. Ledger events refresh automatically when no local edit is active; profile and notification changes never advance the ledger revision. If a ledger edit or write is in progress, Outflow marks the ledger `stale` and requires an explicit refresh so an unfinished form is never silently discarded.
 
 Channel errors, timeouts, and unexpected closures visibly mark the cloud connection `offline`. When the channel resubscribes, Outflow performs an authoritative snapshot refresh; a reconnect during an active edit follows the same `stale` path instead of replacing the form.
 

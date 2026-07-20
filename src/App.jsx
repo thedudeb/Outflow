@@ -18,6 +18,7 @@ import {
   readNotificationPreferences,
   readProEntitlement,
   readProOffer,
+  resumeEmailNotifications,
   renameCloudLedger,
   removeCloudLedgerMember,
   replaceCloudLedgerSnapshot,
@@ -29,6 +30,7 @@ import {
   sendCloudLedgerInvitation,
   saveNotificationPreferences,
   subscribeToCloudLedger,
+  subscribeToNotificationPreferences,
   uploadGuestWorkspace,
   updateCloudLedgerMemberRole,
   verifyAccountSession,
@@ -1515,8 +1517,11 @@ function Tracker({ onExit, pwa }) {
     emailEnabled: false,
     pausedScheduleEnabled: false,
     timezone: browserTimezone(),
+    emailSuppressedAt: "",
+    emailSuppressionReason: "",
   }));
   const [emailPreferencesLoading, setEmailPreferencesLoading] = useState(false);
+  const [emailPreferencesRefresh, setEmailPreferencesRefresh] = useState(0);
   const [proOffer, setProOffer] = useState(null);
   const [proOfferLoading, setProOfferLoading] = useState(false);
   const [proOfferError, setProOfferError] = useState("");
@@ -1712,7 +1717,13 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     const userId = accountSession?.user?.id;
     if (!userId) {
-      setEmailPreferences({ emailEnabled: false, pausedScheduleEnabled: false, timezone: browserTimezone() });
+      setEmailPreferences({
+        emailEnabled: false,
+        pausedScheduleEnabled: false,
+        timezone: browserTimezone(),
+        emailSuppressedAt: "",
+        emailSuppressionReason: "",
+      });
       setEmailPreferencesLoading(false);
       return undefined;
     }
@@ -1725,6 +1736,8 @@ function Tracker({ onExit, pwa }) {
           emailEnabled: false,
           pausedScheduleEnabled: false,
           timezone: browserTimezone(),
+          emailSuppressedAt: "",
+          emailSuppressionReason: "",
         });
       })
       .catch((error) => {
@@ -1735,6 +1748,26 @@ function Tracker({ onExit, pwa }) {
       });
     return () => {
       active = false;
+    };
+  }, [accountSession?.user?.id, emailPreferencesRefresh]);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!userId) return undefined;
+    let active = true;
+    let unsubscribe = () => {};
+    const refreshPreferences = () => {
+      if (active) setEmailPreferencesRefresh((current) => current + 1);
+    };
+    subscribeToNotificationPreferences(userId, refreshPreferences, (status) => {
+      if (status === "SUBSCRIBED") refreshPreferences();
+    }).then((removeSubscription) => {
+      if (active) unsubscribe = removeSubscription;
+      else removeSubscription();
+    }).catch(() => {});
+    return () => {
+      active = false;
+      unsubscribe();
     };
   }, [accountSession?.user?.id]);
 
@@ -2893,12 +2926,36 @@ function Tracker({ onExit, pwa }) {
         emailEnabled: saved?.emailEnabled === true,
         pausedScheduleEnabled: saved?.pausedScheduleEnabled === true,
         timezone: saved?.timezone || emailPreferences.timezone,
+        emailSuppressedAt: saved?.emailSuppressedAt || "",
+        emailSuppressionReason: saved?.emailSuppressionReason || "",
       });
       setAccountMessage(saved?.emailEnabled
         ? "Email reminders enabled. Subscription lead times control each delivery."
         : "Email reminders disabled. Device alert settings were not changed.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not save email reminder settings.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function resumeEmailReminderChannel() {
+    if (!accountSession || accountBusy || emailPreferencesLoading || !emailPreferences.emailSuppressedAt) return;
+    setAccountBusy("resume-email");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const saved = await resumeEmailNotifications();
+      setEmailPreferences({
+        emailEnabled: saved?.emailEnabled === true,
+        pausedScheduleEnabled: saved?.pausedScheduleEnabled === true,
+        timezone: saved?.timezone || emailPreferences.timezone,
+        emailSuppressedAt: saved?.emailSuppressedAt || "",
+        emailSuppressionReason: saved?.emailSuppressionReason || "",
+      });
+      setAccountMessage("Email reminders resumed. Outflow will stop them again if the provider reports another permanent delivery problem.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not resume email reminders.");
     } finally {
       setAccountBusy("");
     }
@@ -4508,7 +4565,9 @@ function Tracker({ onExit, pwa }) {
                     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">Email reminder channel</span>
                       <span className={`font-mono text-[9px] font-black uppercase ${
-                        emailPreferences.emailEnabled && accountEntitlement?.status === "active"
+                        emailPreferences.emailSuppressedAt
+                          ? "text-red-300"
+                          : emailPreferences.emailEnabled && accountEntitlement?.status === "active"
                           ? "text-amber-300"
                           : emailPreferences.emailEnabled
                             ? "text-red-300"
@@ -4516,11 +4575,38 @@ function Tracker({ onExit, pwa }) {
                       }`}>
                         {emailPreferencesLoading
                           ? "Loading"
+                          : emailPreferences.emailSuppressedAt
+                            ? "Suppressed"
                           : emailPreferences.emailEnabled
                             ? accountEntitlement?.status === "active" ? "Enabled" : "Suspended"
                             : "Disabled"}
                       </span>
                     </header>
+                    {emailPreferences.emailSuppressedAt && (
+                      <LiveMessage kind="alert" className="grid gap-3 border-b border-red-900 bg-red-950/30 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                        <span className="min-w-0">
+                          <span className="block text-xs font-black uppercase tracking-[0.1em] text-red-200">
+                            Provider delivery stopped
+                          </span>
+                          <span className="mt-1 block font-mono text-[9px] uppercase leading-4 text-red-300/70">
+                            {emailPreferences.emailSuppressionReason === "complained"
+                              ? "The recipient marked an Outflow email as spam."
+                              : emailPreferences.emailSuppressionReason === "suppressed"
+                                ? "The provider has this address on its suppression list."
+                                : "The recipient address permanently rejected an Outflow email."}
+                            {" "}Device alerts were not changed.
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={resumeEmailReminderChannel}
+                          disabled={Boolean(accountBusy) || emailPreferencesLoading || accountEntitlement?.status !== "active"}
+                          className="h-10 border border-red-700 px-3 font-mono text-[10px] font-black uppercase text-red-200 hover:border-red-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                        >
+                          {accountBusy === "resume-email" ? "Resuming..." : "Resume email"}
+                        </button>
+                      </LiveMessage>
+                    )}
                     <div className="grid sm:grid-cols-2">
                       <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-zinc-900 px-4 py-3 sm:border-r">
                         <span className="min-w-0">
@@ -4532,7 +4618,7 @@ function Tracker({ onExit, pwa }) {
                         <input
                           type="checkbox"
                           checked={emailPreferences.emailEnabled}
-                          disabled={emailPreferencesLoading || (accountEntitlement?.status !== "active" && !emailPreferences.emailEnabled)}
+                          disabled={emailPreferencesLoading || Boolean(emailPreferences.emailSuppressedAt) || (accountEntitlement?.status !== "active" && !emailPreferences.emailEnabled)}
                           onChange={(event) => setEmailPreferences((current) => ({ ...current, emailEnabled: event.target.checked }))}
                           className="h-5 w-5 accent-amber-400 disabled:opacity-30"
                         />

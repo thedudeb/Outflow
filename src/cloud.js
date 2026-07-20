@@ -198,7 +198,7 @@ export async function readNotificationPreferences(userId) {
   if (!cloud) throw new Error("Outflow cloud is not configured.");
   const { data, error } = await cloud
     .from("notification_preferences")
-    .select("email_enabled, paused_schedule_enabled, timezone, updated_at")
+    .select("email_enabled, paused_schedule_enabled, timezone, email_suppressed_at, email_suppression_reason, updated_at")
     .eq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
@@ -207,6 +207,8 @@ export async function readNotificationPreferences(userId) {
     emailEnabled: data.email_enabled === true,
     pausedScheduleEnabled: data.paused_schedule_enabled === true,
     timezone: data.timezone || "UTC",
+    emailSuppressedAt: data.email_suppressed_at || "",
+    emailSuppressionReason: data.email_suppression_reason || "",
     updatedAt: data.updated_at || "",
   };
 }
@@ -221,6 +223,31 @@ export async function saveNotificationPreferences({ emailEnabled, pausedSchedule
   });
   if (error) throw error;
   return data;
+}
+
+export async function resumeEmailNotifications() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("resume_email_notifications");
+  if (error) throw error;
+  return data;
+}
+
+export async function subscribeToNotificationPreferences(userId, onChange, onStatus = () => {}) {
+  const cloud = await getCloud();
+  if (!cloud) return () => {};
+  const channel = cloud
+    .channel(`outflow-notification-preferences-${userId}`)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "notification_preferences",
+      filter: `user_id=eq.${userId}`,
+    }, onChange)
+    .subscribe(onStatus);
+  return () => {
+    cloud.removeChannel(channel);
+  };
 }
 
 export async function readHostedCalendarFeed(ledgerId) {

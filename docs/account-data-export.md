@@ -8,10 +8,10 @@ The `export_account_data()` RPC returns a `schemaVersion: 1` document containing
 
 - Account ID, email, display name, and account/profile timestamps.
 - Lifetime-Pro product, status, provider, purchase date, and revocation date when present.
-- Email-reminder preference state and timezone.
+- Email-reminder preference state, timezone, and any current bounded provider-suppression reason.
 - Every cloud ledger the account can currently access, including its role, revision, members, pending invitations visible to an owner, and complete subscription records.
 - Hosted-calendar metadata owned by the account.
-- Email-reminder delivery history with schedule, amount, status, attempt count, and timestamps.
+- Email-reminder delivery history with schedule, amount, worker status, provider delivery status, attempt count, and timestamps.
 
 The browser downloads the result as `outflow-account-data-YYYY-MM-DD.json`. Export does not mutate cloud or local data and does not require Pro.
 
@@ -25,7 +25,7 @@ The document never contains:
 - Invitation secrets or hashes.
 - Hosted-calendar URL secrets or hashes.
 - Stripe checkout, payment-intent, or provider-reference identifiers.
-- Resend provider IDs, claim tokens, or delivery error codes.
+- Resend provider IDs, webhook event IDs, recipient addresses, raw diagnostics, claim tokens, or delivery error codes.
 - Idempotency operation IDs, migration hashes, or internal reconciliation events.
 - Browser-local ledgers, permissions, alert-delivery deduplication state, or service-worker data.
 - Bank or card credentials; Outflow does not collect them.

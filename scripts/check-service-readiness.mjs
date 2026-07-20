@@ -8,6 +8,7 @@ export const FUNCTION_POLICIES = Object.freeze({
   "create-pro-checkout": { verifyJwt: true, supabase: ["publishable"], env: ["SUPABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_PRO_PRICE_ID", "OUTFLOW_ALLOWED_ORIGINS", "OUTFLOW_APP_URL"] },
   "stripe-webhook": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRO_PRICE_ID"] },
   "send-due-reminders": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_API_KEY", "OUTFLOW_CRON_SECRET", "OUTFLOW_REMINDER_FROM", "OUTFLOW_APP_URL"] },
+  "resend-webhook": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_WEBHOOK_SECRET"] },
   "calendar-feed": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL"] },
 });
 
@@ -231,6 +232,7 @@ export function validateServiceEnvironment(env, { allowLocal = false } = {}) {
     errors.push("SUPABASE_URL: expected an exact HTTPS project origin on supabase.co.");
   }
   if (values.RESEND_API_KEY && !/^re_[A-Za-z0-9_-]{16,}$/.test(values.RESEND_API_KEY)) errors.push("RESEND_API_KEY: expected a Resend API key.");
+  if (values.RESEND_WEBHOOK_SECRET && !/^whsec_[A-Za-z0-9+/_=-]{16,}$/.test(values.RESEND_WEBHOOK_SECRET)) errors.push("RESEND_WEBHOOK_SECRET: expected a Resend webhook signing secret.");
   if (values.STRIPE_SECRET_KEY && !/^sk_(test|live)_[A-Za-z0-9]{16,}$/.test(values.STRIPE_SECRET_KEY)) errors.push("STRIPE_SECRET_KEY: expected a Stripe secret key.");
   if (values.STRIPE_WEBHOOK_SECRET && !/^whsec_[A-Za-z0-9]{16,}$/.test(values.STRIPE_WEBHOOK_SECRET)) errors.push("STRIPE_WEBHOOK_SECRET: expected a Stripe webhook signing secret.");
   if (values.STRIPE_PRO_PRICE_ID && !/^price_[A-Za-z0-9]{8,}$/.test(values.STRIPE_PRO_PRICE_ID)) errors.push("STRIPE_PRO_PRICE_ID: expected a Stripe Price ID.");

@@ -8,6 +8,7 @@ function validEnvironment() {
     SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${"p".repeat(24)}`,
     SUPABASE_SECRET_KEY: `sb_secret_${"s".repeat(24)}`,
     RESEND_API_KEY: `re_${"r".repeat(24)}`,
+    RESEND_WEBHOOK_SECRET: `whsec_${"e".repeat(24)}`,
     STRIPE_SECRET_KEY: `sk_test_${"a".repeat(24)}`,
     STRIPE_WEBHOOK_SECRET: `whsec_${"w".repeat(24)}`,
     STRIPE_PRO_PRICE_ID: `price_${"i".repeat(16)}`,
@@ -27,9 +28,9 @@ function legacyKey(role) {
 test("repository service inventory and JWT policy are complete", async () => {
   const result = await validateRepository();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.functionCount, 6);
+  assert.equal(result.functionCount, 7);
   assert.equal(result.jwtProtectedCount, 3);
-  assert.equal(result.publicBoundaryCount, 3);
+  assert.equal(result.publicBoundaryCount, 4);
   assert.ok(result.migrationCount >= 7);
 });
 
@@ -82,6 +83,7 @@ test("wildcards, local production URLs, mismatched browser values, and weak secr
     OUTFLOW_ALLOWED_ORIGINS: "*,http://localhost:5173",
     OUTFLOW_APP_URL: "http://localhost:5173/",
     OUTFLOW_CRON_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    RESEND_WEBHOOK_SECRET: "not-a-signing-secret",
     VITE_SUPABASE_URL: "https://another-project.supabase.co",
     VITE_STRIPE_SECRET_KEY: "must-never-be-public",
   };
@@ -89,6 +91,7 @@ test("wildcards, local production URLs, mismatched browser values, and weak secr
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_ALLOWED_ORIGINS: wildcard")));
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_APP_URL:")));
   assert.ok(errors.some((error) => error.startsWith("OUTFLOW_CRON_SECRET:")));
+  assert.ok(errors.some((error) => error.startsWith("RESEND_WEBHOOK_SECRET:")));
   assert.ok(errors.some((error) => error.startsWith("VITE_SUPABASE_URL:")));
   assert.ok(errors.some((error) => error.startsWith("VITE_STRIPE_SECRET_KEY:")));
   assert.equal(JSON.stringify(errors).includes("must-never-be-public"), false);

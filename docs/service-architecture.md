@@ -29,9 +29,10 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [frontend da
 
 - Resend supplies Supabase authentication email through its managed integration.
 - Charge and trial reminders are claimed from a durable, RLS-protected delivery ledger by the cron-authenticated `send-due-reminders` Edge Function. Resend idempotency keys protect provider retries.
-- The browser never receives a Resend API key.
+- A separate raw-body-signature-verified `resend-webhook` records bounded delivery events. Permanent bounces, complaints, and provider suppressions disable the account email channel and refresh the signed-in UI over RLS-filtered Realtime; raw recipients, subjects, and diagnostics are discarded.
+- The browser never receives a Resend API key or webhook signing secret.
 
-Reference: [Resend with Supabase](https://resend.com/docs/knowledge-base/getting-started-with-resend-and-supabase).
+References: [Resend with Supabase](https://resend.com/docs/knowledge-base/getting-started-with-resend-and-supabase), [webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), and [email suppressions](https://resend.com/docs/dashboard/emails/email-suppressions).
 
 ### Stripe
 
@@ -71,7 +72,7 @@ When browser configuration is absent, the Supabase client is not downloaded or i
 10. A signed-in free user can review the configured one-time Price and open Stripe-hosted Checkout. The success return polls the server entitlement; only a verified paid webhook activates Pro. Browser coverage proves a pending success remains Free and no client entitlement write occurs.
 11. Signing in on another browser restores Pro by reading the durable entitlement without creating checkout. A full Stripe refund revokes only its matching purchase.
 12. The same verified entitlement controls reviewed CSV import, new non-USD records, and multiple or custom reminder lead times. Free gates are contextual and do not mutate local data; a downgrade retains existing advanced values but prevents expanding them.
-13. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim. The configured browser contract verifies persistence, local device-channel isolation, visible suspension after refund, and an always-available opt-out.
+13. A Pro account can independently opt into email reminders, choose its timezone, and include or exclude paused schedules. Subscription lead days drive charge and trial delivery; the scheduler rechecks Pro, membership, and preference state before every claim. Signed provider bounce, complaint, and suppression events stop email automatically; the configured browser contract verifies live suppression, local device-channel isolation, visible suspension after refund, explicit recovery, and an always-available opt-out.
 14. A Pro member can publish or rotate a private feed URL for a cloud ledger. Calendar clients see current recurring events while entitlement and membership remain active; the user can change paused scope without rotating or revoke the URL immediately. Browser coverage verifies one-time plaintext disclosure, token-free metadata reloads, suspension, and revocation without local-workspace mutation.
 15. Every signed-in user can download a versioned JSON archive of identity/profile data, entitlement state, accessible cloud ledgers and subscriptions, collaboration metadata, reminder preferences and history, and hosted-calendar metadata. The function excludes authentication, invitation, calendar, payment, delivery-provider, and idempotency secrets. See [Account Data Export](account-data-export.md).
 16. Signing out closes the cloud ledger and returns to the untouched local workspace.
@@ -94,13 +95,13 @@ Before enabling accounts in a public build:
 1. Complete the ordered, secret-safe [Service Provisioning Runbook](service-provisioning.md).
 2. Provision Supabase and apply every migration under `supabase/migrations`.
 3. Deploy `delete-account`, `send-ledger-invite`, and `create-pro-checkout` with JWT verification enabled.
-4. Deploy `stripe-webhook`, `send-due-reminders`, and `calendar-feed` with their function-specific JWT exceptions in `supabase/config.toml`; the webhook verifies Stripe's raw-body signature, the reminder worker verifies its dedicated cron bearer secret, and the calendar endpoint verifies a database-generated private URL token.
-5. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, and an active fixed one-time Stripe Price.
-6. Connect a verified Resend sending domain to Supabase Auth.
+4. Deploy `stripe-webhook`, `send-due-reminders`, `resend-webhook`, and `calendar-feed` with their function-specific JWT exceptions in `supabase/config.toml`; the provider webhooks verify exact raw-body signatures, the reminder worker verifies its dedicated cron bearer secret, and the calendar endpoint verifies a database-generated private URL token.
+5. Configure the server values documented in `supabase/functions/.env.example`, including strict origins, the public app URL, verified invitation/reminder senders, a high-entropy cron secret, both provider webhook secrets, and an active fixed one-time Stripe Price.
+6. Connect a verified Resend sending domain to Supabase Auth and register the reminder-event endpoint for delivered, delayed, failed, bounced, complained, and suppressed events.
 7. Configure permitted Auth redirect URLs for production and local development.
 8. Run the public staging boundary probe and retain its pass result with the deployment commit.
 9. Run migration, RLS cross-user isolation, sign-out, and deletion tests against a non-production project.
 10. Pass the protected account-plane disconnect, stale-conflict, authoritative catch-up, and post-reconnect delivery sequence, then pass **Staging Browser Sync** in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit before describing synchronization as available publicly; complete the branded-browser checks in [Browser Compatibility Contract](browser-compatibility.md) before broad support claims.
 11. Pass the protected signed-event billing-plane workflow, then complete the actual Stripe-hosted payment and provider-originated delivery matrix in [One-Time Pro Billing](pro-billing.md) before enabling the production Price.
-12. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery and retry matrix in [Durable Email Reminders](email-reminders.md).
+12. Create the hourly reminder invocation with Supabase Cron and Vault, then complete the delivery, retry, signed bounce-suppression, and recovery matrix in [Durable Email Reminders](email-reminders.md).
 13. Complete the private-token and client refresh matrix in [Hosted Calendar Feeds](hosted-calendar-feeds.md), with query-token redaction enabled in operational logs.

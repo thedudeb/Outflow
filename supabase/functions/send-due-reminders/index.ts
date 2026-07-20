@@ -155,11 +155,15 @@ Deno.serve(async (request) => {
           html,
         }),
       });
-      succeeded = resendResponse.ok;
-      errorCode = succeeded ? "" : `resend_${resendResponse.status}`;
-      if (succeeded) {
+      if (resendResponse.ok) {
         const providerBody = await resendResponse.json().catch(() => ({}));
-        providerIdentifier = typeof providerBody?.id === "string" ? providerBody.id.slice(0, 100) : "";
+        providerIdentifier = typeof providerBody?.id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(providerBody.id)
+          ? providerBody.id
+          : "";
+        succeeded = Boolean(providerIdentifier);
+        errorCode = succeeded ? "" : "resend_invalid_response";
+      } else {
+        errorCode = `resend_${resendResponse.status}`;
       }
     } catch {
       errorCode = "resend_network_error";

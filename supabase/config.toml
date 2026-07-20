@@ -13,5 +13,8 @@ verify_jwt = false
 [functions.send-due-reminders]
 verify_jwt = false
 
+[functions.resend-webhook]
+verify_jwt = false
+
 [functions.calendar-feed]
 verify_jwt = false

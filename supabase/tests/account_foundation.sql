@@ -780,6 +780,12 @@ begin
   exception
     when insufficient_privilege then null;
   end;
+  begin
+    perform count(*) from public.notification_provider_events;
+    raise exception 'browser read provider event state';
+  exception
+    when insufficient_privilege then null;
+  end;
 end;
 $$;
 
@@ -874,6 +880,12 @@ begin
   if public.complete_email_notification(charge_delivery, 'bbbbbbbb-2222-4222-8222-222222222222', true, 'wrong-claim', null) then
     raise exception 'wrong worker completed another worker claim';
   end if;
+  begin
+    perform public.complete_email_notification(charge_delivery, 'aaaaaaaa-1111-4111-8111-111111111111', true, null, null);
+    raise exception 'successful email completion accepted a missing provider identifier';
+  exception
+    when invalid_parameter_value then null;
+  end;
   if not public.complete_email_notification(charge_delivery, 'aaaaaaaa-1111-4111-8111-111111111111', true, 'resend-charge', null) then
     raise exception 'charge email completion failed';
   end if;
@@ -914,8 +926,101 @@ end;
 $$;
 
 reset role;
+set role service_role;
+select public.record_email_provider_event(
+  'resend-event-delivered', 'email.delivered', 'resend-charge', '2026-07-19T18:00:00Z'
+) as delivered_provider_event;
+select public.record_email_provider_event(
+  'resend-event-delivered', 'email.delivered', 'resend-charge', '2026-07-19T18:00:00Z'
+) as duplicate_provider_event;
+select public.record_email_provider_event(
+  'resend-event-unmatched', 'email.bounced', 'unrelated-message', '2026-07-19T18:00:00Z'
+) as unrelated_provider_event;
+select public.record_email_provider_event(
+  'resend-event-stale', 'email.failed', 'resend-charge', '2026-07-19T17:59:00Z'
+) as stale_provider_event;
+select public.record_email_provider_event(
+  'resend-event-bounced', 'email.bounced', 'resend-charge', '2026-07-19T18:01:00Z'
+) as bounced_provider_event;
+
+reset role;
+do $$
+begin
+  if (select count(*) from public.notification_provider_events) <> 3 then
+    raise exception 'provider event deduplication or correlation is incorrect';
+  end if;
+  if (select provider_status from public.notification_deliveries where provider_message_id = 'resend-charge') <> 'bounced' then
+    raise exception 'latest provider delivery state was not retained';
+  end if;
+  if (select email_enabled from public.notification_preferences where user_id = '11111111-1111-4111-8111-111111111111') then
+    raise exception 'provider bounce did not stop email reminders';
+  end if;
+  if (select email_suppression_reason from public.notification_preferences where user_id = '11111111-1111-4111-8111-111111111111') <> 'bounced' then
+    raise exception 'provider bounce reason was not retained';
+  end if;
+  if not exists (
+    select 1 from pg_catalog.pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notification_preferences'
+  ) then
+    raise exception 'notification preference changes are missing from Realtime';
+  end if;
+end;
+$$;
+
 set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+begin
+  begin
+    perform public.save_notification_preferences(true, false, 'UTC');
+    raise exception 'suppressed email channel was enabled through the general settings RPC';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.record_email_provider_event(
+      'forged-provider-event', 'email.delivered', 'resend-charge', now()
+    );
+    raise exception 'browser recorded a forged provider event';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+select public.resume_email_notifications() as resumed_email_notifications;
+
+reset role;
+set role service_role;
+select public.record_email_provider_event(
+  'resend-event-bounced', 'email.bounced', 'resend-charge', '2026-07-19T18:01:00Z'
+) as replayed_bounced_provider_event;
+
+reset role;
+do $$
+begin
+  if not (select email_enabled from public.notification_preferences where user_id = '11111111-1111-4111-8111-111111111111') then
+    raise exception 'duplicate provider event suppressed an explicitly resumed channel';
+  end if;
+end;
+$$;
+
+set role service_role;
+select public.record_email_provider_event(
+  'resend-event-complained', 'email.complained', 'resend-charge', '2026-07-19T18:02:00Z'
+) as complained_provider_event;
+
+reset role;
+do $$
+begin
+  if (select email_suppression_reason from public.notification_preferences where user_id = '11111111-1111-4111-8111-111111111111') <> 'complained' then
+    raise exception 'new provider complaint did not suppress a resumed channel';
+  end if;
+end;
+$$;
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select public.resume_email_notifications() as resumed_after_complaint;
 select public.save_notification_preferences(true, true, 'UTC') as enabled_paused_email_preferences;
 
 reset role;
@@ -1215,6 +1320,13 @@ begin
   end if;
   if payload -> 'notificationPreferences' is null then
     raise exception 'account export omitted notification preferences';
+  end if;
+  if not (payload -> 'notificationPreferences' ? 'emailSuppressionReason') then
+    raise exception 'account export omitted email delivery health';
+  end if;
+  if jsonb_array_length(payload -> 'emailReminderDeliveries') > 0
+    and not ((payload -> 'emailReminderDeliveries' -> 0) ? 'providerStatus') then
+    raise exception 'account export omitted provider delivery status';
   end if;
   if jsonb_array_length(payload -> 'hostedCalendarFeeds') <> 1 then
     raise exception 'account export omitted hosted calendar metadata';

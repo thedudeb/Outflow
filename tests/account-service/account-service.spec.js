@@ -83,6 +83,7 @@ function createCloudState({
     acceptedInvitations: [],
     notificationPreferences: null,
     notificationPreferenceWrites: [],
+    notificationResumeRequests: 0,
     calendarFeed: null,
     calendarFeedToken: "",
     calendarFeedTokens: [],
@@ -166,6 +167,8 @@ function accountExportFromCloudState(cloudState) {
       emailEnabled: cloudState.notificationPreferences.email_enabled,
       pausedScheduleEnabled: cloudState.notificationPreferences.paused_schedule_enabled,
       timezone: cloudState.notificationPreferences.timezone,
+      emailSuppressedAt: cloudState.notificationPreferences.email_suppressed_at || null,
+      emailSuppressionReason: cloudState.notificationPreferences.email_suppression_reason || null,
       createdAt: "2026-07-19T12:00:00.000Z",
       updatedAt: cloudState.notificationPreferences.updated_at,
     } : null,
@@ -251,35 +254,39 @@ function createRealtimeState() {
   return {
     connections,
     joinedCount() {
-      return [...connections.values()].filter((connection) => connection.topic).length;
+      return [...connections.values()].reduce((count, connection) => count + connection.topics.size, 0);
     },
     clientJoinedCount(clientId) {
-      return [...connections.values()].filter((connection) => connection.clientId === clientId && connection.topic).length;
+      return [...connections.values()]
+        .filter((connection) => connection.clientId === clientId)
+        .reduce((count, connection) => count + connection.topics.size, 0);
     },
     emitChange({ table = "subscriptions", event = "UPDATE" } = {}) {
       connections.forEach((connection, socket) => {
-        const ids = connection.bindings
-          .filter((binding) => binding.table === table)
-          .map((binding) => binding.id);
-        if (!connection.topic || !ids.length) return;
-        socket.send(JSON.stringify({
-          topic: connection.topic,
-          event: "postgres_changes",
-          payload: {
-            ids,
-            data: {
-              schema: "public",
-              table,
-              commit_timestamp: new Date().toISOString(),
-              type: event,
-              columns: [],
-              record: {},
-              old_record: {},
-              errors: null,
+        connection.topics.forEach((bindings, topic) => {
+          const ids = bindings
+            .filter((binding) => binding.table === table)
+            .map((binding) => binding.id);
+          if (!ids.length) return;
+          socket.send(JSON.stringify({
+            topic,
+            event: "postgres_changes",
+            payload: {
+              ids,
+              data: {
+                schema: "public",
+                table,
+                commit_timestamp: new Date().toISOString(),
+                type: event,
+                columns: [],
+                record: {},
+                old_record: {},
+                errors: null,
+              },
             },
-          },
-          ref: null,
-        }));
+            ref: null,
+          }));
+        });
       });
     },
     async disconnect(clientId) {
@@ -295,7 +302,7 @@ function createRealtimeState() {
 async function installRealtimeFixture(page, realtimeState, clientId) {
   let bindingSequence = 0;
   await page.routeWebSocket(/\/supabase\/realtime\/v1\/websocket/, (socket) => {
-    const connection = { clientId, topic: "", bindings: [] };
+    const connection = { clientId, topics: new Map() };
     realtimeState.connections.set(socket, connection);
 
     const reply = (message, response = {}) => {
@@ -317,19 +324,18 @@ async function installRealtimeFixture(page, realtimeState, clientId) {
       }
 
       if (message.event === "phx_join") {
-        connection.topic = message.topic;
-        connection.bindings = (message.payload?.config?.postgres_changes || []).map((binding) => ({
+        const bindings = (message.payload?.config?.postgres_changes || []).map((binding) => ({
           ...binding,
           id: `fixture-binding-${clientId}-${++bindingSequence}`,
         }));
-        reply(message, { postgres_changes: connection.bindings });
+        connection.topics.set(message.topic, bindings);
+        reply(message, { postgres_changes: bindings });
         return;
       }
 
       if (message.event === "phx_leave") {
         reply(message);
-        connection.topic = "";
-        connection.bindings = [];
+        connection.topics.delete(message.topic);
         return;
       }
 
@@ -468,18 +474,52 @@ async function installCloudFixture(page, {
       if (entry.body?.requested_email_enabled && cloudState.entitlementStatus !== "active") {
         return reply({ message: "Outflow Pro is required for email automation." }, 403);
       }
+      if (entry.body?.requested_email_enabled && cloudState.notificationPreferences?.email_suppressed_at) {
+        return reply({ message: "Email reminders are suppressed after a provider delivery failure. Resume them explicitly." }, 403);
+      }
       const updatedAt = new Date().toISOString();
       cloudState.notificationPreferences = {
         email_enabled: entry.body?.requested_email_enabled === true,
         paused_schedule_enabled: entry.body?.requested_paused_schedule_enabled === true,
         timezone: entry.body?.requested_timezone,
+        email_suppressed_at: cloudState.notificationPreferences?.email_suppressed_at || null,
+        email_suppression_reason: cloudState.notificationPreferences?.email_suppression_reason || null,
         updated_at: updatedAt,
       };
       cloudState.notificationPreferenceWrites.push(entry.body);
+      realtimeState.emitChange({ table: "notification_preferences" });
       return reply({
         emailEnabled: cloudState.notificationPreferences.email_enabled,
         pausedScheduleEnabled: cloudState.notificationPreferences.paused_schedule_enabled,
         timezone: cloudState.notificationPreferences.timezone,
+        emailSuppressedAt: cloudState.notificationPreferences.email_suppressed_at,
+        emailSuppressionReason: cloudState.notificationPreferences.email_suppression_reason,
+        updatedAt,
+      });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/resume_email_notifications") && cloudState) {
+      if (cloudState.entitlementStatus !== "active") {
+        return reply({ message: "Outflow Pro is required for email automation." }, 403);
+      }
+      if (!cloudState.notificationPreferences?.email_suppressed_at) {
+        return reply({ message: "Email reminders are not suppressed." }, 400);
+      }
+      const updatedAt = new Date().toISOString();
+      cloudState.notificationPreferences = {
+        ...cloudState.notificationPreferences,
+        email_enabled: true,
+        email_suppressed_at: null,
+        email_suppression_reason: null,
+        updated_at: updatedAt,
+      };
+      cloudState.notificationResumeRequests += 1;
+      realtimeState.emitChange({ table: "notification_preferences" });
+      return reply({
+        emailEnabled: true,
+        pausedScheduleEnabled: cloudState.notificationPreferences.paused_schedule_enabled,
+        timezone: cloudState.notificationPreferences.timezone,
+        emailSuppressedAt: null,
+        emailSuppressionReason: null,
         updatedAt,
       });
     }
@@ -799,7 +839,7 @@ test("account display name stays private and refreshes shared attribution throug
     await openStudioCloud(page);
     await openTracker(peerPage);
     await openStudioCloud(peerPage, editorUser.email);
-    await expect.poll(() => realtimeState.joinedCount()).toBe(2);
+    await expect.poll(() => realtimeState.joinedCount()).toBe(4);
 
     const peerCard = peerPage.getByRole("article").filter({ hasText: "Figma Cloud" });
     await expect(peerCard).toContainText("Added by You / Updated by Avery Owner");
@@ -859,7 +899,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
     await openStudioCloud(page);
     await openTracker(peerPage);
     await openStudioCloud(peerPage);
-    await expect.poll(() => realtimeState.joinedCount()).toBe(2);
+    await expect.poll(() => realtimeState.joinedCount()).toBe(4);
 
     let primaryCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
@@ -875,7 +915,7 @@ test("isolated browser clients refresh through Realtime and protect an active st
 
     await peerCard.getByRole("button", { name: "Edit", exact: true }).click();
     await peerPage.getByRole("spinbutton", { name: "Amount", exact: true }).fill("32");
-    await expect.poll(() => realtimeState.clientJoinedCount("peer")).toBe(1);
+    await expect.poll(() => realtimeState.clientJoinedCount("peer")).toBe(2);
 
     primaryCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
     await primaryCard.getByRole("button", { name: "Edit", exact: true }).click();
@@ -1101,6 +1141,53 @@ test("email reminders persist independently and remain disableable after Pro is 
     requested_paused_schedule_enabled: true,
     requested_timezone: "UTC",
   });
+  expect(await page.evaluate(() => localStorage.getItem("outflow:alert-settings"))).toBe(localAlertSettings);
+});
+
+test("provider suppression stops email reminders in Realtime and requires explicit recovery", async ({ page }) => {
+  const cloudState = createCloudState();
+  cloudState.notificationPreferences = {
+    email_enabled: true,
+    paused_schedule_enabled: false,
+    timezone: "UTC",
+    email_suppressed_at: null,
+    email_suppression_reason: null,
+    updated_at: "2026-07-19T12:00:00.000Z",
+  };
+  const realtimeState = createRealtimeState();
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState, realtimeState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+  const localAlertSettings = await page.evaluate(() => localStorage.getItem("outflow:alert-settings"));
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog.getByText("Enabled", { exact: true })).toBeVisible();
+  await expect.poll(() => realtimeState.clientJoinedCount("fixture-client")).toBe(1);
+
+  cloudState.notificationPreferences = {
+    ...cloudState.notificationPreferences,
+    email_enabled: false,
+    email_suppressed_at: "2026-07-19T18:00:00.000Z",
+    email_suppression_reason: "bounced",
+    updated_at: "2026-07-19T18:00:00.000Z",
+  };
+  realtimeState.emitChange({ table: "notification_preferences" });
+
+  await expect(dialog.getByText("Suppressed", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Provider delivery stopped", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/recipient address permanently rejected an Outflow email/)).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).toBeDisabled();
+  await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).not.toBeChecked();
+  await dialog.getByRole("button", { name: "Resume email", exact: true }).click();
+
+  await expect(dialog.getByText("Email reminders resumed. Outflow will stop them again if the provider reports another permanent delivery problem.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Enabled", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Provider delivery stopped", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox", { name: /Email reminders/ })).toBeChecked();
+  expect(cloudState.notificationResumeRequests).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
   expect(await page.evaluate(() => localStorage.getItem("outflow:alert-settings"))).toBe(localAlertSettings);
 });
 

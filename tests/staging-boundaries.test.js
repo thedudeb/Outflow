@@ -31,6 +31,7 @@ function fixtureFetch({ corsOrigin = appOrigin, calendarStatus = 404, calendarHe
     }
     if (functionName === "stripe-webhook") return Response.json({ error: "invalid signature" }, { status: 400, headers: { "Cache-Control": "no-store" } });
     if (functionName === "send-due-reminders") return Response.json({ error: "invalid cron secret" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    if (functionName === "resend-webhook") return Response.json({ error: "invalid signature" }, { status: 400, headers: { "Cache-Control": "no-store" } });
     if (functionName === "calendar-feed") {
       return Response.json({ error: "not found" }, {
         status: calendarStatus,
@@ -77,11 +78,11 @@ test("public staging configuration accepts hosted keys and rejects secret browse
   }).errors.some((error) => error.startsWith("OUTFLOW_ALLOWED_ORIGINS: expected")));
 });
 
-test("the probe verifies nine non-destructive boundaries without server credentials", async () => {
+test("the probe verifies ten non-destructive boundaries without server credentials", async () => {
   const fixture = fixtureFetch();
   const completed = await probeStagingBoundaries({ projectUrl, publishableKey, appOrigin, fetchImpl: fixture.fetchImpl });
-  assert.equal(completed.length, 9);
-  assert.equal(fixture.calls.length, 9);
+  assert.equal(completed.length, 10);
+  assert.equal(fixture.calls.length, 10);
   for (const call of fixture.calls.filter(({ functionName }) => ["delete-account", "send-ledger-invite", "create-pro-checkout"].includes(functionName))) {
     assert.equal(call.headers.get("apikey"), publishableKey);
   }
@@ -123,7 +124,7 @@ test("the staging report records bounded evidence without credentials or full-ac
   const report = buildStagingBoundaryReport({
     projectUrl,
     appOrigin,
-    completed: Array.from({ length: 9 }, (_, index) => `check-${index}`),
+    completed: Array.from({ length: 10 }, (_, index) => `check-${index}`),
     migrations: ["20260719133000_account_foundation.sql", "unsafe name.sql"],
     commit: "5c173bd",
     actor: "release-owner",
@@ -131,7 +132,7 @@ test("the staging report records bounded evidence without credentials or full-ac
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /\*\*PASS\*\* \(9 non-destructive checks across 6 functions\)/);
+  assert.match(report, /\*\*PASS\*\* \(10 non-destructive checks across 7 functions\)/);
   assert.match(report, /Migration Inventory \(1\)/);
   assert.match(report, /outflow-stage\.supabase\.co/);
   assert.match(report, /20260719133000_account_foundation\.sql/);

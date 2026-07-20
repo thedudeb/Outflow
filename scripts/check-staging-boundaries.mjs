@@ -167,6 +167,18 @@ export async function probeStagingBoundaries({ projectUrl, publishableKey, appOr
   }, 401, (response) => {
     if (response.headers.get("cache-control") !== "no-store") throw new Error("send-due-reminders cron secret: Outflow response headers were not returned.");
   });
+  await request("resend-webhook signature", "resend-webhook", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "svix-id": "msg_outflow_staging_probe",
+      "svix-timestamp": "1",
+      "svix-signature": "v1,invalid-outflow-probe",
+    },
+    body: "{}",
+  }, 400, (response) => {
+    if (response.headers.get("cache-control") !== "no-store") throw new Error("resend-webhook signature: Outflow response headers were not returned.");
+  });
   await request("calendar-feed private token", `calendar-feed?token=${"A".repeat(43)}`, { method: "GET" }, 404, (response) => {
     if (
       response.headers.get("cache-control") !== "no-store"
@@ -211,7 +223,7 @@ export function buildStagingBoundaryReport({
   return [
     "## Outflow Staging Boundary",
     "",
-    `- Result: **PASS** (${completed.length} non-destructive checks across 6 functions)`,
+    `- Result: **PASS** (${completed.length} non-destructive checks across 7 functions)`,
     `- Environment: \`${safeEnvironment}\``,
     `- Supabase project: \`${projectHost}\``,
     `- App origin: \`${appOrigin}\``,
@@ -273,7 +285,7 @@ async function main() {
         runUrl,
       }));
     }
-    console.log(`Staging boundary probe passed: ${completed.length} non-destructive checks across 6 functions.`);
+    console.log(`Staging boundary probe passed: ${completed.length} non-destructive checks across 7 functions.`);
   } catch (error) {
     console.error(`- ${error instanceof Error ? error.message : "Staging boundary probe failed."}`);
     process.exitCode = 1;
