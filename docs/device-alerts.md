@@ -41,6 +41,6 @@ Every due reminder receives a stable identifier containing its internal list ID,
 
 ## Native Desktop Contract
 
-The Tauri desktop shell loads the official notification plugin only in a native build. The main window capability grants exactly permission lookup, permission request, and immediate notification delivery. Outflow does not grant scheduled-notification, channel-management, active-notification, filesystem, shell, process, or updater access.
+The Tauri desktop shell loads the official notification plugin only in a native build. Its notification capability grants exactly permission lookup, permission request, and immediate notification delivery. A separate macOS-only capability permits signed update checks, download/install, and restart; iOS and Android do not receive it. Outflow does not grant scheduled-notification, channel-management, active-notification, filesystem, shell, or arbitrary process access.
 
 `npm run test:device-notifications` proves native permission mapping, request behavior, privacy-limited title/body delivery, browser tag preservation, and duplicate in-flight claims. `npm run test:desktop-shell` proves the exact capability and plugin inventory. The fresh macOS CI job compiles those boundaries into `Outflow.app`. A real macOS permission-prompt and Notification Center delivery check remains required before public desktop distribution.

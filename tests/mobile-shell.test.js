@@ -82,7 +82,8 @@ test("the iOS native boundary stays notification-only and has a clean build gate
   assert.doesNotMatch(entitlements, /keychain|network|application-groups|icloud|healthkit/i);
   assert.match(backend, /#\[cfg_attr\(mobile, tauri::mobile_entry_point\)\]/);
   assert.match(backend, /tauri_plugin_notification::init\(\)/);
-  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell|process/);
+  assert.match(backend, /#\[cfg\(target_os = "macos"\)\]/);
+  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell/);
   assert.match(app, /pwa\.nativeApp \? "Native local" : "Offline ready"/);
   assert.match(initializer, /execFileSync\(tauri, \["ios", "init", "--ci"/);
   assert.match(initializer, /generated launch screen background changed/);
@@ -191,7 +192,8 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.doesNotMatch(debugNetwork, /includeSubdomains="true"/);
   assert.match(backend, /#\[cfg_attr\(mobile, tauri::mobile_entry_point\)\]/);
   assert.match(backend, /tauri_plugin_notification::init\(\)/);
-  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell|process/);
+  assert.match(backend, /#\[cfg\(target_os = "macos"\)\]/);
+  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell/);
   assert.match(initializer, /execFileSync\(tauri, \["android", "init", "--ci"/);
   assert.match(initializer, /generated Android compile SDK changed/);
   assert.match(initializer, /Generated the hardened Outflow Android project/);

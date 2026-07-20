@@ -19,6 +19,14 @@ const privateKey = {
   size: 256,
   path: "/private/release/AuthKey_F6G7H8J9K0.p8",
 };
+const updaterEnvironment = {
+  OUTFLOW_MACOS_REQUIRE_UPDATER: "true",
+  OUTFLOW_MACOS_TARGET: "universal-apple-darwin",
+  OUTFLOW_MACOS_EXPECTED_VERSION: "0.1.0",
+  OUTFLOW_UPDATER_PUBLIC_KEY: "public-update-key-content".repeat(3),
+  TAURI_SIGNING_PRIVATE_KEY: "encrypted-private-update-key-content".repeat(3),
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "a-long-update-key-password",
+};
 
 test("macOS release preflight accepts one pinned Developer ID and private API key", () => {
   const result = validateMacosReleaseEnvironment(apiEnvironment, {
@@ -59,6 +67,33 @@ test("macOS release preflight binds protected CI signing to the exact main commi
   assert.deepEqual(result, { valid: true, mode: "app-store-connect-api", errors: [] });
 });
 
+test("macOS release preflight requires the complete universal signed-update boundary", () => {
+  const complete = validateMacosReleaseEnvironment({
+    ...apiEnvironment,
+    ...updaterEnvironment,
+  }, {
+    root: "/workspace/outflow",
+    inspectPath: () => privateKey,
+  });
+  assert.deepEqual(complete, { valid: true, mode: "app-store-connect-api", errors: [] });
+
+  const incomplete = validateMacosReleaseEnvironment({
+    ...apiEnvironment,
+    OUTFLOW_MACOS_REQUIRE_UPDATER: "true",
+    OUTFLOW_MACOS_TARGET: "aarch64-apple-darwin",
+    OUTFLOW_MACOS_EXPECTED_VERSION: "latest",
+  }, {
+    root: "/workspace/outflow",
+    inspectPath: () => privateKey,
+  });
+  assert.equal(incomplete.valid, false);
+  assert.ok(incomplete.errors.some((error) => error.startsWith("OUTFLOW_MACOS_TARGET:")));
+  assert.ok(incomplete.errors.some((error) => error.startsWith("OUTFLOW_MACOS_EXPECTED_VERSION:")));
+  assert.ok(incomplete.errors.some((error) => error.startsWith("OUTFLOW_UPDATER_PUBLIC_KEY:")));
+  assert.ok(incomplete.errors.some((error) => error.startsWith("TAURI_SIGNING_PRIVATE_KEY:")));
+  assert.ok(incomplete.errors.some((error) => error.startsWith("TAURI_SIGNING_PRIVATE_KEY_PASSWORD:")));
+});
+
 test("macOS release preflight rejects partial, mixed, repository-owned, and permissive credentials without echoing values", () => {
   const secret = "do-not-print-this-secret";
   const result = validateMacosReleaseEnvironment({
@@ -97,30 +132,40 @@ test("macOS release preflight rejects partial, mixed, repository-owned, and perm
   assert.doesNotMatch(JSON.stringify(result), new RegExp(secret));
 });
 
-test("the protected macOS workflow retains only an exact-commit verified release candidate", () => {
+test("the protected macOS workflow publishes only an exact-commit verified signed update", () => {
   const workflow = readFileSync(new URL("../.github/workflows/macos-release.yml", import.meta.url), "utf8");
   const installIndex = workflow.indexOf("name: Install locked dependencies");
   const contractsIndex = workflow.indexOf("name: Verify release contracts");
   const keyIndex = workflow.indexOf("name: Materialize private notarization key");
   const cleanupIndex = workflow.indexOf("name: Remove notarization key");
   const inspectIndex = workflow.indexOf("name: Inspect distributable archive");
+  const manifestIndex = workflow.indexOf("name: Create signed update manifest");
+  const updaterInspectIndex = workflow.indexOf("name: Inspect updater release set");
   const uploadIndex = workflow.indexOf("name: Upload verified release candidate");
+  const refuseIndex = workflow.indexOf("name: Refuse an existing release version");
+  const publishIndex = workflow.indexOf("name: Publish signed macOS release");
 
   assert.match(workflow, /on:\n  workflow_dispatch:/);
   assert.doesNotMatch(workflow, /^\s{2}(?:push|pull_request):/m);
-  assert.match(workflow, /permissions:\n  contents: read/);
+  assert.match(workflow, /permissions:\n  contents: write/);
+  assert.match(workflow, /version:\n\s+description: Exact version/);
   assert.match(workflow, /if: github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /environment: macos-production/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /OUTFLOW_MACOS_EXPECTED_COMMIT: \$\{\{ github\.sha \}\}/);
   assert.match(workflow, /OUTFLOW_MACOS_REQUIRE_CERTIFICATE: "true"/);
+  assert.match(workflow, /OUTFLOW_MACOS_REQUIRE_UPDATER: "true"/);
+  assert.match(workflow, /OUTFLOW_MACOS_TARGET: universal-apple-darwin/);
+  assert.match(workflow, /OUTFLOW_UPDATER_PUBLIC_KEY: \$\{\{ vars\.OUTFLOW_UPDATER_PUBLIC_KEY \}\}/);
+  assert.match(workflow, /rustup target add aarch64-apple-darwin x86_64-apple-darwin/);
   assert.doesNotMatch(workflow, /^\s{6}APPLE_API_KEY_PATH:/m);
   assert.equal(workflow.match(/APPLE_API_KEY_PATH: \$\{\{ runner\.temp \}\}/g)?.length, 4);
   assert.match(workflow, /install -m 600 \/dev\/null "\$APPLE_API_KEY_PATH"/);
   assert.match(workflow, /npm run check:desktop:release-environment/);
   assert.match(workflow, /OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE: "true"/);
-  assert.match(workflow, /shasum -a 256 \*\.zip > SHA256SUMS\.txt/);
-  assert.match(workflow, /macos-release\/\*\.zip/);
+  assert.match(workflow, /npm run create:desktop:update-manifest/);
+  assert.match(workflow, /shasum -a 256 \*\.zip \*\.tar\.gz \*\.sig latest\.json > SHA256SUMS\.txt/);
+  assert.match(workflow, /macos-release\/\*/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /if-no-files-found: error/);
   assert.match(workflow, /retention-days: 7/);
@@ -128,6 +173,12 @@ test("the protected macOS workflow retains only an exact-commit verified release
   assert.equal(workflow.match(/secrets\.OUTFLOW_APPLE_API_PRIVATE_KEY/g)?.length, 1);
   assert.equal(workflow.match(/secrets\.OUTFLOW_APPLE_CERTIFICATE \}\}/g)?.length, 2);
   assert.equal(workflow.match(/secrets\.OUTFLOW_APPLE_CERTIFICATE_PASSWORD \}\}/g)?.length, 2);
+  assert.equal(workflow.match(/secrets\.OUTFLOW_UPDATER_PRIVATE_KEY \}\}/g)?.length, 2);
+  assert.equal(workflow.match(/secrets\.OUTFLOW_UPDATER_PRIVATE_KEY_PASSWORD \}\}/g)?.length, 2);
+  assert.match(workflow, /gh release create "v\$OUTFLOW_MACOS_EXPECTED_VERSION"/);
+  assert.match(workflow, /--target "\$GITHUB_SHA"/);
   assert.ok(installIndex < contractsIndex && contractsIndex < keyIndex);
-  assert.ok(keyIndex < cleanupIndex && cleanupIndex < inspectIndex && inspectIndex < uploadIndex);
+  assert.ok(keyIndex < cleanupIndex && cleanupIndex < inspectIndex);
+  assert.ok(inspectIndex < manifestIndex && manifestIndex < updaterInspectIndex && updaterInspectIndex < uploadIndex);
+  assert.ok(uploadIndex < refuseIndex && refuseIndex < publishIndex);
 });

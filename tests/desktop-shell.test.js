@@ -36,7 +36,7 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   assert.equal(config.app.security.freezePrototype, true);
   assert.equal(config.app.security.dangerousDisableAssetCspModification, false);
   assert.deepEqual(config.app.security.assetProtocol, { enable: false, scope: [] });
-  assert.deepEqual(config.app.security.capabilities, ["main-notifications"]);
+  assert.deepEqual(config.app.security.capabilities, ["main-notifications", "main-macos-updater"]);
   assert.equal(directive(csp, "default-src"), "default-src 'self'");
   assert.equal(directive(csp, "base-uri"), "base-uri 'self'");
   assert.equal(directive(csp, "form-action"), "form-action 'self'");
@@ -53,14 +53,23 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   const capabilityFiles = existsSync(capabilityUrl)
     ? readdirSync(capabilityUrl).filter((name) => name.endsWith(".json"))
     : [];
-  assert.deepEqual(capabilityFiles, ["main-notifications.json"]);
+  assert.deepEqual(capabilityFiles, ["main-macos-updater.json", "main-notifications.json"]);
   const notificationCapability = JSON.parse(read("src-tauri/capabilities/main-notifications.json"));
+  const updaterCapability = JSON.parse(read("src-tauri/capabilities/main-macos-updater.json"));
   assert.equal(notificationCapability.identifier, "main-notifications");
   assert.deepEqual(notificationCapability.windows, ["main"]);
   assert.deepEqual(notificationCapability.permissions, [
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
+  ]);
+  assert.equal(updaterCapability.identifier, "main-macos-updater");
+  assert.deepEqual(updaterCapability.windows, ["main"]);
+  assert.deepEqual(updaterCapability.platforms, ["macOS"]);
+  assert.deepEqual(updaterCapability.permissions, [
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart",
   ]);
   assert.deepEqual(config.bundle.targets, ["app"]);
   assert.equal(config.bundle.category, "Finance");
@@ -69,7 +78,7 @@ test("the desktop shell embeds the tracker with a narrow native boundary", () =>
   });
 });
 
-test("the native backend exposes only the notification plugin and no commands", () => {
+test("the native backend exposes notifications plus macOS-gated update plugins and no commands", () => {
   const manifest = read("src-tauri/Cargo.toml");
   const backend = read("src-tauri/src/lib.rs");
 
@@ -78,11 +87,17 @@ test("the native backend exposes only the notification plugin and no commands", 
   assert.match(manifest, /tauri-build = \{ version = "=2\.6\.3"/);
   assert.match(manifest, /tauri = \{ version = "=2\.11\.5"/);
   assert.match(manifest, /tauri-plugin-notification = "=2\.3\.3"/);
-  assert.doesNotMatch(manifest, /tauri-plugin-(?!notification)|serde|reqwest|tokio/);
+  assert.match(manifest, /tauri-plugin-process = "=2\.3\.1"/);
+  assert.match(manifest, /tauri-plugin-updater = "=2\.10\.1"/);
+  assert.match(manifest, /serde_json = "=1\.0\.150"/);
+  assert.doesNotMatch(manifest, /serde\s*=|reqwest|tokio/);
   assert.match(backend, /tauri::Builder::default\(\)/);
   assert.match(backend, /\.plugin\(tauri_plugin_notification::init\(\)\)/);
-  assert.equal(backend.match(/\.plugin\(/g)?.length, 1);
-  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell|process/);
+  assert.match(backend, /#\[cfg\(target_os = "macos"\)\]/);
+  assert.match(backend, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
+  assert.match(backend, /tauri_plugin_process::init\(\)/);
+  assert.equal(backend.match(/\.plugin\(/g)?.length, 3);
+  assert.doesNotMatch(backend, /invoke_handler|Command|http|shell/);
 });
 
 test("desktop builds use the shared frontend and remain a tested release gate", () => {
@@ -97,11 +112,15 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
 
   assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.11.4");
   assert.equal(packageJson.dependencies["@tauri-apps/plugin-notification"], "2.3.3");
+  assert.equal(packageJson.dependencies["@tauri-apps/plugin-process"], "2.3.1");
+  assert.equal(packageJson.dependencies["@tauri-apps/plugin-updater"], "2.10.1");
   assert.equal(packageJson.scripts["desktop:dev"], "tauri dev");
   assert.equal(packageJson.scripts["desktop:build"], "tauri build --bundles app");
   assert.equal(packageJson.scripts["desktop:release"], "node scripts/build-macos-release.mjs");
   assert.equal(packageJson.scripts["test:desktop-shell"], "node --test tests/desktop-shell.test.js");
   assert.equal(packageJson.scripts["test:desktop-release"], "node --test tests/macos-release.test.js");
+  assert.equal(packageJson.scripts["test:app-updates"], "node --test tests/app-updates.test.js");
+  assert.equal(packageJson.scripts["create:desktop:update-manifest"], "node scripts/create-macos-update-manifest.mjs");
   assert.equal(packageJson.scripts["check:desktop:release"], "node scripts/check-macos-release.mjs");
   assert.equal(packageJson.scripts["check:desktop:release-environment"], "node scripts/check-macos-release-environment.mjs");
   assert.deepEqual(macosConfig.bundle.macOS, { hardenedRuntime: true, signingIdentity: "-" });
@@ -111,10 +130,14 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   assert.match(app, /!nativeApp && import\.meta\.env\.PROD/);
   assert.match(app, /pwa\.nativeApp \? "Native local" : "Offline ready"/);
   assert.match(app, /sendDeviceNotification/);
+  assert.match(app, /checkForMacosUpdate/);
+  assert.match(app, /installMacosUpdate/);
   assert.match(releaseBuilder, /LANG: "C"/);
   assert.match(releaseBuilder, /--keepParent/);
   assert.match(releaseBuilder, /tauriConfig\.productName/);
   assert.match(releaseBuilder, /tauriConfig\.version/);
+  assert.match(releaseBuilder, /createUpdaterArtifacts: true/);
+  assert.match(releaseBuilder, /universal-apple-darwin/);
   assert.doesNotMatch(releaseBuilder, /Outflow_0\.1\.0/);
   assert.match(releaseInspector, /tauriConfig\.identifier/);
   assert.match(releaseInspector, /tauriConfig\.version/);
@@ -127,6 +150,7 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   assert.match(quality, /persist-credentials: false/);
   assert.match(quality, /npm run test:desktop-shell/);
   assert.match(quality, /npm run test:device-notifications/);
+  assert.match(quality, /npm run test:app-updates/);
   assert.match(quality, /npm run test:desktop-release/);
   assert.match(quality, /npm run desktop:release/);
   assert.match(quality, /npm run check:desktop:release/);

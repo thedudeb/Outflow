@@ -2,9 +2,18 @@ name: macOS Production Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already committed in src-tauri/tauri.conf.json
+        required: true
+        type: string
+      release_notes:
+        description: Optional notes prepended to generated release notes
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: outflow-macos-production-release
@@ -21,7 +30,12 @@ jobs:
       APPLE_SIGNING_IDENTITY: ${{ vars.OUTFLOW_MACOS_SIGNING_IDENTITY }}
       OUTFLOW_MACOS_EXPECTED_TEAM_ID: ${{ vars.OUTFLOW_MACOS_TEAM_ID }}
       OUTFLOW_MACOS_EXPECTED_COMMIT: ${{ github.sha }}
+      OUTFLOW_MACOS_EXPECTED_VERSION: ${{ inputs.version }}
       OUTFLOW_MACOS_REQUIRE_CERTIFICATE: "true"
+      OUTFLOW_MACOS_REQUIRE_UPDATER: "true"
+      OUTFLOW_MACOS_TARGET: universal-apple-darwin
+      OUTFLOW_MACOS_RELEASE_REPOSITORY: ${{ github.repository }}
+      OUTFLOW_UPDATER_PUBLIC_KEY: ${{ vars.OUTFLOW_UPDATER_PUBLIC_KEY }}
       APPLE_API_KEY: ${{ vars.OUTFLOW_APPLE_API_KEY }}
       APPLE_API_ISSUER: ${{ vars.OUTFLOW_APPLE_API_ISSUER }}
 
@@ -33,11 +47,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install universal Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
       - name: Install locked dependencies
         run: npm ci
       - name: Verify release contracts
         run: |
           npm run test:device-notifications
+          npm run test:app-updates
           npm run test:desktop-shell
           npm run test:desktop-release
       - name: Materialize private notarization key
@@ -54,12 +71,16 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE_PASSWORD }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey_${{ vars.OUTFLOW_APPLE_API_KEY }}.p8
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OUTFLOW_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.OUTFLOW_UPDATER_PRIVATE_KEY_PASSWORD }}
       - name: Build signed and notarized archive
         run: npm run desktop:release
         env:
           APPLE_CERTIFICATE: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.OUTFLOW_APPLE_CERTIFICATE_PASSWORD }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey_${{ vars.OUTFLOW_APPLE_API_KEY }}.p8
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OUTFLOW_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.OUTFLOW_UPDATER_PRIVATE_KEY_PASSWORD }}
       - name: Remove notarization key
         if: always()
         run: rm -f "$APPLE_API_KEY_PATH"
@@ -69,15 +90,41 @@ jobs:
         run: npm run check:desktop:release
         env:
           OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE: "true"
+          OUTFLOW_MACOS_REQUIRE_UPDATER: "false"
+      - name: Create signed update manifest
+        run: npm run create:desktop:update-manifest
+        env:
+          OUTFLOW_MACOS_RELEASE_NOTES: ${{ inputs.release_notes }}
+      - name: Inspect updater release set
+        run: npm run check:desktop:release
+        env:
+          OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE: "true"
       - name: Write archive checksum
-        working-directory: src-tauri/target/release/bundle/macos-release
-        run: shasum -a 256 *.zip > SHA256SUMS.txt
+        working-directory: src-tauri/target/universal-apple-darwin/release/bundle/macos-release
+        run: shasum -a 256 *.zip *.tar.gz *.sig latest.json > SHA256SUMS.txt
       - name: Upload verified release candidate
         uses: actions/upload-artifact@v4
         with:
           name: outflow-macos-${{ github.sha }}
-          path: |
-            src-tauri/target/release/bundle/macos-release/*.zip
-            src-tauri/target/release/bundle/macos-release/SHA256SUMS.txt
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos-release/*
           if-no-files-found: error
           retention-days: 7
+      - name: Refuse an existing release version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$OUTFLOW_MACOS_EXPECTED_VERSION" >/dev/null 2>&1; then
+            echo "Release v$OUTFLOW_MACOS_EXPECTED_VERSION already exists." >&2
+            exit 1
+          fi
+      - name: Publish signed macOS release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTFLOW_MACOS_RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          gh release create "v$OUTFLOW_MACOS_EXPECTED_VERSION" \
+            src-tauri/target/universal-apple-darwin/release/bundle/macos-release/* \
+            --target "$GITHUB_SHA" \
+            --title "Outflow v$OUTFLOW_MACOS_EXPECTED_VERSION" \
+            --notes "$OUTFLOW_MACOS_RELEASE_NOTES" \
+            --generate-notes

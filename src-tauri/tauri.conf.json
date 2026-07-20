@@ -32,7 +32,7 @@
         "enable": false,
         "scope": []
       },
-      "capabilities": ["main-notifications"]
+      "capabilities": ["main-notifications", "main-macos-updater"]
     }
   },
   "bundle": {

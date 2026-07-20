@@ -73,6 +73,11 @@ import {
   requestDeviceNotificationPermission,
   sendDeviceNotification,
 } from "./deviceNotifications";
+import {
+  checkForMacosUpdate,
+  installMacosUpdate,
+  isMacosNativeRuntime,
+} from "./appUpdates";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -1247,9 +1252,13 @@ function useDialogLifecycle(open, onClose, closeDisabled = false) {
 
 function useInstallableApp() {
   const nativeApp = Boolean(import.meta.env.TAURI_ENV_PLATFORM);
+  const nativeMacosApp = isMacosNativeRuntime();
   const [online, setOnline] = useState(() => navigator.onLine);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [waitingWorker, setWaitingWorker] = useState(null);
+  const [nativeUpdate, setNativeUpdate] = useState(null);
+  const [nativeUpdateStatus, setNativeUpdateStatus] = useState("idle");
+  const [nativeUpdateProgress, setNativeUpdateProgress] = useState(null);
   const [standalone, setStandalone] = useState(() => nativeApp || window.matchMedia("(display-mode: standalone)").matches);
   const [offlineReady, setOfflineReady] = useState(() => nativeApp || Boolean(navigator.serviceWorker?.controller));
   const reloadForUpdate = useRef(false);
@@ -1298,6 +1307,30 @@ function useInstallableApp() {
     };
   }, [nativeApp]);
 
+  useEffect(() => {
+    if (!nativeMacosApp || !import.meta.env.PROD) return undefined;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setNativeUpdateStatus("checking");
+      try {
+        const update = await checkForMacosUpdate();
+        if (!active) {
+          await update?.close?.();
+          return;
+        }
+        setNativeUpdate(update);
+        setNativeUpdateStatus(update ? "available" : "current");
+      } catch {
+        if (active) setNativeUpdateStatus("unavailable");
+      }
+    }, 1_500);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [nativeMacosApp]);
+
   async function install() {
     if (!installPrompt) return false;
     await installPrompt.prompt();
@@ -1306,11 +1339,40 @@ function useInstallableApp() {
     return choice.outcome === "accepted";
   }
 
-  function applyUpdate() {
-    if (!waitingWorker) return;
-    reloadForUpdate.current = true;
-    waitingWorker.postMessage({ type: "SKIP_WAITING" });
+  async function applyUpdate() {
+    if (nativeUpdate) {
+      setNativeUpdateStatus("downloading");
+      setNativeUpdateProgress(null);
+      try {
+        await installMacosUpdate(nativeUpdate, {
+          onProgress: (progress) => {
+            setNativeUpdateProgress(progress);
+            if (progress.phase === "installed") setNativeUpdateStatus("restarting");
+          },
+        });
+      } catch {
+        setNativeUpdateStatus("error");
+      }
+      return;
+    }
+    if (waitingWorker) {
+      reloadForUpdate.current = true;
+      waitingWorker.postMessage({ type: "SKIP_WAITING" });
+    }
   }
+
+  const nativeUpdatePercent = nativeUpdateProgress?.contentLength > 0
+    ? Math.min(100, Math.round((nativeUpdateProgress.downloaded / nativeUpdateProgress.contentLength) * 100))
+    : null;
+  const updateLabel = nativeUpdate
+    ? nativeUpdateStatus === "downloading"
+      ? `Updating${nativeUpdatePercent === null ? "" : ` ${nativeUpdatePercent}%`}`
+      : nativeUpdateStatus === "restarting"
+        ? "Restarting"
+        : nativeUpdateStatus === "error"
+          ? "Retry update"
+          : `Update ${nativeUpdate.version}`
+    : "Update ready";
 
   return {
     online,
@@ -1318,7 +1380,9 @@ function useInstallableApp() {
     standalone,
     offlineReady,
     canInstall: Boolean(installPrompt) && !standalone,
-    updateAvailable: Boolean(waitingWorker),
+    updateAvailable: Boolean(waitingWorker || nativeUpdate),
+    updateBusy: ["downloading", "restarting"].includes(nativeUpdateStatus),
+    updateLabel,
     install,
     applyUpdate,
   };
@@ -1404,6 +1468,9 @@ function PrivacyPage({ onHome, onOpen }) {
           <p>
             The public website is hosted through GitHub Pages. Like any website host, it may process standard request information such as IP address, browser type, requested path, and request time. Outflow does not add analytics, advertising pixels, or cross-site tracking to the current build.
           </p>
+          <p>
+            The macOS client checks GitHub Releases for signed updates after launch. That request includes the current app version, operating system, and processor architecture, and GitHub may process standard request information such as your IP address. An update is downloaded and installed only after you choose the update control.
+          </p>
         </PrivacySection>
 
         <PrivacySection code="02" title="Optional account and shared data">
@@ -1434,7 +1501,7 @@ function PrivacyPage({ onHome, onOpen }) {
           <p>Outflow uses or plans to use the following processors only for the named product functions:</p>
           <ul className="grid border border-zinc-800 sm:grid-cols-2">
             {[
-              ["GitHub Pages", "Public web hosting", "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"],
+              ["GitHub Pages / Releases", "Public web hosting and signed macOS update delivery", "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"],
               ["Supabase", "Authentication, database, synchronization, and server functions", "https://supabase.com/privacy"],
               ["Resend", "Passwordless, invitation, and reminder email", "https://resend.com/legal/privacy-policy"],
               ["Stripe", "Hosted one-time payment and payment events", "https://stripe.com/privacy"],
@@ -4237,9 +4304,10 @@ function Tracker({ onExit, pwa }) {
                   <button
                     type="button"
                     onClick={pwa.applyUpdate}
+                    disabled={pwa.updateBusy}
                     className="border border-cyan-700 bg-black px-2 py-1.5 font-mono text-[10px] font-black uppercase text-cyan-300 hover:border-cyan-400"
                   >
-                    Update ready
+                    {pwa.updateLabel}
                   </button>
                 )}
                 <button

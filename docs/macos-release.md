@@ -1,8 +1,8 @@
-# macOS Release Readiness
+# macOS Release And Updates
 
-Outflow produces a hardened-runtime macOS application with a complete sealed-resource signature and a headless ZIP distribution container. The default build uses Apple's ad-hoc identity (`-`) and is intentionally rejected by Gatekeeper. It is release-readiness evidence, not a public desktop release.
+Outflow's default macOS build is a hardened, ad-hoc-signed release-readiness artifact. It is intentionally rejected by Gatekeeper and is never uploaded by Quality. The protected production path builds one universal Apple Silicon/Intel app, applies an operator-owned Developer ID signature and Apple notarization, and creates a separate Tauri updater signature.
 
-The production path requires an operator-owned Developer ID Application certificate and successful Apple notarization. Tauri accepts the installed identity through `APPLE_SIGNING_IDENTITY` and supports App Store Connect API or Apple ID notarization credentials. The repository never stores those credentials or uploads a desktop artifact from the default Quality workflow.
+Published clients check `https://github.com/thedudeb/Outflow/releases/latest/download/latest.json` after launch. A client downloads an update only after the user selects the update control, verifies the archive against its embedded updater public key, installs it, and relaunches. The updater endpoint and public key are injected only into protected production builds.
 
 ## Readiness Build
 
@@ -13,87 +13,71 @@ npm run desktop:release
 npm run check:desktop:release
 ```
 
-The build creates:
+This creates `src-tauri/target/release/bundle/macos/Outflow.app` and a versioned ZIP in `macos-release`. The checker validates identity, version, category, architecture, hardened runtime, sealed resources, empty entitlements, and strict signatures before and after extraction. It also proves that the default artifact has no Team ID or notarization ticket and fails Gatekeeper distribution assessment. Updater metadata is deliberately absent.
 
-- `src-tauri/target/release/bundle/macos/Outflow.app`
-- `src-tauri/target/release/bundle/macos-release/Outflow_0.1.0_<architecture>.zip`
+## Production Credentials
 
-The checker requires the production `com.thedudeb.outflow` identifier, version `0.1.0`, finance category, expected executable and icon, 64-bit Mach-O code, hardened runtime, a complete sealed-resource inventory, an empty entitlement boundary, and valid strict deep signatures before and after archive extraction. It also requires the default build to have no Team ID or notarization ticket and to fail Gatekeeper distribution assessment.
-
-## Production Environment Preflight
-
-The protected release environment must set:
-
-```text
-APPLE_SIGNING_IDENTITY=Developer ID Application: <name> (<team id>)
-OUTFLOW_MACOS_EXPECTED_TEAM_ID=<team id>
-```
-
-CI may additionally provide `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` together for Tauri to import an exported certificate. They are optional when the Developer ID identity is already installed in the build keychain.
-
-Configure exactly one notarization mode:
-
-```text
-APPLE_API_KEY
-APPLE_API_ISSUER
-APPLE_API_KEY_PATH
-```
-
-or:
-
-```text
-APPLE_ID
-APPLE_PASSWORD
-APPLE_TEAM_ID
-```
-
-Run `npm run check:desktop:release-environment` before building. The preflight requires a canonical Developer ID identity whose Team ID matches the independent pin, rejects partial or mixed notarization modes, and requires an API private key to be a private regular file outside the repository. It reports field names and policy errors without echoing values.
-
-## Protected GitHub Workflow
-
-`.github/workflows/macos-release.yml` is a manual, `main`-only production path. Its `macos-production` environment must have deployment-branch protection and required reviewers before credentials are added.
-
-Run `npm run check:github-environments` before dispatch. The shared readiness contract verifies that this environment exists, allows exactly `main`, requires review, and contains every variable and secret name used below without requesting any secret value.
-
-Configure these environment variables:
+The protected `macos-production` GitHub environment must allow exactly `main`, require review, and contain these variables:
 
 ```text
 OUTFLOW_MACOS_SIGNING_IDENTITY
 OUTFLOW_MACOS_TEAM_ID
 OUTFLOW_APPLE_API_KEY
 OUTFLOW_APPLE_API_ISSUER
+OUTFLOW_UPDATER_PUBLIC_KEY
 ```
 
-Configure these environment secrets:
+It must contain these secrets:
 
 ```text
 OUTFLOW_APPLE_CERTIFICATE
 OUTFLOW_APPLE_CERTIFICATE_PASSWORD
 OUTFLOW_APPLE_API_PRIVATE_KEY
+OUTFLOW_UPDATER_PRIVATE_KEY
+OUTFLOW_UPDATER_PRIVATE_KEY_PASSWORD
 ```
 
-`OUTFLOW_APPLE_CERTIFICATE` is the certificate payload accepted by Tauri and its password must be stored separately. The workflow installs locked dependencies and passes release policy tests before exposing any production secret. It then writes the App Store Connect private key to a `0600` file in the ephemeral runner directory, binds the release to the exact `main` commit, imports the certificate only for preflight and build steps, and removes the private key before inspecting or uploading the result.
+The Apple certificate and password enable Developer ID signing. The App Store Connect key ID, issuer, and private key enable notarization. The encrypted Tauri updater private key signs update archives; its password must remain a separate secret. Generate and back up the updater key outside the repository. Losing it prevents existing installations from accepting future updates, while exposing it permits unauthorized update signatures.
 
-The workflow uploads only the verified notarized ZIP and `SHA256SUMS.txt` as a GitHub Actions release-candidate artifact named for the exact commit, with seven-day retention. Under [GitHub's workflow-artifact access rules](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts), signed-in users with repository read access can download artifacts; in a public repository this is intentionally treated as a review candidate rather than private storage. It does not create a GitHub Release, publish an ad-hoc artifact, or upload the raw `.app`. Promotion remains a separate operator decision after clean-machine acceptance.
+`npm run check:github-environments` validates environment protection and setting names without reading secret values. `npm run check:desktop:release-environment` validates the Developer ID, Team ID, notarization mode, universal target, exact version, and updater credential presence without echoing values.
 
-## Operator Release Procedure
+## Protected Workflow
 
-1. Create or import an operator-owned Developer ID Application certificate and confirm it appears in `security find-identity -v -p codesigning`.
-2. Configure the pinned Team ID and one complete notarization mode in a protected macOS build environment.
-3. Run `npm run check:desktop:release-environment`.
-4. Run `npm run desktop:release`. Tauri signs, submits, and staples the `.app` before the wrapper creates the ZIP.
-5. Verify the distributable artifact:
+`.github/workflows/macos-release.yml` is manual and `main`-only. Dispatch requires the exact version already committed in `src-tauri/tauri.conf.json`. The workflow:
+
+1. Installs locked dependencies and both macOS Rust targets.
+2. Runs notification, updater, shell, and release policy contracts before exposing secrets.
+3. Builds and notarizes a universal app and creates the updater archive and detached signature.
+4. Removes the temporary notarization key, then verifies the app, ZIP, architectures, notarization, updater signature set, and `latest.json` linkage.
+5. Uploads the complete set as a seven-day GitHub Actions review artifact and refuses an existing version.
+6. Publishes the GitHub Release as the final step with the manual ZIP, update archive, signature, manifest, and checksums.
+
+The workflow does not publish a raw `.app`, an ad-hoc artifact, or replacement assets under an existing version.
+
+## Release Procedure
+
+1. Provision the protected environment with independently generated Apple and updater credentials.
+2. Increment `src-tauri/tauri.conf.json`, commit the version to `main`, and wait for Quality to pass.
+3. Dispatch `macOS Production Release` from that exact commit with the exact version and optional notes.
+4. Review and approve the protected environment only after confirming the commit and version.
+5. Download the review artifact and perform clean-machine first-launch and upgrade acceptance.
+6. Confirm that the previous release discovers the new version, rejects altered signatures, installs only after user action, preserves local data, and relaunches successfully.
+
+For a local operator reproduction, supply the production signing environment and run:
 
 ```sh
-OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE=true \
+OUTFLOW_MACOS_TARGET=universal-apple-darwin \
+OUTFLOW_MACOS_REQUIRE_UPDATER=true \
+OUTFLOW_MACOS_EXPECTED_VERSION="<version>" \
+npm run desktop:release
+
+OUTFLOW_MACOS_TARGET=universal-apple-darwin \
+OUTFLOW_MACOS_REQUIRE_UPDATER=true \
+OUTFLOW_MACOS_EXPECTED_DISTRIBUTABLE=true \
 OUTFLOW_MACOS_EXPECTED_TEAM_ID="<team id>" \
 npm run check:desktop:release
 ```
 
-The distributable mode rejects ad-hoc signatures, requires the exact Team ID and Developer ID authority, validates the stapled ticket, requires Gatekeeper's notarized Developer ID assessment, and repeats those checks after extracting the ZIP.
+Before broad distribution, complete interrupted-download recovery, rollback response, native notification acceptance, configured account callback and sync testing, VoiceOver and text-scaling review, privacy review, and incident ownership. Ad-hoc Quality artifacts must never be presented as public releases.
 
-## Remaining Acceptance
-
-Before publication, complete a protected Developer ID build, Apple notarization and stapling, clean-machine download and first-launch checks, signed in-place upgrade and rollback testing, native notification permission/delivery acceptance, configured account callback and synchronization testing, VoiceOver and text-scaling review, privacy disclosures, distribution-channel policy, and incident/rollback ownership. Ad-hoc Quality artifacts must never be presented as installable public releases.
-
-See Tauri's official [macOS code-signing guide](https://v2.tauri.app/distribute/sign/macos/) for certificate and notarization setup.
+See Tauri's official [macOS code-signing guide](https://v2.tauri.app/distribute/sign/macos/) and [updater guide](https://v2.tauri.app/plugin/updater/) for the underlying contracts.

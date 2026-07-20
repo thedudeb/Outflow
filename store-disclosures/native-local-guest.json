@@ -15,7 +15,7 @@
     "privacyChoicesUrl": "https://thedudeb.github.io/Outflow/?view=privacy"
   },
   "sourceEvidence": {
-    "dependencyLockSha256": "eebf07b9ec1050b4ff2976acc153f64358c36c95e51dc5582deddbdf336fee03",
+    "dependencyLockSha256": "57169b24ed3536bc8dfdc52fb718cf1155d8b7f47e4e50961016cf1d44d1bb5c",
     "iosPrivacyManifestSha256": "37f23fa7aabe84ee3c9a1f162c2c036612e5142aa6e3ce1dfc711161572d3131",
     "androidManifestSha256": "5fd46fa993942621d525c2d726585f21b99a71e257392176fbad4fde7ef7f8cf",
     "androidNetworkSecuritySha256": "dea35ebed76536c24c13f74036f02dc874f944147cb3a49c2ad0550f71e3e0c7"

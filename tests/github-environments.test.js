@@ -31,8 +31,8 @@ test("complete protected GitHub environments satisfy the versioned readiness con
   const result = evaluateGitHubEnvironmentReadiness(requirements, completeSnapshot(requirements));
   assert.deepEqual(result.errors, []);
   assert.equal(result.environmentCount, 4);
-  assert.equal(result.variableCount, 17);
-  assert.equal(result.secretCount, 19);
+  assert.equal(result.variableCount, 18);
+  assert.equal(result.secretCount, 21);
   assert.match(buildGitHubEnvironmentReadinessReport(requirements.repository, result), /readiness: READY/);
 });
 

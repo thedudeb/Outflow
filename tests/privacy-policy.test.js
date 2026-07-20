@@ -27,6 +27,7 @@ test("the policy reflects the implemented local, hosted, provider, and data-cont
     "Payment-card details are entered with Stripe and are not collected by the Outflow application",
     "Outflow does not create a recurring product subscription",
     "GitHub Pages",
+    "The macOS client checks GitHub Releases for signed updates after launch",
     "Supabase",
     "Resend",
     "Stripe",

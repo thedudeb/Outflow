@@ -54,6 +54,31 @@ export function validateMacosReleaseEnvironment(env, options = {}) {
     }
   }
 
+  const requireUpdater = value(env, "OUTFLOW_MACOS_REQUIRE_UPDATER");
+  if (requireUpdater && !/^(?:true|false)$/.test(requireUpdater)) {
+    errors.push("OUTFLOW_MACOS_REQUIRE_UPDATER: expected true or false.");
+  }
+  if (requireUpdater === "true") {
+    if (value(env, "OUTFLOW_MACOS_TARGET") !== "universal-apple-darwin") {
+      errors.push("OUTFLOW_MACOS_TARGET: signed updates require the universal macOS target.");
+    }
+    if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value(env, "OUTFLOW_MACOS_EXPECTED_VERSION"))) {
+      errors.push("OUTFLOW_MACOS_EXPECTED_VERSION: expected an exact semantic version.");
+    }
+    const updaterPublicKey = value(env, "OUTFLOW_UPDATER_PUBLIC_KEY");
+    const updaterPrivateKey = value(env, "TAURI_SIGNING_PRIVATE_KEY");
+    const updaterPassword = String(env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || "");
+    if (updaterPublicKey.length < 40 || updaterPublicKey.length > 2_000) {
+      errors.push("OUTFLOW_UPDATER_PUBLIC_KEY: expected the Tauri updater public key content.");
+    }
+    if (updaterPrivateKey.length < 40) {
+      errors.push("TAURI_SIGNING_PRIVATE_KEY: expected the encrypted Tauri updater private key content.");
+    }
+    if (updaterPassword.length < 16) {
+      errors.push("TAURI_SIGNING_PRIVATE_KEY_PASSWORD: expected at least 16 characters.");
+    }
+  }
+
   const apiPresent = apiNames.filter((name) => value(env, name));
   const appleIdPresent = appleIdNames.filter((name) => value(env, name));
   if (apiPresent.length && appleIdPresent.length) {

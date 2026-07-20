@@ -35,7 +35,7 @@ test("guest browser compatibility is a direct three-engine CI contract", async (
   assert.match(spec, /collectBrowserFailures/);
   assert.match(spec, /documentElement\.scrollWidth/);
   assert.match(spec, /Current release status/);
-  assert.match(spec, /Personal \/ Local/);
+  assert.match(spec, /Personal \/ On this device/);
   assert.match(spec, /Account \/ Guest/);
 
   const packageJson = JSON.parse(packageSource);
