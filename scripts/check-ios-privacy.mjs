@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readPlist } from "./ios-release-lib.mjs";
-import { parseEnvFile } from "./check-service-readiness.mjs";
+import { validateNativeGuestBuildInputs } from "./native-guest-boundary.mjs";
 
 const expectedRootKeys = [
   "NSPrivacyAccessedAPITypes",
@@ -10,21 +10,7 @@ const expectedRootKeys = [
   "NSPrivacyTracking",
   "NSPrivacyTrackingDomains",
 ];
-const hostedBrowserNames = ["VITE_SUPABASE_ANON_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_URL"];
-
-export function validateIosGuestBuildInputs(env, environmentFiles = []) {
-  const configured = new Set();
-  for (const name of hostedBrowserNames) {
-    if (String(env?.[name] || "").trim()) configured.add(name);
-  }
-  for (const source of environmentFiles) {
-    const parsed = parseEnvFile(String(source || ""));
-    for (const name of hostedBrowserNames) {
-      if (String(parsed[name] || "").trim()) configured.add(name);
-    }
-  }
-  return [...configured].sort().map((name) => `${name}: hosted native configuration is not covered by the guest privacy manifest.`);
-}
+export const validateIosGuestBuildInputs = validateNativeGuestBuildInputs;
 
 export function validateIosPrivacyManifest(manifest) {
   const errors = [];

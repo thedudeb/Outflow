@@ -58,8 +58,8 @@ test("App Store guest packaging rejects hosted configuration without exposing va
     ["VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_private-value"],
   );
   assert.deepEqual(errors, [
-    "VITE_SUPABASE_PUBLISHABLE_KEY: hosted native configuration is not covered by the guest privacy manifest.",
-    "VITE_SUPABASE_URL: hosted native configuration is not covered by the guest privacy manifest.",
+    "VITE_SUPABASE_PUBLISHABLE_KEY: hosted native configuration is not covered by the local guest store disclosures.",
+    "VITE_SUPABASE_URL: hosted native configuration is not covered by the local guest store disclosures.",
   ]);
   assert.doesNotMatch(errors.join("\n"), /private-project|private-value/);
 });
@@ -98,6 +98,6 @@ test("simulator and signed IPA inspection enforce the bundled manifest", () => {
   assert.match(quality, /npm run check:mobile:ios-privacy/);
   assert.match(protectedWorkflow, /npm run test:mobile:ios-privacy/);
   assert.match(protectedWorkflow, /npm run check:mobile:ios-privacy/);
-  assert.match(releaseBuilder, /validateIosGuestBuildInputs/);
+  assert.match(releaseBuilder, /validateNativeGuestBuildInputs/);
   assert.match(releaseBuilder, /\.env\.production\.local/);
 });

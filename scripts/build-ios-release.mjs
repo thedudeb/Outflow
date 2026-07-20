@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { validateIosGuestBuildInputs } from "./check-ios-privacy.mjs";
+import { validateNativeGuestBuildInputs } from "./native-guest-boundary.mjs";
 
 assert.equal(process.platform, "darwin", "iOS release artifacts must be built on macOS");
 
@@ -13,9 +13,9 @@ const viteEnvironmentFiles = [".env", ".env.local", ".env.production", ".env.pro
   .filter((path) => existsSync(resolve(path)))
   .map((path) => readFileSync(resolve(path), "utf8"));
 assert.deepEqual(
-  validateIosGuestBuildInputs(process.env, viteEnvironmentFiles),
+  validateNativeGuestBuildInputs(process.env, viteEnvironmentFiles),
   [],
-  "hosted native configuration requires a reviewed privacy manifest before App Store packaging",
+  "hosted native configuration requires reviewed privacy artifacts before App Store packaging",
 );
 
 const tauri = resolve("node_modules/.bin/tauri");

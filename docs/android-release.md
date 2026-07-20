@@ -21,6 +21,12 @@ The build creates:
 
 The checker requires the production `com.thedudeb.outflow` identifier, version `0.1.0` and code `1000`, API 24 minimum/API 36 target, a non-debuggable manifest, denied cleartext traffic, the restricted permission set, ARM64-only native code, 16 KB APK alignment, an R8 mapping file, and an unsigned APK/AAB. These artifacts are readiness evidence only and must not be distributed.
 
+## Store Disclosure Boundary
+
+The versioned [native store disclosure draft](native-store-disclosures.md) records the current Play Data safety and Financial features answers, policy URL, review triggers, and exact-candidate procedure. The release command now runs through `scripts/build-android-release.mjs`, which rejects Supabase browser configuration from the process environment and every production Vite environment-file layer before invoking Tauri. `npm run test:mobile:store-disclosures` and `npm run check:mobile:store-disclosures` also bind the draft to the app identity, policy version, source permission set, disabled backup, and denied production cleartext traffic.
+
+The draft answer is **No** for collection or sharing of required user data types and **Other** for the Financial features declaration, scoped to local subscription and recurring-charge tracking. It claims neither an independent security review nor a Families badge. These are operator inputs for an exact local guest candidate, not a Play Console submission or policy acceptance.
+
 ## Signing Boundary
 
 The generated Gradle project reads a release signing identity only from a complete environment tuple:
@@ -75,7 +81,7 @@ npm run check:mobile:android-release
 ```
 
 5. Retain the matching R8 mapping file with the release and upload the AAB through a protected Play Console path. Never publish the APK/AAB or mapping file as a public CI artifact.
-6. Set `https://thedudeb.github.io/Outflow/?view=privacy` as the Play privacy-policy URL, reconcile its version with the exact candidate's network/provider behavior and Data safety answers, then confirm Play App Signing enrollment, package identity, version code, target API, app-content declarations, pre-launch results, upgrade behavior, and staged rollout controls before promotion.
+6. Review the [native store disclosure draft](native-store-disclosures.md) against the exact candidate, set its privacy-policy URL in Play Console, submit the candidate-specific Data safety and Financial features answers, then confirm Play App Signing enrollment, package identity, version code, target API, remaining app-content declarations, pre-launch results, upgrade behavior, and staged rollout controls before promotion.
 
 ## Remaining Acceptance
 

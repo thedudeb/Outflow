@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "releaseBoundary": "native-local-guest",
+  "effectiveDate": "2026-07-20",
+  "operatorStatus": "draft-not-submitted",
+  "submissionRequiresCandidateReview": true,
+  "app": {
+    "name": "Outflow",
+    "version": "0.1.0",
+    "identifier": "com.thedudeb.outflow"
+  },
+  "privacy": {
+    "policyVersion": "2026-07-20",
+    "policyUrl": "https://thedudeb.github.io/Outflow/?view=privacy",
+    "privacyChoicesUrl": "https://thedudeb.github.io/Outflow/?view=privacy"
+  },
+  "sourceEvidence": {
+    "dependencyLockSha256": "eebf07b9ec1050b4ff2976acc153f64358c36c95e51dc5582deddbdf336fee03",
+    "iosPrivacyManifestSha256": "37f23fa7aabe84ee3c9a1f162c2c036612e5142aa6e3ce1dfc711161572d3131",
+    "androidManifestSha256": "5fd46fa993942621d525c2d726585f21b99a71e257392176fbad4fde7ef7f8cf",
+    "androidNetworkSecuritySha256": "dea35ebed76536c24c13f74036f02dc874f944147cb3a49c2ad0550f71e3e0c7"
+  },
+  "releaseCapabilities": {
+    "accounts": false,
+    "hostedSync": false,
+    "hostedEmail": false,
+    "hostedCalendar": false,
+    "payments": false,
+    "analytics": false,
+    "advertising": false,
+    "tracking": false,
+    "bankConnections": false
+  },
+  "apple": {
+    "appPrivacy": {
+      "response": "No, we do not collect data from this app",
+      "collectsData": false,
+      "dataTypes": [],
+      "tracking": false
+    }
+  },
+  "googlePlay": {
+    "dataSafety": {
+      "collectsOrSharesRequiredUserData": false,
+      "dataTypes": [],
+      "dataShared": false,
+      "accountCreationAvailable": false,
+      "independentSecurityReview": false,
+      "familiesPolicyBadge": false
+    },
+    "financialFeatures": {
+      "selections": [
+        "Other"
+      ],
+      "description": "Local subscription and recurring-charge tracking only; no bank connection, payment execution, lending, financial advice, investing, insurance, credit reporting, or money transfer."
+    }
+  },
+  "reviewTriggers": [
+    "account or hosted-service configuration",
+    "analytics, advertising, or tracking code",
+    "app permission or entitlement changes",
+    "data export or notification behavior changes",
+    "new native or webview network destinations",
+    "new third-party libraries or SDKs",
+    "privacy policy or release version changes"
+  ],
+  "sources": {
+    "appleAppPrivacy": "https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy",
+    "googlePlayDataSafety": "https://support.google.com/googleplay/android-developer/answer/10787469",
+    "googlePlayFinancialFeatures": "https://support.google.com/googleplay/android-developer/answer/13849271"
+  }
+}

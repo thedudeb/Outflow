@@ -48,7 +48,9 @@ jobs:
         run: |
           npm run test:device-notifications
           npm run test:mobile-shell
+          npm run test:mobile:store-disclosures
           npm run test:mobile:android-release
+          npm run check:mobile:store-disclosures
       - name: Build and inspect unsigned baseline
         run: |
           npm run mobile:android:release

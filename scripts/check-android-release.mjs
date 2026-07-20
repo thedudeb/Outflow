@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { inspectNativeStoreDisclosureSources } from "./check-native-store-disclosures.mjs";
+
+assert.deepEqual(
+  inspectNativeStoreDisclosureSources(),
+  [],
+  "Android release store disclosures do not match the native local guest boundary",
+);
 
 const outputRoot = "src-tauri/gen/android/app/build/outputs";
 const expectSigned = process.env.OUTFLOW_ANDROID_EXPECT_SIGNED === "true";

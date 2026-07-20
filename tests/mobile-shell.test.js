@@ -165,7 +165,7 @@ test("the Android native boundary is private, immediate-notification-only, and C
 
   assert.equal(packageJson.scripts["mobile:android:init"], "node scripts/init-android-project.mjs");
   assert.equal(packageJson.scripts["mobile:android:build"], "tauri android build --ci --debug --target aarch64 --apk");
-  assert.equal(packageJson.scripts["mobile:android:release"], "tauri android build --ci --target aarch64 --apk --aab");
+  assert.equal(packageJson.scripts["mobile:android:release"], "node scripts/build-android-release.mjs");
   assert.equal(packageJson.scripts["check:mobile:android-bundle"], "node scripts/check-android-bundle.mjs");
   assert.equal(packageJson.scripts["check:mobile:android-release"], "node scripts/check-android-release.mjs");
   assert.equal(packageJson.scripts["test:mobile:android-signing"], "node scripts/check-android-signing-path.mjs");

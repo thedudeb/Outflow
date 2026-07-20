@@ -13,8 +13,14 @@ import {
   validateProvisioningProfile,
 } from "./ios-release-lib.mjs";
 import { inspectIosPrivacyManifest, validateIosRequiredReasonSymbols } from "./check-ios-privacy.mjs";
+import { inspectNativeStoreDisclosureSources } from "./check-native-store-disclosures.mjs";
 
 assert.equal(process.platform, "darwin", "signed iOS artifacts must be inspected on macOS");
+assert.deepEqual(
+  inspectNativeStoreDisclosureSources(),
+  [],
+  "signed IPA store disclosures do not match the native local guest boundary",
+);
 
 const expectedTeamId = String(process.env.OUTFLOW_IOS_EXPECTED_TEAM_ID || "").trim();
 const expectedFingerprint = normalizeFingerprint(process.env.OUTFLOW_IOS_EXPECTED_CERT_SHA256);

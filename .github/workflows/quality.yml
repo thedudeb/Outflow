@@ -114,8 +114,10 @@ jobs:
       - run: rustup target add aarch64-apple-ios-sim
       - run: npm run test:device-notifications
       - run: npm run test:mobile-shell
+      - run: npm run test:mobile:store-disclosures
       - run: npm run test:mobile:ios-privacy
       - run: npm run test:mobile:ios-release
+      - run: npm run check:mobile:store-disclosures
       - run: npm run check:mobile:ios-privacy
       - run: npm run mobile:ios:build
       - run: npm run check:mobile:ios-bundle
@@ -147,7 +149,9 @@ jobs:
       - run: rustup target add aarch64-linux-android
       - run: npm run test:device-notifications
       - run: npm run test:mobile-shell
+      - run: npm run test:mobile:store-disclosures
       - run: npm run test:mobile:android-release
+      - run: npm run check:mobile:store-disclosures
       - run: npm run mobile:android:build
       - run: npm run check:mobile:android-bundle
       - run: npm run mobile:android:release
