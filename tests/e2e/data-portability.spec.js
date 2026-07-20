@@ -22,7 +22,7 @@ const canonicalColumns = [
 
 test("CSV export is canonical, complete, and spreadsheet-formula safe", async ({ page }) => {
   await openTracker(page);
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("=RISK(A1)");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("=RISK(A1)");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("1.25");
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
 

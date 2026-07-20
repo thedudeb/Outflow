@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { openTracker } from "../e2e/helpers";
+import { openTracker, showTrackerView } from "../e2e/helpers";
 
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
 const importFixture = fileURLToPath(new URL("../fixtures/subscriptions-import.csv", import.meta.url));
@@ -981,7 +981,7 @@ test("verified sign-in preserves local data until Create cloud copy is selected"
   await openTracker(page);
   await expect(page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true })).toBeVisible();
 
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Local Boundary");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Local Boundary");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("9");
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
   const localCard = page.getByRole("article").filter({ hasText: "Local Boundary" });
@@ -1552,6 +1552,7 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
   await openTracker(page);
   const localWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
   await openStudioCloud(page);
+  await showTrackerView(page, "Calendar");
 
   await page.getByRole("button", { name: "Export calendar", exact: true }).click();
   let dialog = page.getByRole("dialog", { name: "Calendar export" });
@@ -1611,8 +1612,9 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
   cloudState.entitlementStatus = "refunded";
   cloudState.canSync = false;
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Outflow", level: 1 })).toBeVisible();
   await openStudioCloud(page);
+  await showTrackerView(page, "Calendar");
   await page.getByRole("button", { name: "Export calendar", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "Calendar export" });
   await expect(dialog.getByText("Suspended", { exact: true })).toBeVisible();
@@ -1674,7 +1676,7 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("article").filter({ hasText: "Linear" })).toContainText("Alert 45d / 1d");
 
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Pro Matrix");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Pro Matrix");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("18.50");
   await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("CAD");
   const leadTimes = page.getByRole("group", { name: "Alert lead times" }).getByRole("checkbox");

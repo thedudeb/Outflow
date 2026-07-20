@@ -84,7 +84,7 @@ async function addSubscription(page, {
   selectedLeadDays = [7],
   paused = false,
 }) {
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill(name);
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill(String(amount));
   await page.getByLabel("Next billing date", { exact: true }).fill(date);
   await page.getByRole("textbox", { name: "Category", exact: true }).fill("Operations");

@@ -21,7 +21,7 @@ async function createEmptyHouseholdLedger(page, name) {
 }
 
 async function addSubscription(page, { name, amount, cycle, date, paused = false }) {
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill(name);
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill(String(amount));
   await page.getByRole("button", { name: cycle, exact: true }).click();
   await page.getByLabel("Next billing date", { exact: true }).fill(date);

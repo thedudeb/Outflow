@@ -37,7 +37,7 @@ test("guest upgrade comparison keeps the local free core available", async ({ pa
   await expect(dialog.getByRole("link", { name: "Privacy and data controls", exact: true })).toHaveAttribute("href", "/?view=privacy");
 
   await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Still Local");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Still Local");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("5");
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
   await expect(page.getByRole("article").filter({ hasText: "Still Local" })).toHaveCount(1);

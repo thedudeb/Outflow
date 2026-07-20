@@ -99,7 +99,7 @@ test("the published guest tracker identifies its boundary and persists a local e
   const trackerLayout = await layoutState(page);
   expect(trackerLayout.documentWidth).toBeLessThanOrEqual(trackerLayout.viewportWidth);
 
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Hosted Local Check");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Hosted Local Check");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("12.34");
   await page.getByRole("button", { name: "Add subscription", exact: true }).click();
   await expect(page.getByRole("article").filter({ hasText: "Hosted Local Check" })).toHaveCount(1);

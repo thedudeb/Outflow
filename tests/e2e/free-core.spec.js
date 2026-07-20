@@ -26,7 +26,7 @@ async function createEmptyHouseholdLedger(page) {
 }
 
 async function addSubscription(page, { name, amount, cycle, date, category }) {
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill(name);
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill(String(amount));
   await page.getByRole("button", { name: cycle, exact: true }).click();
   await page.getByLabel("Next billing date", { exact: true }).fill(date);
@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
 test("free-core subscription CRUD preserves metadata and rolls overdue billing forward", async ({ page }) => {
   await openTracker(page);
 
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Gym Membership");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Gym Membership");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("18.50");
   await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption("USD");
   await page.getByRole("button", { name: "Weekly", exact: true }).click();
@@ -113,7 +113,7 @@ test("trial billing aligns the first charge and becomes a recurring withdrawal a
   await openTracker(page);
   await createEmptyHouseholdLedger(page);
 
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Trial Service");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Trial Service");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("20");
   await page.getByLabel("Next billing date", { exact: true }).fill("2026-07-20");
   await page.getByLabel("Trial ends", { exact: true }).fill("2026-08-05");

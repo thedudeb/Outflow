@@ -20,7 +20,7 @@ async function createLedger(dialog, name, kind) {
 }
 
 async function addSubscription(page, { name, amount, currency = "USD", category }) {
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill(name);
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill(String(amount));
   await page.getByRole("combobox", { name: "Currency", exact: true }).selectOption(currency);
   await page.getByRole("textbox", { name: "Category", exact: true }).fill(category);

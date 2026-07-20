@@ -20,7 +20,7 @@ test("mobile tracker uses focused section views and preserves editor state", asy
   await showTrackerView(page, "Subscriptions");
   await expect(page.getByRole("heading", { name: "Active subscriptions", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Alerts", exact: true })).toBeHidden();
-  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Draft stays put");
+  await page.getByRole("combobox", { name: "Name", exact: true }).fill("Draft stays put");
 
   await showTrackerView(page, "Calendar");
   await expect(calendar).toHaveAttribute("aria-pressed", "true");
@@ -30,7 +30,7 @@ test("mobile tracker uses focused section views and preserves editor state", asy
 
   await showTrackerView(page, "Subscriptions");
   await expect(subscriptions).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Draft stays put");
+  await expect(page.getByRole("combobox", { name: "Name", exact: true })).toHaveValue("Draft stays put");
 
   const geometry = await navigation.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
