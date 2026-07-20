@@ -2,7 +2,7 @@
 
 Outflow has generated Tauri 2 targets for iPhone, iPad, and Android phones and tablets. Both embed the same responsive React tracker as the web and macOS products, open directly into `index.html#app`, and preserve the local-first guest ledger, forecasts, billing calendar, CSV/backup exports, and device-alert concepts without reimplementing subscription rules in native code.
 
-These are build- and emulator-verified guest alphas, not signed mobile releases. iOS requires version 14 or newer; Android requires API 24 or newer and targets API 36. Guest data stays inside each application sandbox. Neither target bundles Supabase, Stripe, Resend, bank connectivity, or provider credentials, and neither enables account/cloud features in the default build.
+These are build- and emulator-verified guest alphas, not production-signed mobile releases. iOS requires version 14 or newer; Android requires API 24 or newer and targets API 36. Guest data stays inside each application sandbox. Neither target bundles Supabase, Stripe, Resend, bank connectivity, or provider credentials, and neither enables account/cloud features in the default build.
 
 ## Commands
 
@@ -13,6 +13,9 @@ These are build- and emulator-verified guest alphas, not signed mobile releases.
 - `npm run check:mobile:ios-bundle` verifies the built identifier, product/version metadata, minimum OS, simulator platform, compiled assets, unsigned state, and 64-bit Mach-O executable.
 - `npm run mobile:android:build` creates a debug-signed ARM64 APK at `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
 - `npm run check:mobile:android-bundle` inspects the merged manifest, identity, API levels, permissions, native ABI, debug certificate, and 16 KB ZIP alignment of the built APK.
+- `npm run mobile:android:release` creates a minified production-ID APK and AAB. Without a complete signing environment, the release-readiness artifacts intentionally remain unsigned.
+- `npm run check:mobile:android-release` verifies production identity, release manifest policy, permission scope, ARM64 packaging, 16 KB alignment, R8 output, AAB structure, and either the expected unsigned boundary or an explicitly requested pinned signing certificate.
+- `npm run test:mobile:android-signing` rejects partial signing configuration, signs both release artifacts with a disposable external test keystore, pins their certificate fingerprint, and removes the keystore. See [android-release.md](android-release.md).
 
 ## Native Boundary
 
@@ -31,8 +34,8 @@ The local iOS acceptance build compiled an arm64 Simulator app, installed it as 
 
 The local Android acceptance build compiled an ARM64 APK, installed it as `com.thedudeb.outflow.debug`, and cold-launched it successfully on a clean Pixel 8 emulator running API 35. The live WebView reported a 412 CSS-pixel viewport and document width, full-width 355-pixel date controls, the expected five-record ledger after in-place APK replacement, and restart-safe local storage across process termination. Visual inspection confirmed a complete year in both native date controls, readable system status content, the intended dense layout, and no horizontal clipping. Filtered runtime logs contained no Outflow crash, fatal exception, blocked cleartext request, or WebView load error.
 
-The Quality workflow independently builds and inspects the unsigned iOS simulator bundle on a fresh `macos-latest` runner and the debug-signed, 16 KB-aligned Android APK on a fresh `ubuntu-latest` runner. CI does not upload or distribute either app.
+The Quality workflow independently builds and inspects the unsigned iOS simulator bundle on a fresh `macos-latest` runner. On a fresh `ubuntu-latest` runner it verifies the debug-signed Android APK, the unsigned minified release APK/AAB, incomplete-signing rejection, and a disposable-certificate signed build with exact fingerprint matching. CI does not upload or distribute any mobile artifact and does not receive a production signing identity.
 
 ## Release Work
 
-Before offering Outflow through TestFlight, the App Store, or Google Play, complete real-device persistence and upgrade testing, native notification permission and delivery acceptance, background-behavior decisions, account callback and configured-service acceptance, phone and tablet interaction coverage, VoiceOver/TalkBack and text-scaling review, privacy disclosures, platform signing, release archive/bundle generation, and protected distribution. The Android release must also pass Play Console policy, target-API, app-bundle, data-safety, and pre-launch checks. Pro purchase portability must follow each eventual platform-store policy rather than being inferred from either guest alpha.
+Before offering Outflow through TestFlight, the App Store, or Google Play, complete real-device persistence and upgrade testing, native notification permission and delivery acceptance, background-behavior decisions, account callback and configured-service acceptance, phone and tablet interaction coverage, VoiceOver/TalkBack and text-scaling review, privacy disclosures, operator-owned platform signing, and protected distribution. Android release APK/AAB generation and signing-path verification are present, but the Android release must still pass the production-key and Play Console policy, target-API, app-bundle, data-safety, and pre-launch gates in [android-release.md](android-release.md). Pro purchase portability must follow each eventual platform-store policy rather than being inferred from either guest alpha.

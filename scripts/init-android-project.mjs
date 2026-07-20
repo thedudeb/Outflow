@@ -159,10 +159,52 @@ writeFileSync(resolve(androidRoot, "main/res/xml/network_security_config.xml"), 
 writeFileSync(resolve(androidRoot, "debug/res/xml/network_security_config.xml"), debugNetworkSecurity);
 writeFileSync(resolve(androidRoot, "main/java/com/thedudeb/outflow/MainActivity.kt"), activity);
 
-const normalizedGradle = generatedGradle.replace(
-  "packaging {                jniLibs.keepDebugSymbols",
-  "packaging {\n                jniLibs.keepDebugSymbols",
-);
+const releaseSigningValues = `val releaseKeystorePath = System.getenv("OUTFLOW_ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotEmpty() }
+val releaseKeystorePassword = System.getenv("OUTFLOW_ANDROID_KEYSTORE_PASSWORD")?.takeIf { it.isNotEmpty() }
+val releaseKeyAlias = System.getenv("OUTFLOW_ANDROID_KEY_ALIAS")?.takeIf { it.isNotEmpty() }
+val releaseKeyPassword = System.getenv("OUTFLOW_ANDROID_KEY_PASSWORD")?.takeIf { it.isNotEmpty() }
+val releaseSigningValues = listOf(releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword)
+val releaseSigningConfigured = releaseSigningValues.count { it != null }
+
+if (releaseSigningConfigured != 0 && releaseSigningConfigured != releaseSigningValues.size) {
+    throw GradleException("Android release signing requires a complete Outflow signing environment.")
+}
+`;
+const releaseSigningConfig = `    signingConfigs {
+        if (releaseSigningConfigured == releaseSigningValues.size) {
+            create("outflowRelease") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
+            }
+        }
+    }
+`;
+const releaseSigningAssignment = `            if (releaseSigningConfigured == releaseSigningValues.size) {
+                signingConfig = signingConfigs.getByName("outflowRelease")
+            }
+`;
+const releaseBuildSigning = `        getByName("release") {
+${releaseSigningAssignment}`;
+const pluginsBlock = `plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("rust")
+}
+`;
+const cleanGeneratedGradle = generatedGradle
+  .replaceAll(releaseSigningValues, "")
+  .replaceAll(releaseSigningConfig, "")
+  .replaceAll(releaseSigningAssignment, "");
+const normalizedGradle = cleanGeneratedGradle
+  .replace(pluginsBlock, `${pluginsBlock}\n${releaseSigningValues}`)
+  .replace("android {\n", `android {\n${releaseSigningConfig}`)
+  .replace('        getByName("release") {\n', releaseBuildSigning)
+  .replace(
+    "packaging {                jniLibs.keepDebugSymbols",
+    "packaging {\n                jniLibs.keepDebugSymbols",
+  );
 writeFileSync(gradlePath, normalizedGradle);
 
 const generatedWrapperProperties = readFileSync(gradleWrapperPropertiesPath, "utf8");
@@ -196,14 +238,17 @@ assert.equal(wrapperDigest, gradleWrapperSha256, "generated Gradle wrapper JAR d
   resolve(gradleRoot, "gradlew.bat"),
   resolve(gradleRoot, "settings.gradle"),
 ].forEach((path) => {
-  const normalized = `${readFileSync(path, "utf8")
+  let normalized = readFileSync(path, "utf8")
     .replace(/\r\n?/g, "\n")
-    .replace(/[ \t]+$/gm, "")
-    .trimEnd()}\n`;
+    .replace(/[ \t]+$/gm, "");
+  if (/\.(?:gradle|kts|kt)$/.test(path)) normalized = normalized.replace(/\n{3,}/g, "\n\n");
+  normalized = `${normalized.trimEnd()}\n`;
   writeFileSync(path, normalized);
 });
 
 assert.doesNotMatch(manifest, /external-path|LEANBACK_LAUNCHER/);
 assert.match(manifest, /android:allowBackup="false"/);
 assert.match(normalizedGradle, /packaging \{\n\s+jniLibs\.keepDebugSymbols/);
+assert.match(normalizedGradle, /OUTFLOW_ANDROID_KEYSTORE_PATH/);
+assert.match(normalizedGradle, /signingConfig = signingConfigs\.getByName\("outflowRelease"\)/);
 console.log("Generated the hardened Outflow Android project");

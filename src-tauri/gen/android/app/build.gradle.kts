@@ -6,6 +6,17 @@ plugins {
     id("rust")
 }
 
+val releaseKeystorePath = System.getenv("OUTFLOW_ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotEmpty() }
+val releaseKeystorePassword = System.getenv("OUTFLOW_ANDROID_KEYSTORE_PASSWORD")?.takeIf { it.isNotEmpty() }
+val releaseKeyAlias = System.getenv("OUTFLOW_ANDROID_KEY_ALIAS")?.takeIf { it.isNotEmpty() }
+val releaseKeyPassword = System.getenv("OUTFLOW_ANDROID_KEY_PASSWORD")?.takeIf { it.isNotEmpty() }
+val releaseSigningValues = listOf(releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword)
+val releaseSigningConfigured = releaseSigningValues.count { it != null }
+
+if (releaseSigningConfigured != 0 && releaseSigningConfigured != releaseSigningValues.size) {
+    throw GradleException("Android release signing requires a complete Outflow signing environment.")
+}
+
 val tauriProperties = Properties().apply {
     val propFile = file("tauri.properties")
     if (propFile.exists()) {
@@ -14,6 +25,16 @@ val tauriProperties = Properties().apply {
 }
 
 android {
+    signingConfigs {
+        if (releaseSigningConfigured == releaseSigningValues.size) {
+            create("outflowRelease") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
+            }
+        }
+    }
     compileSdk = 36
     namespace = "com.thedudeb.outflow"
     defaultConfig {
@@ -39,6 +60,9 @@ android {
             }
         }
         getByName("release") {
+            if (releaseSigningConfigured == releaseSigningValues.size) {
+                signingConfig = signingConfigs.getByName("outflowRelease")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

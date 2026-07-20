@@ -144,13 +144,19 @@ test("the Android native boundary is private, immediate-notification-only, and C
   const backend = read("src-tauri/src/lib.rs");
   const initializer = read("scripts/init-android-project.mjs");
   const inspector = read("scripts/check-android-bundle.mjs");
+  const releaseInspector = read("scripts/check-android-release.mjs");
+  const signingHarness = read("scripts/check-android-signing-path.mjs");
+  const gradle = read("src-tauri/gen/android/app/build.gradle.kts");
   const wrapperProperties = read("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties");
   const wrapperJar = readFileSync(new URL("src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar", root));
   const quality = read(".github/workflows/quality.yml");
 
   assert.equal(packageJson.scripts["mobile:android:init"], "node scripts/init-android-project.mjs");
   assert.equal(packageJson.scripts["mobile:android:build"], "tauri android build --ci --debug --target aarch64 --apk");
+  assert.equal(packageJson.scripts["mobile:android:release"], "tauri android build --ci --target aarch64 --apk --aab");
   assert.equal(packageJson.scripts["check:mobile:android-bundle"], "node scripts/check-android-bundle.mjs");
+  assert.equal(packageJson.scripts["check:mobile:android-release"], "node scripts/check-android-release.mjs");
+  assert.equal(packageJson.scripts["test:mobile:android-signing"], "node scripts/check-android-signing-path.mjs");
   assert.deepEqual(capability.permissions, [
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
@@ -179,6 +185,18 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.match(initializer, /Generated the hardened Outflow Android project/);
   assert.match(inspector, /Signer #1 certificate DN: .*CN=Android Debug/);
   assert.match(inspector, /"-P", "16"/);
+  assert.match(releaseInspector, /release-readiness APK must remain unsigned/);
+  assert.match(releaseInspector, /APK signing certificate does not match the pinned fingerprint/);
+  assert.match(releaseInspector, /BUNDLE-METADATA\/com\.android\.tools\.build\.obfuscation\/proguard\.map/);
+  assert.match(releaseInspector, /android:usesCleartextTraffic=/);
+  assert.match(releaseInspector, /"-P", "16"/);
+  assert.match(gradle, /getByName\("release"\) \{[\s\S]+signingConfig = signingConfigs\.getByName\("outflowRelease"\)[\s\S]+isMinifyEnabled = true/);
+  assert.equal((gradle.match(/val releaseKeystorePath/g) || []).length, 1);
+  assert.equal((gradle.match(/signingConfigs \{/g) || []).length, 1);
+  assert.match(initializer, /replaceAll\(releaseSigningValues, ""\)/);
+  assert.match(signingHarness, /partial Android signing configuration must fail closed/);
+  assert.match(signingHarness, /mkdtempSync/);
+  assert.match(signingHarness, /OUTFLOW_ANDROID_EXPECTED_CERT_SHA256/);
   assert.match(wrapperProperties, /distributionUrl=https\\:\/\/services\.gradle\.org\/distributions\/gradle-8\.14\.3-bin\.zip/);
   assert.match(wrapperProperties, /distributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531/);
   assert.equal(
@@ -194,4 +212,7 @@ test("the Android native boundary is private, immediate-notification-only, and C
   assert.match(quality, /rustup target add aarch64-linux-android/);
   assert.match(quality, /npm run mobile:android:build/);
   assert.match(quality, /npm run check:mobile:android-bundle/);
+  assert.match(quality, /npm run mobile:android:release/);
+  assert.match(quality, /npm run check:mobile:android-release/);
+  assert.match(quality, /npm run test:mobile:android-signing/);
 });

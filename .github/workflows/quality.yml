@@ -143,3 +143,6 @@ jobs:
       - run: npm run test:mobile-shell
       - run: npm run mobile:android:build
       - run: npm run check:mobile:android-bundle
+      - run: npm run mobile:android:release
+      - run: npm run check:mobile:android-release
+      - run: npm run test:mobile:android-signing
