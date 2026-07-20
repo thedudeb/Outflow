@@ -30,7 +30,7 @@ test("public guest surfaces render without browser errors or horizontal overflow
   await expectNoHorizontalOverflow(page);
 
   await page.goto("/#app");
-  await expect(page.getByRole("heading", { name: "Active subscriptions", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alerts", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Manage Personal subscriptions", exact: true })).toContainText("Personal / On this device");
   await expect(page.getByRole("button", { name: "Open optional account controls", exact: true })).toContainText("Account / Guest");
   await expectNoHorizontalOverflow(page);

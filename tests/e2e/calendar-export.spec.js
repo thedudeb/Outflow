@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 function parseCalendar(value) {
   const text = value.replace(/\r?\n[ \t]/g, "").replaceAll("\r\n", "\n");
@@ -34,6 +34,7 @@ function eventFor(events, subscriptionName) {
 
 test("calendar exports preserve identity, publish edits, and isolate paused schedules", async ({ page }) => {
   await openTracker(page);
+  await showTrackerView(page, "Calendar");
   await page.getByRole("button", { name: "Export calendar", exact: true }).click();
 
   const dialog = page.getByRole("dialog", { name: "Calendar export" });
@@ -60,11 +61,13 @@ test("calendar exports preserve identity, publish edits, and isolate paused sche
   expect(initialNetflix.CATEGORIES).toContain("Streaming");
   expect(initialNetflix.DESCRIPTION).toContain("Personal / personal / on this device");
 
+  await showTrackerView(page, "Subscriptions");
   const netflixCard = page.getByRole("article").filter({ hasText: "Netflix" });
   await netflixCard.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByRole("textbox", { name: "Next billing date", exact: true }).fill("2030-12-15");
   await page.waitForTimeout(1100);
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await showTrackerView(page, "Calendar");
   await page.getByRole("button", { name: "Export calendar", exact: true }).click();
 
   const revised = await downloadCalendar(page);

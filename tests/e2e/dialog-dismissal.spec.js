@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 async function expectPanelAndBackdropBehavior(page, openButton, dialogName) {
   await openButton.click();
@@ -31,6 +31,7 @@ test("every guest dialog closes from its backdrop but not from its panel", async
     page.getByRole("button", { name: "Alert rules / Off", exact: true }),
     "Alert controls",
   );
+  await showTrackerView(page, "Calendar");
   await expectPanelAndBackdropBehavior(
     page,
     page.getByRole("button", { name: "Export calendar", exact: true }),

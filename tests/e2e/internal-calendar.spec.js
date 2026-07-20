@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 const fixedNow = new Date("2026-07-19T12:00:00-03:00");
 
@@ -38,6 +38,7 @@ test("calendar navigation, selected days, and the 30-day timeline share one acti
   await openTracker(page);
   await createEmptyHouseholdLedger(page, "Calendar Lab");
 
+  await showTrackerView(page, "Calendar");
   let calendar = panel(page, "Billing calendar");
   let upcoming = panel(page, "Upcoming 30 days");
   await expect(calendar).toContainText("$0.00 / 0");
@@ -45,6 +46,7 @@ test("calendar navigation, selected days, and the 30-day timeline share one acti
   await expect(upcoming.getByRole("listitem")).toHaveCount(1);
   await expect(upcoming).toContainText("No active charges inside the next 30 days.");
 
+  await showTrackerView(page, "Subscriptions");
   await addSubscription(page, {
     name: "Weekly Service",
     amount: 10,
@@ -71,6 +73,7 @@ test("calendar navigation, selected days, and the 30-day timeline share one acti
     paused: true,
   });
 
+  await showTrackerView(page, "Calendar");
   calendar = panel(page, "Billing calendar");
   upcoming = panel(page, "Upcoming 30 days");
   await expect(calendar).toContainText("July 2026");
@@ -112,6 +115,7 @@ test("calendar navigation, selected days, and the 30-day timeline share one acti
 test("calendar dates provide one tab stop and predictable keyboard navigation", async ({ page }) => {
   await openTracker(page);
   await createEmptyHouseholdLedger(page, "Keyboard Calendar");
+  await showTrackerView(page, "Calendar");
 
   const calendar = panel(page, "Billing calendar");
   const dateGroup = calendar.getByRole("group", { name: "Billing calendar dates", exact: true });
@@ -167,6 +171,7 @@ test("month-end recurrences remain visible in the internal calendar and timeline
     date: "2026-01-31",
   });
 
+  await showTrackerView(page, "Calendar");
   const calendar = panel(page, "Billing calendar");
   const upcoming = panel(page, "Upcoming 30 days");
   await expect(calendar).toContainText("January 2026");

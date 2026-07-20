@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 const fixedNow = new Date("2026-07-19T12:00:00-03:00");
 const leadDays = [0, 1, 3, 7, 14, 30];
@@ -72,6 +72,7 @@ async function seedExistingLeadDays(page, name, reminderLeadDays) {
     localStorage.setItem("outflow:workspace", JSON.stringify(workspace));
   }, { subscriptionName: name, days: reminderLeadDays });
   await page.reload();
+  await showTrackerView(page, "Subscriptions");
   await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
 }
 
@@ -169,6 +170,7 @@ test("paused alerts require opt-in and global device disablement stops delivery"
     paused: true,
   });
   await expect.poll(() => page.evaluate(() => window.__outflowNotifications.length)).toBe(0);
+  await showTrackerView(page, "Overview");
   await expect(panel(page, "Alerts")).not.toContainText("Paused Reminder");
 
   dialog = await openAlertControls(page, "On");
@@ -180,12 +182,14 @@ test("paused alerts require opt-in and global device disablement stops delivery"
   await settingsCheckbox(dialog, "Device notifications").uncheck();
   await expect(dialog.getByRole("status")).toContainText("Device notifications disabled");
   await dialog.getByRole("button", { name: "Close alert controls", exact: true }).click();
+  await showTrackerView(page, "Subscriptions");
   await addSubscription(page, {
     name: "Active Reminder",
     amount: 16,
     date: "2026-07-26",
   });
   await expect.poll(() => page.evaluate(() => window.__outflowNotifications.length)).toBe(1);
+  await showTrackerView(page, "Overview");
   await expect(panel(page, "Alerts")).toContainText("Paused Reminder");
   await expect(panel(page, "Alerts")).toContainText("Active Reminder");
 
@@ -207,24 +211,30 @@ test("multiple per-subscription lead times can be reduced to one or disabled", a
   });
   await seedExistingLeadDays(page, "Reminder Matrix", [3, 7]);
 
-  let alerts = panel(page, "Alerts");
   let card = page.getByRole("article").filter({ hasText: "Reminder Matrix" });
-  await expect(alerts.getByText("Reminder Matrix", { exact: true })).toHaveCount(2);
   await expect(card).toContainText("Alert 7d / 3d");
+  await showTrackerView(page, "Overview");
+  let alerts = panel(page, "Alerts");
+  await expect(alerts.getByText("Reminder Matrix", { exact: true })).toHaveCount(2);
 
+  await showTrackerView(page, "Subscriptions");
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await setReminderLeadDays(page, [3]);
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await showTrackerView(page, "Overview");
   alerts = panel(page, "Alerts");
   await expect(alerts.getByText("Reminder Matrix", { exact: true })).toHaveCount(1);
   await expect(alerts.getByText("trial", { exact: true })).toBeVisible();
   await expect(alerts.getByText("charge", { exact: true })).toHaveCount(0);
+  await showTrackerView(page, "Subscriptions");
   await expect(card).toContainText("Alert 3d");
 
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   await setReminderLeadDays(page, []);
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await showTrackerView(page, "Overview");
   await expect(alerts).not.toContainText("Reminder Matrix");
+  await showTrackerView(page, "Subscriptions");
   await expect(card).toContainText("Alert off");
 
   await page.reload();

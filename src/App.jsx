@@ -113,11 +113,17 @@ const WORKSPACE_KEY = "outflow:workspace";
 const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
+const TRACKER_VIEW_KEY = "outflow:tracker-view";
 const PRIVACY_VIEW = "privacy";
 const ADMIN_VIEW = "admin";
 const PRIVACY_POLICY_VERSION = "2026-07-20";
 const privacyPolicyHref = `${import.meta.env.BASE_URL}?view=${PRIVACY_VIEW}`;
 const adminConsoleHref = `${import.meta.env.BASE_URL}?view=${ADMIN_VIEW}`;
+const trackerViews = [
+  { id: "overview", code: "SUM", label: "Overview" },
+  { id: "subscriptions", code: "SUB", label: "Subscriptions" },
+  { id: "calendar", code: "CAL", label: "Calendar" },
+];
 
 const colorTags = [
   { label: "Amber", value: "#f59e0b" },
@@ -2284,6 +2290,11 @@ function Tracker({ onExit, pwa }) {
   const [customReminderError, setCustomReminderError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [forecastHorizon, setForecastHorizon] = useState(30);
+  const [mobileView, setMobileView] = useState(() => {
+    const storedView = sessionStorage.getItem(TRACKER_VIEW_KEY);
+    return trackerViews.some((view) => view.id === storedView) ? storedView : "overview";
+  });
+  const mobileViewScrollRef = useRef({ overview: 0, subscriptions: 0, calendar: 0 });
   const [notificationPermission, setNotificationPermission] = useState(initialDeviceNotificationPermission);
   const [alertSettings, setAlertSettings] = useState(() => {
     const permission = initialDeviceNotificationPermission();
@@ -4352,8 +4363,25 @@ function Tracker({ onExit, pwa }) {
     closeCsvImport();
   }
 
+  function selectMobileView(nextView) {
+    if (nextView === mobileView) return;
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      mobileViewScrollRef.current[mobileView] = window.scrollY;
+    }
+    setMobileView(nextView);
+  }
+
+  useEffect(() => {
+    sessionStorage.setItem(TRACKER_VIEW_KEY, mobileView);
+    if (window.matchMedia("(min-width: 1024px)").matches) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: mobileViewScrollRef.current[mobileView] || 0, behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [mobileView]);
+
   return (
-    <main className="min-h-screen text-zinc-200">
+    <main className="min-h-screen pb-20 text-zinc-200 lg:pb-0">
       <div className="mx-auto grid w-full max-w-[1560px] grid-cols-[minmax(0,1fr)] gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="border border-zinc-800 bg-black/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:sticky lg:top-3 lg:h-fit">
           <header className="border-b border-zinc-800 bg-zinc-950/70 px-4 py-3">
@@ -4391,7 +4419,11 @@ function Tracker({ onExit, pwa }) {
             </div>
           </header>
 
-          <form onSubmit={submitSubscription} className="grid gap-3 p-4">
+          <form
+            id="mobile-subscription-editor"
+            onSubmit={submitSubscription}
+            className={`${mobileView === "subscriptions" ? "grid" : "hidden lg:grid"} gap-3 p-4`}
+          >
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
               <h2 className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">
                 {editingId ? "Edit subscription" : "Add subscription"}
@@ -4889,14 +4921,19 @@ function Tracker({ onExit, pwa }) {
             </LiveMessage>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className={`${mobileView === "overview" ? "grid" : "hidden lg:grid"} gap-3 sm:grid-cols-2 xl:grid-cols-4`}>
             <StatCell label="Monthly outflow" value={formatCurrencyTotals(monthlyTotals)} sublabel={`${activeSubscriptions.length} active subscriptions / no FX conversion`} tone="hot" code="MRC" />
             <StatCell label="Next charge" value={nextCharge ? money(nextCharge.amount, nextCharge.currency) : "$0.00"} sublabel={nextCharge ? `${nextCharge.name} / ${fullDate(nextCharge.date)}` : "No active charges"} code="DUE" />
             <StatCell label="30 day pull" value={formatCurrencyTotals(thirtyDayTotals)} sublabel={`${timeline.length} scheduled debit events / no FX conversion`} code="T+30" />
             <StatCell label="Annualized" value={formatCurrencyTotals(yearlyRunRateTotals)} sublabel="Projected run rate / no FX conversion" code="ARR" />
           </div>
 
-          <Panel title="Alerts" marker action={<span className="font-mono text-xs text-amber-300">{alerts.length}</span>}>
+          <Panel
+            title="Alerts"
+            marker
+            action={<span className="font-mono text-xs text-amber-300">{alerts.length}</span>}
+            className={mobileView === "overview" ? "" : "hidden lg:block"}
+          >
             <div className="grid divide-y divide-zinc-900 md:grid-cols-2 md:divide-x md:divide-y-0 md:divide-zinc-900">
               {alerts.length ? (
                 alerts.map((alert) => (
@@ -4928,6 +4965,7 @@ function Tracker({ onExit, pwa }) {
           <Panel
             title="Cash-out forecast"
             marker
+            className={mobileView === "overview" ? "" : "hidden lg:block"}
             action={(
               <div className="grid grid-cols-3 border border-zinc-700" role="group" aria-label="Forecast horizon">
                 {[30, 60, 90].map((days) => (
@@ -5021,6 +5059,7 @@ function Tracker({ onExit, pwa }) {
           <Panel
             title="Billing calendar"
             marker
+            className={mobileView === "calendar" ? "" : "hidden lg:block"}
             action={(
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] text-amber-300">{formatCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>
@@ -5146,6 +5185,7 @@ function Tracker({ onExit, pwa }) {
                 title="Active subscriptions"
                 marker
                 action={<span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500 sm:inline">identity / subscription / withdrawal</span>}
+                className={mobileView === "subscriptions" ? "" : "hidden lg:block"}
               >
                 <div className="grid min-w-0 gap-3 p-3">
                   <div className="hidden grid-cols-[220px_minmax(0,1fr)_280px] gap-3 px-1 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-600 lg:grid">
@@ -5271,7 +5311,12 @@ function Tracker({ onExit, pwa }) {
                 </div>
               </Panel>
 
-              <Panel title="Next 7 days" marker action={<span className="font-mono text-xs text-amber-300">{upcomingWeek.length}</span>}>
+              <Panel
+                title="Next 7 days"
+                marker
+                action={<span className="font-mono text-xs text-amber-300">{upcomingWeek.length}</span>}
+                className={mobileView === "overview" ? "" : "hidden lg:block"}
+              >
                 <div className="grid divide-y divide-zinc-900 md:grid-cols-2 md:divide-x md:divide-y-0 md:divide-zinc-900">
                   {upcomingWeek.length ? (
                     upcomingWeek.map((event) => (
@@ -5293,7 +5338,12 @@ function Tracker({ onExit, pwa }) {
               </Panel>
             </section>
 
-            <Panel title="Upcoming 30 days" marker action={<span className="font-mono text-xs text-amber-300">{timeline.length}</span>} className="min-w-0">
+            <Panel
+              title="Upcoming 30 days"
+              marker
+              action={<span className="font-mono text-xs text-amber-300">{timeline.length}</span>}
+              className={`${mobileView === "calendar" ? "" : "hidden lg:block"} min-w-0`}
+            >
               <ol className="max-h-[640px] overflow-auto">
                 {timeline.length ? timeline.map((event) => (
                   <li key={event.eventId} className="grid grid-cols-[72px_1fr_auto] items-center gap-3 border-b border-zinc-900 px-3 py-3">
@@ -5318,6 +5368,35 @@ function Tracker({ onExit, pwa }) {
           </div>
         </section>
       </div>
+
+      <nav
+        aria-label="Tracker sections"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-black/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(0,0,0,0.45)] lg:hidden"
+      >
+        <div className="mx-auto grid max-w-xl grid-cols-3">
+          {trackerViews.map((view) => {
+            const active = mobileView === view.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                aria-label={view.label}
+                aria-pressed={active}
+                onClick={() => selectMobileView(view.id)}
+                className={`relative grid min-h-16 place-items-center border-r border-zinc-800 px-2 py-2 font-mono last:border-r-0 ${
+                  active ? "bg-zinc-950 text-amber-300" : "bg-black text-zinc-500 hover:bg-zinc-950 hover:text-zinc-200"
+                }`}
+              >
+                <span aria-hidden="true" className={`absolute inset-x-0 top-0 h-0.5 ${active ? "bg-amber-400" : "bg-transparent"}`} />
+                <span>
+                  <span className="block text-[9px] font-black tracking-[0.16em] text-zinc-600">{view.code}</span>
+                  <span className="mt-1 block text-[11px] font-black uppercase">{view.label}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
       {accountOpen && (
         <DialogOverlay onClose={closeAccountControls} closeDisabled={Boolean(accountBusy)}>

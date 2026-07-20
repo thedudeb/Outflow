@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 const fixedNow = new Date("2026-07-19T12:00:00-03:00");
 
@@ -63,10 +63,12 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await expect(card).toContainText("first paid charge");
   await expect(card).toContainText("Sun, Jul 26");
   await expect(card).toContainText("Trial ends Sun, Jul 26");
+  await showTrackerView(page, "Overview");
   await expect(panel(page, "Alerts")).toContainText("Gym Membership");
   await expect(panel(page, "Alerts")).toContainText("Trial ends Sun, Jul 26");
 
   await page.reload();
+  await showTrackerView(page, "Subscriptions");
   card = page.getByRole("article").filter({ hasText: "Gym Membership" });
   await expect(card).toHaveCount(1);
   await expect(card).toContainText("Sun, Jul 26");
@@ -88,14 +90,18 @@ test("free-core subscription CRUD preserves metadata and rolls overdue billing f
   await card.getByRole("button", { name: "Active", exact: true }).click();
   await expect(card.getByRole("button", { name: "Paused", exact: true })).toBeVisible();
   await expect(card).toContainText("paused schedule");
+  await showTrackerView(page, "Overview");
   await expect(monthlyOutflowCard(page)).toContainText("$39.47");
   await expect(panel(page, "Alerts")).not.toContainText("Gym Membership");
 
+  await showTrackerView(page, "Subscriptions");
   await card.getByRole("button", { name: "Paused", exact: true }).click();
   await expect(card.getByRole("button", { name: "Active", exact: true })).toBeVisible();
+  await showTrackerView(page, "Overview");
   await expect(monthlyOutflowCard(page)).toContainText("$41.47");
   await expect(panel(page, "Alerts")).toContainText("Gym Membership");
 
+  await showTrackerView(page, "Subscriptions");
   await card.getByRole("button", { name: "Del", exact: true }).click();
   await expect(card).toHaveCount(0);
   await expect(page.getByRole("article")).toHaveCount(5);
@@ -154,6 +160,7 @@ test("weekly, monthly, and yearly schedules produce exact 30, 60, and 90 day for
     category: "Infrastructure",
   });
 
+  await showTrackerView(page, "Overview");
   const forecast = panel(page, "Cash-out forecast");
   await expect(forecastMetric(forecast, "Scheduled")).toContainText("$200.00");
   await expect(forecastMetric(forecast, "Debits")).toContainText("7");
@@ -168,7 +175,9 @@ test("weekly, monthly, and yearly schedules produce exact 30, 60, and 90 day for
 
   await page.reload();
   await expect(page.getByRole("button", { name: "Manage Forecast Lab subscriptions", exact: true })).toBeVisible();
+  await showTrackerView(page, "Subscriptions");
   await expect(page.getByRole("article")).toHaveCount(3);
+  await showTrackerView(page, "Overview");
   await expect(forecastMetric(panel(page, "Cash-out forecast"), "Scheduled")).toContainText("$200.00");
 });
 
@@ -185,14 +194,17 @@ test("month-end subscriptions clamp to the last valid day instead of skipping a 
     category: "Operations",
   });
 
+  await showTrackerView(page, "Overview");
   let forecast = panel(page, "Cash-out forecast");
   await expect(forecastMetric(forecast, "Scheduled")).toContainText("$62.00");
   await expect(forecastMetric(forecast, "Debits")).toContainText("2");
 
   await page.clock.setFixedTime(new Date("2026-02-01T12:00:00-04:00"));
   await page.reload();
+  await showTrackerView(page, "Subscriptions");
   const card = page.getByRole("article").filter({ hasText: "Month End Service" });
   await expect(card).toContainText("Sat, Feb 28");
+  await showTrackerView(page, "Overview");
   forecast = panel(page, "Cash-out forecast");
   await expect(forecastMetric(forecast, "Scheduled")).toContainText("$31.00");
 });

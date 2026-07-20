@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { openTracker } from "./helpers";
+import { openTracker, showTrackerView } from "./helpers";
 
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"];
 
@@ -153,7 +153,7 @@ test("admin console meets the automated WCAG A and AA gate", async ({ page }) =>
 
 test("tracker dashboard meets the automated WCAG A and AA gate", async ({ page }) => {
   await page.goto("/#app");
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expectNoWcagViolations(page);
   await expectKeyboardBypass(page, "Outflow");
 });
@@ -164,10 +164,11 @@ test("primary pointer controls meet the WCAG 2.2 minimum target size", async ({ 
   await expectPointerTargets(page);
 
   await page.goto("/#app");
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expectPointerTargets(page);
 
   for (const dialogCase of dialogs) {
+    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
     await expect(page.getByRole("dialog", { name: dialogCase.title })).toBeVisible();
     await expectPointerTargets(page, '[role="dialog"]');
@@ -185,7 +186,7 @@ test("user text spacing does not clip or horizontally overflow primary workflows
 
   await page.goto("/#app");
   await applyWcagTextSpacing(page);
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expectDocumentToReflow(page);
 
   await page.getByRole("button", { name: "Open optional account controls", exact: true }).click();
@@ -196,6 +197,7 @@ test("user text spacing does not clip or horizontally overflow primary workflows
 for (const dialogCase of dialogs) {
   test(`${dialogCase.name} dialog meets the automated WCAG A and AA gate`, async ({ page }) => {
     await openTracker(page);
+    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: dialogCase.title });
@@ -222,9 +224,10 @@ test("landing page and tracker reflow without document overflow at 320 CSS pixel
   await expectDocumentToReflow(page);
 
   await page.goto("/#app");
-  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
   await expectDocumentToReflow(page);
 
+  await showTrackerView(page, "Subscriptions");
   const dateGeometry = await page.getByLabel("Next billing date", { exact: true }).evaluate((element) => ({
     fieldWidth: element.getBoundingClientRect().width,
     labelWidth: element.parentElement?.getBoundingClientRect().width || 0,
@@ -237,6 +240,7 @@ test("core dialogs remain contained and reflow at 320 CSS pixels", async ({ page
   await openTracker(page);
 
   for (const dialogCase of dialogs) {
+    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: dialogCase.title });
