@@ -82,6 +82,7 @@ jobs:
       - run: npm run test:device-notifications
       - run: npm run test:app-updates
       - run: npm run test:service-status
+      - run: npm run test:beta-access
       - run: npm run test:desktop-shell
       - run: npm run test:pwa
       - run: npm run test:e2e

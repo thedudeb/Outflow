@@ -26,6 +26,8 @@ test("the policy reflects the implemented local, hosted, provider, and data-cont
     "Signing in alone does not upload subscriptions from this device",
     "Payment-card details are entered with Stripe and are not collected by the Outflow application",
     "Outflow does not create a recurring product subscription",
+    "An administrator can see your account email, optional display name, and redemption time in the beta usage report",
+    "stored only as a hash",
     "GitHub Pages",
     "The macOS client checks GitHub Releases for signed updates after launch",
     "Installed web apps check this website for a newer cached release",

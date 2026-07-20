@@ -65,11 +65,13 @@ function createCloudState({
   inviteToken = invitationToken,
   proOffer = null,
   checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_outflow",
+  entitlementProvider = "stripe",
 } = {}) {
   return {
     replaceMode,
     replaceFailuresRemaining,
     entitlementStatus,
+    entitlementProvider,
     accessGranted,
     canSync,
     inviteToken,
@@ -367,6 +369,11 @@ async function installCloudFixture(page, {
     updatedAt: "2026-07-20T14:00:00.000Z",
     changes: [],
   },
+  betaState = {
+    secret: "OUTFLOW-ABCDE-F0123-45678-9ABCD",
+    codes: [],
+    nextId: 1,
+  },
   realtimeState = createRealtimeState(),
   realtimeClientId = "fixture-client",
 } = {}) {
@@ -420,6 +427,69 @@ async function installCloudFixture(page, {
         updatedAt: maintenanceState.updatedAt,
       });
     }
+    if (url.pathname.endsWith("/rest/v1/rpc/read_beta_access_codes")) {
+      if (verifiedUser?.app_metadata?.outflow_role !== "admin") {
+        return reply({ message: "Administrator access is required." }, 403);
+      }
+      return reply({ schemaVersion: 1, codes: betaState.codes });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/create_beta_access_code")) {
+      if (verifiedUser?.app_metadata?.outflow_role !== "admin") {
+        return reply({ message: "Administrator access is required." }, 403);
+      }
+      const createdAt = new Date().toISOString();
+      const created = {
+        id: `44444444-4444-4444-8444-${String(betaState.nextId).padStart(12, "0")}`,
+        label: entry.body?.requested_label,
+        codeSuffix: "9ABCD",
+        maxRedemptions: entry.body?.requested_max_redemptions,
+        redemptionCount: 0,
+        remaining: entry.body?.requested_max_redemptions,
+        expiresAt: entry.body?.requested_expires_at || null,
+        disabledAt: null,
+        createdAt,
+        redemptions: [],
+      };
+      betaState.nextId += 1;
+      betaState.codes.unshift(created);
+      return reply({ schemaVersion: 1, code: betaState.secret, ...created });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/set_beta_access_code_disabled")) {
+      if (verifiedUser?.app_metadata?.outflow_role !== "admin") {
+        return reply({ message: "Administrator access is required." }, 403);
+      }
+      const code = betaState.codes.find((candidate) => candidate.id === entry.body?.target_code_id);
+      if (!code) return reply({ message: "Beta code was not found." }, 404);
+      code.disabledAt = entry.body?.requested_disabled ? new Date().toISOString() : null;
+      return reply({ schemaVersion: 1, id: code.id, disabledAt: code.disabledAt });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/redeem_beta_access_code")) {
+      if (!verifiedUser) return reply({ message: "Authentication is required." }, 403);
+      const code = betaState.codes.find((candidate) => (
+        entry.body?.access_code === betaState.secret
+        && !candidate.disabledAt
+        && candidate.remaining > 0
+      ));
+      if (!code) return reply({ schemaVersion: 1, status: "invalid" });
+      if (cloudState?.entitlementStatus === "active") return reply({ schemaVersion: 1, status: "already_pro" });
+      if (code.redemptions.some((redemption) => redemption.userId === verifiedUser.id)) {
+        return reply({ schemaVersion: 1, status: "already_redeemed" });
+      }
+      const redeemedAt = new Date().toISOString();
+      code.redemptions.unshift({
+        userId: verifiedUser.id,
+        email: verifiedUser.email,
+        displayName: "Avery Owner",
+        redeemedAt,
+      });
+      code.redemptionCount += 1;
+      code.remaining -= 1;
+      if (cloudState) {
+        cloudState.entitlementStatus = "active";
+        cloudState.entitlementProvider = "manual";
+      }
+      return reply({ schemaVersion: 1, status: "redeemed", label: code.label, redeemedAt });
+    }
     if (url.pathname.endsWith("/rest/v1/rpc/migrate_guest_workspace")) {
       migrations.push(entry.body);
       const subscriptions = entry.body?.workspace_payload?.ledgers?.flatMap((ledger) => ledger.subscriptions || []) || [];
@@ -431,7 +501,12 @@ async function installCloudFixture(page, {
     if (url.pathname.endsWith("/rest/v1/entitlements")) {
       if (cloudState) cloudState.entitlementReads += 1;
       return cloudState?.entitlementStatus
-        ? reply({ status: cloudState.entitlementStatus, provider: "stripe", purchased_at: "2026-07-19T12:00:00.000Z" })
+        ? reply({
+          status: cloudState.entitlementStatus,
+          provider: cloudState.entitlementProvider,
+          provider_reference: cloudState.entitlementProvider === "manual" ? "beta_access:fixture" : "cs_test_outflow",
+          purchased_at: "2026-07-19T12:00:00.000Z",
+        })
         : reply([], 200, { "Content-Range": "0-0/0" });
     }
     if (url.pathname.endsWith("/rest/v1/notification_preferences")) {
@@ -758,6 +833,61 @@ test("administrator can enable maintenance, retain console access, and restore t
 
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Open tracker", exact: true })).toBeVisible();
+});
+
+test("administrator creates limited beta codes and tracks tester redemption", async ({ page }) => {
+  const betaState = {
+    secret: "OUTFLOW-ABCDE-F0123-45678-9ABCD",
+    nextId: 2,
+    codes: [{
+      id: "44444444-4444-4444-8444-000000000001",
+      label: "Founding cohort",
+      codeSuffix: "ABCDE",
+      maxRedemptions: 20,
+      redemptionCount: 1,
+      remaining: 19,
+      expiresAt: null,
+      disabledAt: null,
+      createdAt: "2026-07-20T15:00:00.000Z",
+      redemptions: [{
+        userId: fixtureUser.id,
+        email: fixtureUser.email,
+        displayName: "Avery Owner",
+        redeemedAt: "2026-07-20T15:30:00.000Z",
+      }],
+    }],
+  };
+  await seedStoredSession(page, storedSession(adminUser));
+  await installCloudFixture(page, { verifiedUser: adminUser, betaState });
+
+  await page.goto("/?view=admin");
+  await expect(page.getByRole("heading", { name: "Beta codes", exact: true })).toBeVisible();
+  await expect(page.getByText("Avery Owner", { exact: true })).toBeVisible();
+  const testerEmail = page.viewportSize().width < 640
+    ? page.locator("span.sm\\:hidden", { hasText: "owner@example.com" })
+    : page.locator("span.hidden.sm\\:block", { hasText: "owner@example.com" });
+  await expect(testerEmail).toBeVisible();
+  await expect(page.getByText("Used / 1 of 20", { exact: true })).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Internal label", exact: true }).fill("Newsletter beta");
+  await page.getByRole("spinbutton", { name: "Accounts", exact: true }).fill("5");
+  await page.getByRole("button", { name: "Create code", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "New code / shown once", exact: true })).toHaveValue(betaState.secret);
+  await expect(page.getByText("Beta code created for up to 5 accounts. It is shown only once.", { exact: true })).toBeVisible();
+
+  const created = page.getByRole("article").filter({ hasText: "Newsletter beta" });
+  await expect(created).toContainText("Used / 0 of 5");
+  await created.getByRole("button", { name: "Disable code", exact: true }).click();
+  await expect(created.getByText("Disabled", { exact: true })).toBeVisible();
+  await created.getByRole("button", { name: "Enable code", exact: true }).click();
+  await expect(created.getByText("Active", { exact: true })).toBeVisible();
+
+  const { violations } = await new AxeBuilder({ page })
+    .include("main")
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations, violationSummary(violations)).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
 function violationSummary(violations) {
@@ -1554,6 +1684,41 @@ test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminde
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Linear" })).toHaveCount(1);
   await expect(page.getByRole("article").filter({ hasText: "Pro Matrix" })).toContainText("Alert 45d / 7d / 3d");
+});
+
+test("signed-in account redeems a beta code and activates server-backed Pro", async ({ page }) => {
+  const cloudState = createCloudState({ entitlementStatus: null, accessGranted: false, canSync: false });
+  const betaState = {
+    secret: "OUTFLOW-ABCDE-F0123-45678-9ABCD",
+    nextId: 2,
+    codes: [{
+      id: "44444444-4444-4444-8444-000000000001",
+      label: "Private beta",
+      codeSuffix: "9ABCD",
+      maxRedemptions: 20,
+      redemptionCount: 0,
+      remaining: 20,
+      expiresAt: null,
+      disabledAt: null,
+      createdAt: "2026-07-20T15:00:00.000Z",
+      redemptions: [],
+    }],
+  };
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState, betaState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  await page.getByRole("button", { name: `Open account controls for ${fixtureUser.email}`, exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+
+  await dialog.getByRole("textbox", { name: "Access code", exact: true }).fill("outflow-abcde-f0123-45678-9abcd");
+  await dialog.getByRole("button", { name: "Activate Pro", exact: true }).click();
+  await expect(dialog.getByText("Beta active", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Beta access activated / Private beta / Outflow Pro is now available on this account.", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: "Access code", exact: true })).toHaveCount(0);
+  expect(cloudState.entitlementStatus).toBe("active");
+  expect(cloudState.entitlementProvider).toBe("manual");
+  expect(betaState.codes[0].redemptionCount).toBe(1);
+  expect(betaState.codes[0].redemptions[0].email).toBe(fixtureUser.email);
 });
 
 test("entitlement loss preserves existing currency and reminder data without allowing expansion", async ({ page }) => {

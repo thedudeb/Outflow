@@ -1,4 +1,9 @@
 import { sanitizeServiceStatus } from "./serviceStatus";
+import {
+  sanitizeBetaAccessReport,
+  sanitizeBetaRedemptionResult,
+  sanitizeCreatedBetaAccessCode,
+} from "./betaAccess";
 
 const projectUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim();
 const publishableKey = String(
@@ -117,6 +122,53 @@ export async function setAppMaintenanceMode(enabled) {
   return sanitizeServiceStatus(data);
 }
 
+export async function createBetaAccessCode({ label, maxRedemptions, expiresAt }) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("create_beta_access_code", {
+    requested_label: label,
+    requested_max_redemptions: maxRedemptions,
+    requested_expires_at: expiresAt || null,
+  });
+  if (error) throw error;
+  return sanitizeCreatedBetaAccessCode(data);
+}
+
+export async function redeemBetaAccessCode(code) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("redeem_beta_access_code", { access_code: code });
+  if (error) throw error;
+  return sanitizeBetaRedemptionResult(data);
+}
+
+export async function readBetaAccessCodes() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("read_beta_access_codes");
+  if (error) throw error;
+  return sanitizeBetaAccessReport(data);
+}
+
+export async function setBetaAccessCodeDisabled(codeId, disabled) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("set_beta_access_code_disabled", {
+    target_code_id: codeId,
+    requested_disabled: disabled === true,
+  });
+  if (
+    error
+    || !data
+    || data.schemaVersion !== 1
+    || data.id !== codeId
+    || !(data.disabledAt === null || (typeof data.disabledAt === "string" && Number.isFinite(Date.parse(data.disabledAt))))
+  ) {
+    throw error || new Error("Outflow returned an invalid beta code state.");
+  }
+  return { id: data.id, disabledAt: data.disabledAt };
+}
+
 export async function readAccountProfile(userId) {
   const cloud = await getCloud();
   if (!cloud) throw new Error("Outflow cloud is not configured.");
@@ -224,7 +276,7 @@ export async function readProEntitlement(userId) {
   if (!cloud) throw new Error("Outflow cloud is not configured.");
   const { data, error } = await cloud
     .from("entitlements")
-    .select("status, provider, purchased_at")
+    .select("status, provider, provider_reference, purchased_at")
     .eq("user_id", userId)
     .eq("product", "outflow_pro_lifetime")
     .maybeSingle();

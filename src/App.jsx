@@ -5,12 +5,14 @@ import {
   acceptCloudLedgerInvitation,
   cloudConfigured,
   cloudConfigError,
+  createBetaAccessCode,
   createProCheckout,
   deleteCloudAccount,
   getCloud,
   hostedCalendarFeedUrl,
   publishHostedCalendarFeed,
   readAppServiceStatus,
+  readBetaAccessCodes,
   readAccountDataExport,
   readAccountProfile,
   readCloudLedgerAccess,
@@ -19,6 +21,7 @@ import {
   readNotificationPreferences,
   readProEntitlement,
   readProOffer,
+  redeemBetaAccessCode,
   resumeEmailNotifications,
   renameCloudLedger,
   removeCloudLedgerMember,
@@ -31,6 +34,7 @@ import {
   saveAccountProfile,
   sendCloudLedgerInvitation,
   setAppMaintenanceMode,
+  setBetaAccessCodeDisabled,
   saveNotificationPreferences,
   subscribeToCloudLedger,
   subscribeToNotificationPreferences,
@@ -89,6 +93,7 @@ import {
   startServiceStatusChecks,
   writeCachedServiceStatus,
 } from "./serviceStatus";
+import { normalizeBetaAccessCode } from "./betaAccess";
 
 const STORAGE_KEY = "outflow:subscriptions";
 const LEGACY_STORAGE_KEY = "drain:subscriptions";
@@ -1477,6 +1482,13 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [enableArmed, setEnableArmed] = useState(false);
+  const [betaCodes, setBetaCodes] = useState([]);
+  const [betaCodesLoading, setBetaCodesLoading] = useState(false);
+  const [betaLabel, setBetaLabel] = useState("Private beta");
+  const [betaLimit, setBetaLimit] = useState(20);
+  const [betaExpiry, setBetaExpiry] = useState("");
+  const [createdBetaCode, setCreatedBetaCode] = useState("");
+  const [copiedBetaCode, setCopiedBetaCode] = useState(false);
   const isAdmin = session?.user?.app_metadata?.outflow_role === "admin";
 
   useEffect(() => {
@@ -1486,6 +1498,31 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
       document.title = priorTitle;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setBetaCodes([]);
+      setBetaCodesLoading(false);
+      setCreatedBetaCode("");
+      setCopiedBetaCode(false);
+      return undefined;
+    }
+    let active = true;
+    setBetaCodesLoading(true);
+    readBetaAccessCodes()
+      .then((codes) => {
+        if (active) setBetaCodes(codes);
+      })
+      .catch((reportError) => {
+        if (active) setError(reportError instanceof Error ? reportError.message : "Beta access usage could not be read.");
+      })
+      .finally(() => {
+        if (active) setBetaCodesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!cloudConfigured) {
@@ -1604,6 +1641,62 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
     }
   }
 
+  async function createBetaCode(event) {
+    event.preventDefault();
+    if (!isAdmin || busy || betaCodesLoading) return;
+    const label = betaLabel.trim().replace(/\s+/g, " ");
+    if (!label || betaLimit < 1 || betaLimit > 20) return;
+    setBusy("create-beta");
+    setMessage("");
+    setError("");
+    setCreatedBetaCode("");
+    setCopiedBetaCode(false);
+    try {
+      const created = await createBetaAccessCode({
+        label,
+        maxRedemptions: betaLimit,
+        expiresAt: betaExpiry ? new Date(betaExpiry).toISOString() : null,
+      });
+      setCreatedBetaCode(created.code);
+      setBetaCodes((current) => [created, ...current.filter((code) => code.id !== created.id)]);
+      setMessage(`Beta code created for up to ${created.maxRedemptions} accounts. It is shown only once.`);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "The beta access code could not be created.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function copyBetaCode() {
+    if (!createdBetaCode || busy) return;
+    try {
+      await navigator.clipboard.writeText(createdBetaCode);
+      setCopiedBetaCode(true);
+      setMessage("Beta code copied.");
+      setError("");
+    } catch {
+      setError("The code could not be copied automatically. Select it from the field instead.");
+    }
+  }
+
+  async function changeBetaCodeState(codeId, disabled) {
+    if (!isAdmin || busy) return;
+    setBusy(`beta-${codeId}`);
+    setMessage("");
+    setError("");
+    try {
+      const updated = await setBetaAccessCodeDisabled(codeId, disabled);
+      setBetaCodes((current) => current.map((code) => code.id === updated.id
+        ? { ...code, disabledAt: updated.disabledAt }
+        : code));
+      setMessage(disabled ? "Beta code disabled. Existing Pro access remains active." : "Beta code enabled.");
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "The beta code state could not be changed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#08090a] text-zinc-100">
       <nav className="border-b border-zinc-800 bg-black">
@@ -1710,8 +1803,125 @@ function AdminConsole({ serviceStatus, onStatusChange, onHome }) {
               </LiveMessage>
             )}
 
+            <section aria-labelledby="beta-access-title" className="border-t border-zinc-700">
+              <header className="grid gap-2 border-b border-zinc-800 px-4 py-4 sm:px-6">
+                <div className="font-mono text-[10px] font-black uppercase text-cyan-300">Controlled Pro access</div>
+                <h2 id="beta-access-title" className="text-xl font-black uppercase text-zinc-100">Beta codes</h2>
+                <p className="max-w-3xl text-sm leading-6 text-zinc-500">
+                  Generate a one-time visible code for up to 20 signed-in testers. Each account can redeem one beta code; disabling a code stops new redemptions without removing access already granted.
+                </p>
+              </header>
+
+              <form onSubmit={createBetaCode} className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_110px_minmax(190px,0.7fr)_auto] sm:items-end sm:p-6">
+                <Field label="Internal label">
+                  <input
+                    type="text"
+                    value={betaLabel}
+                    maxLength={60}
+                    required
+                    onChange={(event) => setBetaLabel(event.target.value.slice(0, 60))}
+                    className="h-11 min-w-0 border border-zinc-700 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-amber-400"
+                  />
+                </Field>
+                <Field label="Accounts">
+                  <input
+                    type="number"
+                    value={betaLimit}
+                    min="1"
+                    max="20"
+                    required
+                    onChange={(event) => setBetaLimit(Math.min(20, Math.max(1, Number(event.target.value) || 1)))}
+                    className="h-11 w-full border border-zinc-700 bg-zinc-950 px-3 font-mono text-sm text-zinc-100 outline-none focus:border-amber-400"
+                  />
+                </Field>
+                <Field label="Expires (optional)">
+                  <input
+                    type="datetime-local"
+                    value={betaExpiry}
+                    onChange={(event) => setBetaExpiry(event.target.value)}
+                    className="h-11 min-w-0 border border-zinc-700 bg-zinc-950 px-3 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                  />
+                </Field>
+                <button type="submit" disabled={Boolean(busy) || betaCodesLoading} className="h-11 border border-cyan-400 bg-cyan-400 px-4 text-xs font-black uppercase text-black hover:bg-cyan-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
+                  {busy === "create-beta" ? "Creating..." : "Create code"}
+                </button>
+              </form>
+
+              {createdBetaCode && (
+                <LiveMessage className="grid gap-3 border-b border-amber-800 bg-amber-950/20 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:p-6">
+                  <Field label="New code / shown once">
+                    <input
+                      type="text"
+                      value={createdBetaCode}
+                      readOnly
+                      onFocus={(event) => event.target.select()}
+                      className="h-11 min-w-0 border border-amber-700 bg-black px-3 font-mono text-xs font-black uppercase text-amber-300 outline-none focus:border-amber-300 sm:text-sm"
+                    />
+                  </Field>
+                  <button type="button" onClick={copyBetaCode} className="h-11 border border-amber-400 px-4 text-xs font-black uppercase text-amber-300 hover:bg-amber-400 hover:text-black">
+                    {copiedBetaCode ? "Copied" : "Copy code"}
+                  </button>
+                </LiveMessage>
+              )}
+
+              <div aria-busy={betaCodesLoading}>
+                {betaCodesLoading ? (
+                  <LiveMessage className="px-4 py-6 font-mono text-xs uppercase text-zinc-600 sm:px-6">Loading beta access usage...</LiveMessage>
+                ) : betaCodes.length ? betaCodes.map((code) => {
+                  const expired = Boolean(code.expiresAt && Date.parse(code.expiresAt) <= Date.now());
+                  const unavailable = Boolean(code.disabledAt || expired || code.remaining === 0);
+                  const status = code.disabledAt ? "Disabled" : expired ? "Expired" : code.remaining === 0 ? "Full" : "Active";
+                  return (
+                    <article key={code.id} className="border-b border-zinc-800 last:border-b-0">
+                      <div className="grid gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-sm font-black uppercase text-zinc-200">{code.label}</h3>
+                            <span className={`border px-1.5 py-0.5 font-mono text-[9px] font-black uppercase ${unavailable ? "border-zinc-700 text-zinc-500" : "border-emerald-800 text-emerald-300"}`}>{status}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] uppercase text-zinc-600">
+                            <span>Code / *****{code.codeSuffix}</span>
+                            <span>Used / {code.redemptionCount} of {code.maxRedemptions}</span>
+                            <span>Remaining / {code.remaining}</span>
+                            <span>{code.expiresAt ? `Expires / ${new Date(code.expiresAt).toLocaleString()}` : "No expiry"}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => changeBetaCodeState(code.id, !code.disabledAt)}
+                          disabled={Boolean(busy) || expired || code.remaining === 0}
+                          className="h-9 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                        >
+                          {busy === `beta-${code.id}` ? "Saving..." : code.disabledAt ? "Enable code" : "Disable code"}
+                        </button>
+                      </div>
+                      <div className="border-t border-zinc-900 bg-zinc-950/60">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] border-b border-zinc-900 px-4 py-2 font-mono text-[9px] uppercase text-zinc-700 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto] sm:px-6">
+                          <span>Tester</span><span className="hidden sm:block">Account</span><span>Redeemed</span>
+                        </div>
+                        {code.redemptions.length ? code.redemptions.map((redemption) => (
+                          <div key={`${code.id}-${redemption.userId || redemption.redeemedAt}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-zinc-900 px-4 py-2 text-xs last:border-b-0 sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto] sm:px-6">
+                            <span className="min-w-0 text-zinc-300">
+                              <span className="block truncate">{redemption.displayName || (redemption.userId ? "Unnamed tester" : "Deleted account")}</span>
+                              <span className="mt-0.5 block truncate font-mono text-[9px] text-zinc-600 sm:hidden">{redemption.email || "Personal data removed"}</span>
+                            </span>
+                            <span className="hidden truncate font-mono text-[10px] text-zinc-500 sm:block">{redemption.email || "Personal data removed"}</span>
+                            <time className="whitespace-nowrap font-mono text-[10px] text-zinc-600" dateTime={redemption.redeemedAt}>{new Date(redemption.redeemedAt).toLocaleDateString()}</time>
+                          </div>
+                        )) : (
+                          <div className="px-4 py-3 font-mono text-[10px] uppercase text-zinc-700 sm:px-6">No redemptions yet</div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                }) : (
+                  <div className="px-4 py-6 font-mono text-xs uppercase text-zinc-600 sm:px-6">No beta codes created</div>
+                )}
+              </div>
+            </section>
+
             <footer className="flex flex-col gap-3 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-              <span className="font-mono text-[10px] uppercase text-zinc-600">Changes are recorded in the server audit log</span>
+              <span className="font-mono text-[10px] uppercase text-zinc-600">Maintenance changes are recorded in the server audit log</span>
               <button type="button" onClick={signOut} disabled={Boolean(busy)} className="text-left text-xs font-black uppercase text-zinc-400 hover:text-white disabled:opacity-50">Sign out</button>
             </footer>
           </section>
@@ -1821,6 +2031,9 @@ function PrivacyPage({ onHome, onOpen }) {
           </p>
           <p>
             A cloud account can store your email-linked account identifier, optional display name, subscription lists, subscriptions, roles, invitations, creator and updater attribution, synchronization versions, notification preferences, timezone, reminder history, and hosted-calendar metadata. Shared-list members can see subscription data, roles, and display-name attribution for lists they share. Account emails are not displayed to collaborators, except that an owner can see the address of a pending invitation they issued.
+          </p>
+          <p>
+            If you redeem a beta access code, Outflow records the code cohort, your account identifier, and redemption time to activate Pro and enforce the code limit. An administrator can see your account email, optional display name, and redemption time in the beta usage report. The plaintext code is shown to the administrator once and stored only as a hash. Deleting your cloud account removes your identity from the redemption while retaining a de-identified used-seat record.
           </p>
           <p>
             One bounded pending sync may be retained in the browser for retry. It is tied to the account and subscription list but excludes email addresses, session credentials, provider responses, and server secrets.
@@ -2174,6 +2387,7 @@ function Tracker({ onExit, pwa }) {
   const [accountProfileLoading, setAccountProfileLoading] = useState(false);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [betaAccessCode, setBetaAccessCode] = useState("");
   const [emailPreferences, setEmailPreferences] = useState(() => ({
     emailEnabled: false,
     pausedScheduleEnabled: false,
@@ -3756,6 +3970,48 @@ function Tracker({ onExit, pwa }) {
     }
   }
 
+  async function redeemBetaCode(event) {
+    event.preventDefault();
+    const userId = accountSession?.user?.id;
+    if (!userId || !betaAccessCode || accountBusy || accountEntitlementLoading) return;
+    setAccountBusy("redeem-beta");
+    setAccountEntitlementLoading(true);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const result = await redeemBetaAccessCode(betaAccessCode);
+      if (result.status === "invalid") {
+        setAccountError("That beta code is invalid, expired, disabled, or has reached its account limit.");
+        return;
+      }
+      if (result.status === "rate_limited") {
+        setAccountError("Too many beta code attempts. Try again in one hour.");
+        return;
+      }
+      const entitlement = await readProEntitlement(userId);
+      setAccountEntitlement(entitlement);
+      if (result.status === "redeemed" && entitlement?.status === "active") {
+        setBetaAccessCode("");
+        setAccountMessage(`Beta access activated / ${result.label} / Outflow Pro is now available on this account.`);
+        setCloudAccessRefresh((current) => current + 1);
+      } else if (result.status === "already_pro" && entitlement?.status === "active") {
+        setBetaAccessCode("");
+        setAccountMessage("Outflow Pro is already active on this account.");
+      } else if (result.status === "already_redeemed") {
+        setAccountError(entitlement?.status === "active"
+          ? "This account has already redeemed beta access. Pro remains active."
+          : "This account has already used a beta code and cannot redeem another one.");
+      } else {
+        setAccountError("Beta access could not be confirmed. Try Restore access in a moment.");
+      }
+    } catch (redeemError) {
+      setAccountError(redeemError instanceof Error ? redeemError.message : "The beta code could not be redeemed.");
+    } finally {
+      setAccountEntitlementLoading(false);
+      setAccountBusy("");
+    }
+  }
+
   async function saveEmailReminderSettings(event) {
     event.preventDefault();
     if (!accountSession || accountBusy || emailPreferencesLoading) return;
@@ -3841,6 +4097,7 @@ function Tracker({ onExit, pwa }) {
       if (error) throw error;
       setAccountSession(null);
       setAccountEntitlement(null);
+      setBetaAccessCode("");
       setCloudLedgers([]);
       setAccountMessage("Signed out. Subscriptions on this device remain available.");
     } catch (error) {
@@ -3899,6 +4156,7 @@ function Tracker({ onExit, pwa }) {
       }
       setAccountSession(null);
       setAccountEntitlement(null);
+      setBetaAccessCode("");
       setCloudLedgers([]);
       setCloudWriteOperation(null);
       setCloudDiscardArmed(false);
@@ -5453,12 +5711,18 @@ function Tracker({ onExit, pwa }) {
                             ? "border-amber-700 text-amber-300"
                             : "border-zinc-800 text-zinc-600"
                         }`}>
-                          {accountEntitlementLoading ? "Checking" : accountEntitlement?.status === "active" ? "Lifetime active" : "One-time unlock"}
+                          {accountEntitlementLoading
+                            ? "Checking"
+                            : accountEntitlement?.status === "active"
+                              ? accountEntitlement.provider === "manual" ? "Beta active" : "Lifetime active"
+                              : "One-time unlock"}
                         </span>
                       </div>
                       <LiveMessage kind={proOfferError ? "alert" : "status"} className="mt-2 font-mono text-[10px] uppercase leading-5 text-zinc-600">
                         {accountEntitlement?.status === "active"
-                          ? `Purchased ${accountEntitlement.purchased_at ? shortDate(accountEntitlement.purchased_at.slice(0, 10)) : "previously"} / ${accountEntitlement.provider || "account"} / no renewal`
+                          ? accountEntitlement.provider === "manual"
+                            ? `Beta access activated ${accountEntitlement.purchased_at ? shortDate(accountEntitlement.purchased_at.slice(0, 10)) : "previously"} / no renewal`
+                            : `Purchased ${accountEntitlement.purchased_at ? shortDate(accountEntitlement.purchased_at.slice(0, 10)) : "previously"} / ${accountEntitlement.provider || "account"} / no renewal`
                           : proOfferLoading
                             ? "Loading the hosted one-time offer"
                             : proOffer
@@ -5487,6 +5751,34 @@ function Tracker({ onExit, pwa }) {
                       </button>
                     </div>
                   </section>
+
+                  {accountEntitlement?.status !== "active" && (
+                    <form onSubmit={redeemBetaCode} className="grid gap-3 border-b border-zinc-800 bg-zinc-950/40 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                      <div className="sm:col-span-2">
+                        <div className="text-xs font-black uppercase tracking-[0.12em] text-cyan-300">Beta access</div>
+                        <div className="mt-1 font-mono text-[9px] uppercase leading-4 text-zinc-600">A code grants Pro to this signed-in account and can be used only once per account.</div>
+                      </div>
+                      <Field label="Access code">
+                        <input
+                          type="text"
+                          value={betaAccessCode}
+                          maxLength={64}
+                          autoComplete="off"
+                          spellCheck="false"
+                          placeholder="OUTFLOW-XXXXX-XXXXX-XXXXX-XXXXX"
+                          onChange={(event) => setBetaAccessCode(normalizeBetaAccessCode(event.target.value))}
+                          className="h-10 min-w-0 border border-zinc-700 bg-black px-3 font-mono text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-400"
+                        />
+                      </Field>
+                      <button
+                        type="submit"
+                        disabled={Boolean(accountBusy) || accountEntitlementLoading || !betaAccessCode}
+                        className="h-10 border border-cyan-700 px-4 text-xs font-black uppercase tracking-[0.1em] text-cyan-300 hover:border-cyan-400 hover:text-cyan-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                      >
+                        {accountBusy === "redeem-beta" ? "Checking..." : "Activate Pro"}
+                      </button>
+                    </form>
+                  )}
 
                   <form onSubmit={saveEmailReminderSettings} className="border-b border-zinc-800">
                     <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">

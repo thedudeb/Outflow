@@ -82,6 +82,179 @@ set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 select set_config('request.jwt.claims', '{}', false);
 
+reset role;
+insert into auth.users (id, email) values
+  ('33333333-3333-4333-8333-333333333333', 'beta@example.com');
+create temporary table beta_code_fixture (payload jsonb);
+grant select, insert on beta_code_fixture to authenticated;
+
+set role anon;
+do $$
+begin
+  begin
+    perform public.redeem_beta_access_code('OUTFLOW-AAAAA-AAAAA-AAAAA-AAAAA');
+    raise exception 'anonymous client redeemed beta access';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"member"}}', false);
+do $$
+begin
+  begin
+    perform public.create_beta_access_code('Unauthorized', 20, null);
+    raise exception 'non-admin account created a beta code';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.read_beta_access_codes();
+    raise exception 'non-admin account read beta usage';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform count(*) from public.beta_access_codes;
+    raise exception 'authenticated client read private beta codes';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform count(*) from public.beta_access_redemptions;
+    raise exception 'authenticated client read private beta redemptions';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"admin"}}', false);
+insert into beta_code_fixture (payload)
+select public.create_beta_access_code('Private beta', 1, null);
+do $$
+declare
+  created jsonb := (select payload from beta_code_fixture);
+begin
+  if created ->> 'code' !~ '^OUTFLOW-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}-[A-F0-9]{5}$'
+    or (created ->> 'maxRedemptions')::integer <> 1
+    or (created ->> 'remaining')::integer <> 1
+  then
+    raise exception 'administrator beta code response was invalid';
+  end if;
+  begin
+    perform public.create_beta_access_code('Too large', 21, null);
+    raise exception 'administrator created an oversized beta cohort';
+  exception
+    when invalid_parameter_value then null;
+  end;
+end;
+$$;
+
+reset role;
+do $$
+begin
+  if exists (
+    select 1 from public.beta_access_codes
+    where code_hash = (select payload ->> 'code' from beta_code_fixture)
+      or code_suffix = (select payload ->> 'code' from beta_code_fixture)
+  ) then
+    raise exception 'plaintext beta code was persisted';
+  end if;
+end;
+$$;
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', '33333333-3333-4333-8333-333333333333', false);
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"member"}}', false);
+do $$
+declare
+  result jsonb;
+begin
+  result := public.redeem_beta_access_code((select payload ->> 'code' from beta_code_fixture));
+  if result ->> 'status' <> 'redeemed' then raise exception 'valid beta code was not redeemed'; end if;
+  if not public.has_lifetime_pro() then raise exception 'beta redemption did not activate Pro'; end if;
+  if (
+    select provider from public.entitlements
+    where user_id = auth.uid() and product = 'outflow_pro_lifetime'
+  ) <> 'manual' then
+    raise exception 'beta entitlement source was not recorded';
+  end if;
+  if public.redeem_beta_access_code((select payload ->> 'code' from beta_code_fixture)) ->> 'status' <> 'already_redeemed' then
+    raise exception 'repeat beta redemption was not idempotently rejected';
+  end if;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+do $$
+begin
+  if public.redeem_beta_access_code((select payload ->> 'code' from beta_code_fixture)) ->> 'status' <> 'invalid' then
+    raise exception 'full beta code accepted another account';
+  end if;
+end;
+$$;
+
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+declare
+  attempt integer;
+begin
+  for attempt in 1..10 loop
+    if public.redeem_beta_access_code('OUTFLOW-AAAAA-AAAAA-AAAAA-AAAAA') ->> 'status' <> 'invalid' then
+      raise exception 'invalid beta attempt returned an unexpected status';
+    end if;
+  end loop;
+  if public.redeem_beta_access_code('OUTFLOW-AAAAA-AAAAA-AAAAA-AAAAA') ->> 'status' <> 'rate_limited' then
+    raise exception 'beta redemption attempts were not rate limited';
+  end if;
+end;
+$$;
+
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"admin"}}', false);
+do $$
+declare
+  report jsonb := public.read_beta_access_codes();
+  code_id uuid := ((select payload ->> 'id' from beta_code_fixture))::uuid;
+begin
+  if jsonb_array_length(report -> 'codes') <> 1
+    or (report -> 'codes' -> 0 ->> 'redemptionCount')::integer <> 1
+    or report -> 'codes' -> 0 -> 'redemptions' -> 0 ->> 'email' <> 'beta@example.com'
+  then
+    raise exception 'administrator beta usage report was invalid';
+  end if;
+  perform public.set_beta_access_code_disabled(code_id, true);
+  if (public.read_beta_access_codes() -> 'codes' -> 0 ->> 'disabledAt') is null then
+    raise exception 'administrator did not disable beta code';
+  end if;
+  perform public.set_beta_access_code_disabled(code_id, false);
+end;
+$$;
+
+reset role;
+delete from auth.users where id = '33333333-3333-4333-8333-333333333333';
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('request.jwt.claims', '{"app_metadata":{"outflow_role":"admin"}}', false);
+do $$
+declare
+  report jsonb := public.read_beta_access_codes();
+begin
+  if (report -> 'codes' -> 0 ->> 'redemptionCount')::integer <> 1
+    or report -> 'codes' -> 0 -> 'redemptions' -> 0 -> 'userId' <> 'null'::jsonb
+    or report -> 'codes' -> 0 -> 'redemptions' -> 0 -> 'email' <> 'null'::jsonb
+  then
+    raise exception 'deleted beta tester was not de-identified without changing usage';
+  end if;
+end;
+$$;
+
+select set_config('request.jwt.claims', '{}', false);
+
 set role anon;
 do $$
 begin
