@@ -36,6 +36,16 @@ import {
   verifyAccountSession,
 } from "./cloud";
 import {
+  CLOUD_WRITE_OUTBOX_KEY,
+  createCloudWriteOperation,
+  listAccountCloudWriteOperations,
+  markCloudWriteAttempt,
+  readCloudWriteOperation,
+  removeAccountCloudWriteOperations,
+  removeCloudWriteOperation,
+  saveCloudWriteOperation,
+} from "./cloudOutbox";
+import {
   ACCOUNT_NUDGE_DISMISS_DAYS,
   ACCOUNT_NUDGE_OPEN_DAYS,
   accountNudgeIsDue,
@@ -481,6 +491,17 @@ function sanitizeCloudLedgerSnapshot(value) {
     },
     subscriptions: subscriptions.map((subscription) => normalizeBillingDate(subscription)),
   };
+}
+
+function readPendingCloudWrite(accountId, ledgerId) {
+  const operation = readCloudWriteOperation(localStorage, accountId, ledgerId);
+  if (!operation) return null;
+  const subscriptions = operation.subscriptions.map(sanitizeSubscription);
+  const isCanonical = subscriptions.every(Boolean)
+    && JSON.stringify(subscriptions) === JSON.stringify(operation.subscriptions);
+  if (isCanonical) return operation;
+  removeCloudWriteOperation(localStorage, accountId, ledgerId, operation.operationId);
+  return null;
 }
 
 function loadWorkspace() {
@@ -1433,6 +1454,8 @@ function Tracker({ onExit, pwa }) {
   const [cloudSyncStatus, setCloudSyncStatus] = useState("off");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
   const [cloudRemotePending, setCloudRemotePending] = useState(false);
+  const [cloudWriteOperation, setCloudWriteOperation] = useState(null);
+  const [cloudDiscardArmed, setCloudDiscardArmed] = useState(false);
   const [cloudLedgerNameDraft, setCloudLedgerNameDraft] = useState("");
   const cloudSyncingRef = useRef(false);
   const localActiveLedgerRecord = workspace.ledgers.find((entry) => entry.ledger.id === workspace.activeLedgerId) || workspace.ledgers[0];
@@ -1443,15 +1466,17 @@ function Tracker({ onExit, pwa }) {
   const cloudLedgerWriteDisabled = usingCloudLedger && (
     !ledgerMeta.canSync
     || cloudSyncingRef.current
+    || Boolean(cloudWriteOperation)
     || cloudRemotePending
-    || ["loading", "syncing", "refreshing", "stale", "conflict"].includes(cloudSyncStatus)
+    || ["loading", "syncing", "refreshing", "queued", "stale", "conflict"].includes(cloudSyncStatus)
   );
   const cloudLedgerCanRename = usingCloudLedger
     && ledgerMeta.currentRole === "owner"
     && ledgerMeta.canSync
     && !cloudSyncingRef.current
+    && !cloudWriteOperation
     && !cloudRemotePending
-    && !["loading", "syncing", "refreshing", "stale", "conflict"].includes(cloudSyncStatus);
+    && !["loading", "syncing", "refreshing", "queued", "stale", "conflict"].includes(cloudSyncStatus);
 
   function setSubscriptions(nextSubscriptions) {
     if (cloudLedgerSession) {
@@ -1879,6 +1904,8 @@ function Tracker({ onExit, pwa }) {
       setCloudLedgersLoading(false);
       setManagedCloudLedgerId("");
       setCloudLedgerSession(null);
+      setCloudWriteOperation(null);
+      setCloudDiscardArmed(false);
       setCloudSyncStatus("off");
       setCloudSyncMessage("");
       setCloudRemotePending(false);
@@ -1914,10 +1941,15 @@ function Tracker({ onExit, pwa }) {
 
     const receiveRemoteChange = () => {
       if (!active) return;
-      if (cloudSyncingRef.current || editingId) {
+      if (cloudSyncingRef.current || editingId || cloudWriteOperation) {
         setCloudRemotePending(true);
-        setCloudSyncStatus("stale");
-        setCloudSyncMessage("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+        if (cloudWriteOperation) {
+          setCloudSyncStatus("queued");
+          setCloudSyncMessage("A remote revision is available. Retry the saved change; the server will apply it once or return a conflict.");
+        } else {
+          setCloudSyncStatus("stale");
+          setCloudSyncMessage("Another cloud revision is available. Finish or cancel the current edit, then refresh.");
+        }
         return;
       }
       window.clearTimeout(refreshTimer);
@@ -1947,6 +1979,11 @@ function Tracker({ onExit, pwa }) {
       if (status === "SUBSCRIBED") {
         if (!realtimeDisconnected) return;
         realtimeDisconnected = false;
+        if (cloudWriteOperation) {
+          setCloudSyncMessage("Realtime connection restored. Retrying the saved cloud change...");
+          void retryQueuedCloudWrite();
+          return;
+        }
         setCloudSyncMessage("Realtime connection restored. Checking the authoritative cloud revision...");
         receiveRemoteChange();
         return;
@@ -1975,7 +2012,14 @@ function Tracker({ onExit, pwa }) {
       window.clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [accountSession?.user?.id, cloudLedgerSession?.ledger?.id, editingId]);
+  }, [accountSession?.user?.id, cloudLedgerSession?.ledger?.id, cloudWriteOperation?.operationId, editingId]);
+
+  useEffect(() => {
+    if (!cloudWriteOperation || !cloudLedgerSession) return undefined;
+    const retryWhenOnline = () => void retryQueuedCloudWrite();
+    window.addEventListener("online", retryWhenOnline);
+    return () => window.removeEventListener("online", retryWhenOnline);
+  }, [cloudWriteOperation?.operationId, cloudLedgerSession?.ledger?.id]);
 
   useEffect(() => {
     const userId = accountSession?.user?.id;
@@ -2609,17 +2653,25 @@ function Tracker({ onExit, pwa }) {
 
   async function openCloudLedger(ledgerId) {
     const userId = accountSession?.user?.id;
-    if (!userId || cloudOpenId || cloudSyncingRef.current) return;
+    if (!userId || cloudOpenId || cloudSyncingRef.current || cloudWriteOperation) return;
     setCloudOpenId(ledgerId);
     setCloudSyncStatus("loading");
     setCloudSyncMessage("");
     try {
       const snapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(ledgerId, userId));
-      setCloudLedgerSession(snapshot);
-      setCloudSyncStatus(snapshot.ledger.canSync ? "synced" : "read-only");
-      setCloudSyncMessage(snapshot.ledger.canSync
-        ? "Cloud ledger loaded. Changes use optimistic revision checks."
-        : "Cloud ledger opened read-only. Pro editor access is required to synchronize changes.");
+      const pendingOperation = readPendingCloudWrite(userId, ledgerId);
+      const visibleSnapshot = pendingOperation ? { ...snapshot, subscriptions: pendingOperation.subscriptions } : snapshot;
+      setCloudLedgerSession(visibleSnapshot);
+      setCloudWriteOperation(pendingOperation);
+      setCloudDiscardArmed(false);
+      setCloudSyncStatus(pendingOperation ? "queued" : snapshot.ledger.canSync ? "synced" : "read-only");
+      setCloudSyncMessage(pendingOperation
+        ? snapshot.ledger.canSync
+          ? "A cloud change saved on this device is waiting to synchronize."
+          : "A cloud change is saved on this device, but this account no longer has write access."
+        : snapshot.ledger.canSync
+          ? "Cloud ledger loaded. Changes use optimistic revision checks."
+          : "Cloud ledger opened read-only. Pro editor access is required to synchronize changes.");
       setCloudRemotePending(false);
       setAccountOpen(false);
       setLedgerOpen(false);
@@ -2628,6 +2680,9 @@ function Tracker({ onExit, pwa }) {
       resetForm();
       setCalendarCursor(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
       setSelectedDate(toDateInput(new Date()));
+      if (pendingOperation && snapshot.ledger.canSync && navigator.onLine) {
+        void runCloudWriteOperation(snapshot, pendingOperation);
+      }
     } catch (error) {
       setCloudSyncStatus("offline");
       setCloudSyncMessage(error instanceof Error ? error.message : "Outflow could not open this cloud ledger.");
@@ -2637,8 +2692,10 @@ function Tracker({ onExit, pwa }) {
   }
 
   function closeCloudLedger() {
-    if (!cloudLedgerSession || cloudSyncingRef.current) return;
+    if (!cloudLedgerSession || cloudSyncingRef.current || cloudWriteOperation) return;
     setCloudLedgerSession(null);
+    setCloudWriteOperation(null);
+    setCloudDiscardArmed(false);
     setCloudSyncStatus("off");
     setCloudSyncMessage("");
     setCloudRemotePending(false);
@@ -2652,6 +2709,10 @@ function Tracker({ onExit, pwa }) {
     const userId = accountSession?.user?.id;
     const ledgerId = cloudLedgerSession?.ledger?.id;
     if (!userId || !ledgerId || cloudSyncingRef.current) return;
+    if (cloudWriteOperation) {
+      await retryQueuedCloudWrite();
+      return;
+    }
     setCloudSyncStatus("refreshing");
     setCloudSyncMessage("Checking the authoritative cloud revision...");
     try {
@@ -2667,44 +2728,72 @@ function Tracker({ onExit, pwa }) {
     }
   }
 
-  async function commitCloudSubscriptions(nextSubscriptions) {
-    const baseSession = cloudLedgerSession;
+  async function runCloudWriteOperation(baseSession, operation) {
     const userId = accountSession?.user?.id;
-    if (!baseSession || !userId || !baseSession.ledger.canSync || cloudSyncingRef.current) return;
-    const sanitized = nextSubscriptions.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription);
-    if (sanitized.some((subscription) => !subscription)) {
-      setCloudSyncStatus("offline");
-      setCloudSyncMessage("The pending cloud change contains an invalid subscription.");
+    if (
+      !baseSession
+      || !userId
+      || !baseSession.ledger.canSync
+      || cloudSyncingRef.current
+      || operation.accountId !== userId
+      || operation.ledgerId !== baseSession.ledger.id
+    ) return;
+
+    let attemptedOperation;
+    try {
+      attemptedOperation = markCloudWriteAttempt(operation);
+      saveCloudWriteOperation(localStorage, attemptedOperation);
+    } catch (error) {
+      setCloudSyncStatus("queued");
+      setCloudSyncMessage(error instanceof Error ? error.message : "The saved cloud change could not be prepared for retry.");
       return;
     }
 
     cloudSyncingRef.current = true;
+    setCloudWriteOperation(attemptedOperation);
+    setCloudDiscardArmed(false);
     setCloudSyncStatus("syncing");
-    setCloudSyncMessage(`Writing revision ${baseSession.ledger.revision + 1}...`);
+    setCloudSyncMessage(`${attemptedOperation.attemptCount > 1 ? "Retrying" : "Writing"} revision ${attemptedOperation.expectedRevision + 1}...`);
     setCloudLedgerSession({
       ...baseSession,
-      ledger: { ...baseSession.ledger, updatedAt: new Date().toISOString() },
-      subscriptions: sanitized,
+      ledger: { ...baseSession.ledger, revision: attemptedOperation.expectedRevision, updatedAt: attemptedOperation.createdAt },
+      subscriptions: attemptedOperation.subscriptions,
     });
 
     let result;
     try {
       result = await replaceCloudLedgerSnapshot(
-        baseSession.ledger.id,
-        baseSession.ledger.revision,
-        sanitized,
-        crypto.randomUUID(),
+        attemptedOperation.ledgerId,
+        attemptedOperation.expectedRevision,
+        attemptedOperation.subscriptions,
+        attemptedOperation.operationId,
       );
-    } catch (error) {
-      setCloudLedgerSession(baseSession);
-      setCloudSyncStatus("offline");
-      setCloudSyncMessage(error instanceof Error ? error.message : "Cloud synchronization failed before the change was committed.");
+    } catch {
+      setCloudSyncStatus("queued");
+      setCloudSyncMessage(`Cloud change saved on this device / attempt ${attemptedOperation.attemptCount}. Retry when connected.`);
       cloudSyncingRef.current = false;
       return;
     }
 
     try {
-      if (result?.status === "conflict") {
+      if (
+        result?.status === "conflict"
+        && result.ledgerId === attemptedOperation.ledgerId
+        && Number.isSafeInteger(result.currentRevision)
+        && result.currentRevision >= 0
+      ) {
+        let cleared = false;
+        try {
+          cleared = removeCloudWriteOperation(
+            localStorage,
+            attemptedOperation.accountId,
+            attemptedOperation.ledgerId,
+            attemptedOperation.operationId,
+          );
+        } catch {
+          // Replaying the same operation remains safe if browser cleanup is temporarily unavailable.
+        }
+        if (cleared) setCloudWriteOperation(null);
         try {
           const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
           setCloudLedgerSession(serverSnapshot);
@@ -2714,11 +2803,26 @@ function Tracker({ onExit, pwa }) {
           setCloudRemotePending(true);
         }
         setCloudSyncStatus("conflict");
-        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. Your stale write was rejected; refresh and review the server copy.`);
-      } else {
-        const committedRevision = Number.isInteger(result?.currentRevision)
-          ? result.currentRevision
-          : baseSession.ledger.revision + 1;
+        setCloudSyncMessage(`Cloud changed at revision ${result.currentRevision}. Your stale write was rejected; the saved browser operation was cleared. Review the server copy before editing again.`);
+      } else if (
+        result?.status === "applied"
+        && result.ledgerId === attemptedOperation.ledgerId
+        && Number.isSafeInteger(result.currentRevision)
+        && result.currentRevision > attemptedOperation.expectedRevision
+      ) {
+        let cleared = false;
+        try {
+          cleared = removeCloudWriteOperation(
+            localStorage,
+            attemptedOperation.accountId,
+            attemptedOperation.ledgerId,
+            attemptedOperation.operationId,
+          );
+        } catch {
+          // Keep the same operation available for an idempotent cleanup retry.
+        }
+        if (cleared) setCloudWriteOperation(null);
+        const committedRevision = result.currentRevision;
         const committedSession = {
           ...baseSession,
           ledger: {
@@ -2726,25 +2830,95 @@ function Tracker({ onExit, pwa }) {
             revision: committedRevision,
             updatedAt: new Date().toISOString(),
           },
-          subscriptions: sanitized,
+          subscriptions: attemptedOperation.subscriptions,
         };
         setCloudLedgerSession(committedSession);
-        try {
-          const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
-          setCloudLedgerSession(serverSnapshot);
-          setCloudRemotePending(false);
-          setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
-          setCloudSyncMessage(`Synchronized revision ${committedRevision}.`);
-        } catch {
-          setCloudRemotePending(true);
-          setCloudSyncStatus("stale");
-          setCloudSyncMessage(`Revision ${committedRevision} was committed, but confirmation failed. Refresh before making another change.`);
+        if (!cleared) {
+          setCloudSyncStatus("queued");
+          setCloudSyncMessage(`Revision ${committedRevision} synchronized, but its local recovery marker still needs cleanup. Retry safely.`);
+        } else {
+          try {
+            const serverSnapshot = sanitizeCloudLedgerSnapshot(await readCloudLedgerSnapshot(baseSession.ledger.id, userId));
+            setCloudLedgerSession(serverSnapshot);
+            setCloudRemotePending(false);
+            setCloudSyncStatus(serverSnapshot.ledger.canSync ? "synced" : "read-only");
+            setCloudSyncMessage(`Synchronized revision ${committedRevision}.`);
+          } catch {
+            setCloudRemotePending(true);
+            setCloudSyncStatus("stale");
+            setCloudSyncMessage(`Revision ${committedRevision} was committed, but confirmation failed. Refresh before making another change.`);
+          }
         }
+      } else {
+        setCloudSyncStatus("queued");
+        setCloudSyncMessage("The server returned an unrecognized write result. The exact change remains saved for a safe retry.");
       }
       setCloudAccessRefresh((current) => current + 1);
     } finally {
       cloudSyncingRef.current = false;
     }
+  }
+
+  async function retryQueuedCloudWrite() {
+    const operation = cloudWriteOperation;
+    const baseSession = cloudLedgerSession;
+    if (!operation || !baseSession || cloudSyncingRef.current) return;
+    await runCloudWriteOperation(baseSession, operation);
+  }
+
+  function discardQueuedCloudWrite() {
+    const operation = cloudWriteOperation;
+    if (!operation || cloudSyncingRef.current) return;
+    if (!cloudDiscardArmed) {
+      setCloudDiscardArmed(true);
+      setCloudSyncMessage("Discarding removes this unsynchronized browser change. Confirm to return to the local ledger.");
+      return;
+    }
+    try {
+      removeCloudWriteOperation(localStorage, operation.accountId, operation.ledgerId, operation.operationId);
+    } catch (error) {
+      setCloudSyncStatus("queued");
+      setCloudSyncMessage(error instanceof Error ? error.message : "The pending cloud change could not be discarded.");
+      return;
+    }
+    setCloudWriteOperation(null);
+    setCloudDiscardArmed(false);
+    setCloudLedgerSession(null);
+    setCloudSyncStatus("off");
+    setCloudSyncMessage("");
+    setCloudRemotePending(false);
+    setLedgerOpen(false);
+    resetForm();
+  }
+
+  async function commitCloudSubscriptions(nextSubscriptions) {
+    const baseSession = cloudLedgerSession;
+    const userId = accountSession?.user?.id;
+    if (!baseSession || !userId || !baseSession.ledger.canSync || cloudSyncingRef.current || cloudWriteOperation) return;
+    const sanitized = nextSubscriptions.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription);
+    if (sanitized.some((subscription) => !subscription)) {
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage("The pending cloud change contains an invalid subscription.");
+      return;
+    }
+
+    let operation;
+    try {
+      operation = createCloudWriteOperation({
+        accountId: userId,
+        ledgerId: baseSession.ledger.id,
+        expectedRevision: baseSession.ledger.revision,
+        subscriptions: sanitized,
+        operationId: crypto.randomUUID(),
+      });
+      saveCloudWriteOperation(localStorage, operation);
+      setCloudWriteOperation(operation);
+    } catch (error) {
+      setCloudSyncStatus("offline");
+      setCloudSyncMessage(error instanceof Error ? error.message : "The cloud change could not be saved safely on this device.");
+      return;
+    }
+    await runCloudWriteOperation(baseSession, operation);
   }
 
   async function renameActiveCloudLedger(event) {
@@ -2985,6 +3159,11 @@ function Tracker({ onExit, pwa }) {
 
   async function signOutAccount() {
     if (!cloudClient || accountBusy || cloudSyncingRef.current) return;
+    const userId = accountSession?.user?.id;
+    if (userId && listAccountCloudWriteOperations(localStorage, userId).length) {
+      setAccountError("Synchronize or discard the pending cloud change before signing out. No cloud data was left behind.");
+      return;
+    }
     setAccountBusy("signout");
     setAccountError("");
     setAccountMessage("");
@@ -3036,13 +3215,28 @@ function Tracker({ onExit, pwa }) {
     setAccountError("");
     setAccountMessage("");
     try {
+      const userId = accountSession.user.id;
       await deleteCloudAccount();
       await cloudClient?.auth.signOut({ scope: "local" });
+      let outboxCleared = true;
+      try {
+        removeAccountCloudWriteOperations(localStorage, userId);
+      } catch {
+        try {
+          localStorage.removeItem(CLOUD_WRITE_OUTBOX_KEY);
+        } catch {
+          outboxCleared = false;
+        }
+      }
       setAccountSession(null);
       setAccountEntitlement(null);
       setCloudLedgers([]);
+      setCloudWriteOperation(null);
+      setCloudDiscardArmed(false);
       setDeleteAccountArmed(false);
-      setAccountMessage("Cloud account deleted. Local ledgers were not removed.");
+      setAccountMessage(outboxCleared
+        ? "Cloud account deleted. Local ledgers were not removed."
+        : "Cloud account deleted, but the browser denied pending-data cleanup. Clear this site's stored data before leaving the device.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not delete this cloud account.");
     } finally {
@@ -3158,8 +3352,10 @@ function Tracker({ onExit, pwa }) {
   }
 
   function switchLedger(id) {
-    if (cloudSyncingRef.current || !workspace.ledgers.some((entry) => entry.ledger.id === id)) return;
+    if (cloudSyncingRef.current || cloudWriteOperation || !workspace.ledgers.some((entry) => entry.ledger.id === id)) return;
     setCloudLedgerSession(null);
+    setCloudWriteOperation(null);
+    setCloudDiscardArmed(false);
     setCloudSyncStatus("off");
     setCloudSyncMessage("");
     setCloudRemotePending(false);
@@ -3175,11 +3371,13 @@ function Tracker({ onExit, pwa }) {
 
   function createLocalLedger(event) {
     event.preventDefault();
-    if (cloudSyncingRef.current || workspace.ledgers.length >= MAX_LEDGERS) return;
+    if (cloudSyncingRef.current || cloudWriteOperation || workspace.ledgers.length >= MAX_LEDGERS) return;
     const name = newLedgerName.trim().slice(0, 60);
     if (!name || !ledgerKinds.some((kind) => kind.value === newLedgerKind)) return;
     const ledger = sanitizeLedgerMeta({ name, kind: newLedgerKind });
     setCloudLedgerSession(null);
+    setCloudWriteOperation(null);
+    setCloudDiscardArmed(false);
     setCloudSyncStatus("off");
     setCloudSyncMessage("");
     setCloudRemotePending(false);
@@ -3750,14 +3948,14 @@ function Tracker({ onExit, pwa }) {
                 }>
                   {usingCloudLedger ? cloudSyncStatus : pwa.online ? "Online" : "Offline"}
                 </span>
-                {usingCloudLedger && (["stale", "conflict", "offline"].includes(cloudSyncStatus) || cloudRemotePending) && (
+                {usingCloudLedger && (["queued", "stale", "conflict", "offline"].includes(cloudSyncStatus) || cloudRemotePending) && (
                   <button
                     type="button"
                     onClick={refreshActiveCloudLedger}
                     disabled={cloudSyncingRef.current}
                     className="border border-amber-800 px-2 py-1 font-mono text-[9px] font-black uppercase text-amber-300 hover:border-amber-400 disabled:opacity-40"
                   >
-                    Refresh
+                    {cloudWriteOperation ? "Retry" : "Refresh"}
                   </button>
                 )}
               </div>
@@ -3859,18 +4057,41 @@ function Tracker({ onExit, pwa }) {
 
           {usingCloudLedger && (
             <LiveMessage
-              kind={["offline", "conflict", "stale"].includes(cloudSyncStatus) ? "alert" : "status"}
+              kind={["offline", "queued", "conflict", "stale"].includes(cloudSyncStatus) ? "alert" : "status"}
               aria-busy={["loading", "syncing", "refreshing"].includes(cloudSyncStatus)}
               className={`grid gap-2 border px-3 py-2 font-mono text-[10px] uppercase sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
               cloudSyncStatus === "offline"
                 ? "border-red-900 bg-red-950/25 text-red-200"
-                : cloudSyncStatus === "conflict" || cloudSyncStatus === "stale"
+                : cloudSyncStatus === "queued" || cloudSyncStatus === "conflict" || cloudSyncStatus === "stale"
                   ? "border-amber-900 bg-amber-950/20 text-amber-200"
                   : "border-cyan-950 bg-cyan-950/10 text-cyan-200"
               }`}
             >
               <span>{cloudSyncMessage || `Cloud revision ${ledgerMeta.revision}`}</span>
-              <span aria-hidden="true" className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
+              {cloudWriteOperation ? (
+                <span className="flex flex-wrap gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={retryQueuedCloudWrite}
+                    disabled={cloudSyncingRef.current || !ledgerMeta.canSync}
+                    className="border border-amber-700 px-2 py-1 font-black text-amber-200 hover:border-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
+                  >
+                    Retry saved change
+                  </button>
+                  <button
+                    type="button"
+                    onClick={discardQueuedCloudWrite}
+                    disabled={cloudSyncingRef.current}
+                    className={`border px-2 py-1 font-black disabled:cursor-not-allowed disabled:opacity-40 ${
+                      cloudDiscardArmed ? "border-red-500 bg-red-950/40 text-red-200" : "border-zinc-700 text-zinc-400 hover:border-red-700 hover:text-red-300"
+                    }`}
+                  >
+                    {cloudDiscardArmed ? "Confirm discard" : "Discard local change"}
+                  </button>
+                </span>
+              ) : (
+                <span aria-hidden="true" className="text-zinc-600">Rev {ledgerMeta.revision} / local ledgers isolated</span>
+              )}
             </LiveMessage>
           )}
 
@@ -5164,7 +5385,7 @@ function Tracker({ onExit, pwa }) {
                         <button
                           type="button"
                           onClick={() => switchLedger(entry.ledger.id)}
-                          disabled={cloudSyncStatus === "syncing"}
+                          disabled={cloudSyncStatus === "syncing" || Boolean(cloudWriteOperation)}
                           aria-current={active ? "true" : undefined}
                           className="min-w-0 text-left disabled:opacity-40"
                         >
@@ -5217,7 +5438,7 @@ function Tracker({ onExit, pwa }) {
                   </Field>
                   <button
                     type="submit"
-                    disabled={!newLedgerName.trim() || workspace.ledgers.length >= MAX_LEDGERS || cloudSyncStatus === "syncing"}
+                    disabled={!newLedgerName.trim() || workspace.ledgers.length >= MAX_LEDGERS || cloudSyncStatus === "syncing" || Boolean(cloudWriteOperation)}
                     className="h-10 border border-zinc-600 bg-black px-3 text-xs font-black uppercase tracking-[0.1em] text-zinc-200 hover:border-amber-400 hover:text-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
                   >
                     Create local
@@ -5254,7 +5475,7 @@ function Tracker({ onExit, pwa }) {
                         <button
                           type="button"
                           onClick={() => active ? closeCloudLedger() : openCloudLedger(cloudLedger.id)}
-                          disabled={Boolean(cloudOpenId) || cloudSyncingRef.current}
+                          disabled={Boolean(cloudOpenId) || cloudSyncingRef.current || (active && Boolean(cloudWriteOperation))}
                           className="h-8 border border-cyan-900 px-3 font-mono text-[9px] font-black uppercase text-cyan-300 hover:border-cyan-500 disabled:opacity-40"
                         >
                           {cloudOpenId === cloudLedger.id ? "Opening..." : active ? "Close cloud" : "Open"}

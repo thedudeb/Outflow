@@ -13,7 +13,9 @@ Signing in does not synchronize or upload the local workspace. A recovered brows
 - Replaying an idempotency key returns the original result without advancing the revision again.
 - A stale expected revision returns `conflict` and changes no subscription data.
 - Cloud ledger renames use the same revision and idempotency rules and remain owner-only.
-- The browser optimistically renders a write while it is in flight. A network or authorization failure before commit restores the prior snapshot; a conflict rejects the stale write and asks the user to refresh and retry.
+- Before sending a subscription write, the browser durably stores the exact account-bound snapshot, expected revision, and idempotency key. The optimistic snapshot remains visible if the response is lost, and the same immutable operation is retried after an online event, Realtime recovery, reopening the ledger, or an explicit retry.
+- A confirmed application clears the local recovery operation. A stale expected revision clears the rejected operation, loads the authoritative server winner, and requires review before another edit.
+- Ledger renames retain their immediate online-only boundary; they are never mixed into the subscription-snapshot outbox.
 - If the transaction commits but its confirmation read fails, Outflow preserves the committed browser snapshot, marks it `stale`, and blocks another edit until an authoritative refresh succeeds.
 
 ## Access And Entitlements
@@ -38,6 +40,7 @@ The visible runtime states are:
 | `read-only` | The ledger is readable, but role or entitlement blocks writes |
 | `syncing` | A transactional write is in flight |
 | `refreshing` | A newer server revision is being loaded |
+| `queued` | One exact subscription snapshot is saved on this device for idempotent retry or explicit discard |
 | `stale` | A remote change arrived during a local edit |
 | `conflict` | A stale write was rejected; refresh is required before retrying |
 | `offline` | A cloud request or Realtime channel failed; local ledgers remain available |
@@ -50,6 +53,8 @@ The visible runtime states are:
 - Shared records display distinct server-resolved creator and updater identities.
 - A normalized self-profile update reaches a second isolated collaborator over Realtime, updates shared attribution, exposes no account email, and leaves both local workspaces byte-for-byte unchanged.
 - A write sends the full snapshot, expected revision, and a fresh operation UUID, then adopts the confirmed authoritative revision.
+- A failed write remains visible and survives reload, replays the same operation UUID, commits once, and removes its browser recovery record.
+- A queued retry that races a remote revision fails closed to the authoritative server copy; sign-out is blocked until the operation is synchronized or explicitly discarded.
 - A conflict rejects the optimistic value, loads the server winner, announces the conflict, and blocks another write until refresh.
 - Two isolated browser contexts receive protocol-level Realtime changes, refresh to the same server revision, and keep local workspaces separate.
 - A remote change during an unfinished edit preserves the form, marks the peer stale, blocks commit, and requires an explicit refresh.
@@ -68,4 +73,12 @@ The fixed workflow report records only named checks and deployment metadata. It 
 
 ## Offline Boundary
 
-The installable guest tracker and local ledgers remain usable offline. Cloud writes are not queued in this release: failures before commit roll back visibly instead of creating an ambiguous offline mutation queue. A committed write whose confirmation cannot be loaded is retained and marked stale. Durable queued cloud writes require a future operation log, background retry policy, and conflict UX before they can be enabled safely.
+The installable guest tracker and local ledgers remain usable offline. Cloud subscription writes use a deliberately narrow browser outbox rather than a general merge queue:
+
+- At most eight account/ledger-bound operations may exist in the browser, with a 2 MiB total serialized ceiling and no session tokens, emails, provider errors, or service fields.
+- Each ledger can hold only one immutable pending operation. Additional editing, ledger switching, cloud closing, and sign-out are blocked until that operation synchronizes or the user confirms discard.
+- Retry always reuses the original operation UUID and expected revision. The database therefore returns the original applied result or a non-mutating conflict; Outflow never rebases or silently merges the snapshot.
+- Explicit discard removes the browser operation and returns to the untouched local ledger. Account deletion removes matching recovery operations after the server deletion succeeds.
+- A committed write whose confirmation snapshot cannot be loaded is marked `stale`; this is separate from an ambiguous request whose exact operation remains `queued`.
+
+The outbox retries while Outflow is open and when its cloud ledger is reopened. It is not a background-sync promise, and cloud ledger renames remain online-only.

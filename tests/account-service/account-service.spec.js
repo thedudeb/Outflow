@@ -53,6 +53,7 @@ function storedSession(user = fixtureUser) {
 
 function createCloudState({
   replaceMode = "applied",
+  replaceFailuresRemaining = 0,
   entitlementStatus = "active",
   accessGranted = true,
   canSync = true,
@@ -62,6 +63,7 @@ function createCloudState({
 } = {}) {
   return {
     replaceMode,
+    replaceFailuresRemaining,
     entitlementStatus,
     accessGranted,
     canSync,
@@ -76,6 +78,7 @@ function createCloudState({
     deleteRequests: 0,
     deleted: false,
     writes: [],
+    operationResults: new Map(),
     sentInvitations: [],
     roleChanges: [],
     removedMembers: [],
@@ -594,8 +597,14 @@ async function installCloudFixture(page, {
     }
     if (url.pathname.endsWith("/rest/v1/rpc/replace_ledger_snapshot") && cloudState) {
       cloudState.writes.push(entry.body);
+      if (cloudState.replaceFailuresRemaining > 0) {
+        cloudState.replaceFailuresRemaining -= 1;
+        return route.abort("failed");
+      }
+      const existingResult = cloudState.operationResults.get(entry.body?.client_operation_id);
+      if (existingResult) return reply(existingResult);
       if (cloudState.replaceMode === "conflict") {
-        cloudState.ledger.revision = 3;
+        cloudState.ledger.revision = Math.max(cloudState.ledger.revision, Number(entry.body?.expected_revision || 0) + 1);
         cloudState.ledger.updated_at = "2026-07-19T13:00:00.000Z";
         cloudState.subscriptions = [{
           ...cloudState.subscriptions[0],
@@ -605,12 +614,14 @@ async function installCloudFixture(page, {
           client_updated_at: "2026-07-19T13:00:00.000Z",
           updated_at: "2026-07-19T13:00:00.000Z",
         }];
-        return reply({
+        const result = {
           status: "conflict",
           ledgerId: cloudState.ledger.id,
           baseRevision: entry.body?.expected_revision,
-          currentRevision: 3,
-        });
+          currentRevision: cloudState.ledger.revision,
+        };
+        cloudState.operationResults.set(entry.body?.client_operation_id, result);
+        return reply(result);
       }
       cloudState.ledger.revision += 1;
       cloudState.ledger.updated_at = "2026-07-19T13:00:00.000Z";
@@ -618,12 +629,14 @@ async function installCloudFixture(page, {
       cloudState.subscriptions = (entry.body?.subscriptions_payload || []).map((subscription) =>
         cloudRowFromPayload(subscription, existingRows.get(subscription.id)),
       );
-      return reply({
+      const result = {
         status: "applied",
         ledgerId: cloudState.ledger.id,
         baseRevision: entry.body?.expected_revision,
         currentRevision: cloudState.ledger.revision,
-      });
+      };
+      cloudState.operationResults.set(entry.body?.client_operation_id, result);
+      return reply(result);
     }
     if (url.pathname.endsWith("/functions/v1/create-pro-checkout")) {
       if (cloudState?.proOffer && entry.method === "GET") return reply(cloudState.proOffer);
@@ -805,6 +818,79 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
   await expect(monthlyOutflow(page)).toContainText("$39.47");
   await expect(page.getByText("Figma Cloud", { exact: true })).toHaveCount(0);
+});
+
+test("failed cloud writes survive reload, replay once, fail closed on conflict, and discard explicitly", async ({ page }) => {
+  const cloudState = createCloudState({ replaceFailuresRemaining: 1 });
+  await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+  await openStudioCloud(page);
+
+  let cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
+  await cloudCard.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("31");
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+
+  await expect(page.getByRole("alert")).toContainText("Cloud change saved on this device / attempt 1");
+  await expect(cloudCard).toContainText("$31.00");
+  const firstStored = await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")));
+  expect(firstStored.operations).toHaveLength(1);
+  expect(firstStored.operations[0]).toMatchObject({
+    accountId: fixtureUser.id,
+    ledgerId: "studio-cloud",
+    expectedRevision: 2,
+    attemptCount: 1,
+    subscriptions: [expect.objectContaining({ name: "Figma Cloud", amount: 31 })],
+  });
+  expect(JSON.stringify(firstStored)).not.toMatch(/access[_-]?token|refresh[_-]?token|owner@example\.com/i);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Active subscriptions" })).toBeVisible();
+  await openStudioCloud(page);
+  await expect(page.getByRole("status")).toContainText("Synchronized revision 3.");
+  cloudCard = page.getByRole("article").filter({ hasText: "Figma Cloud" });
+  await expect(cloudCard).toContainText("$31.00");
+  expect(cloudState.writes).toHaveLength(2);
+  expect(cloudState.writes[0].client_operation_id).toBe(cloudState.writes[1].client_operation_id);
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")))).operations).toEqual([]);
+
+  cloudState.replaceFailuresRemaining = 1;
+  await cloudCard.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("33");
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Cloud change saved on this device / attempt 1");
+
+  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await dialog.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Synchronize or discard the pending cloud change before signing out");
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+
+  cloudState.replaceMode = "conflict";
+  await page.getByRole("button", { name: "Retry saved change", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Cloud changed at revision 4. Your stale write was rejected");
+  const authoritativeCard = page.getByRole("article").filter({ hasText: "Remote Winner" });
+  await expect(authoritativeCard).toContainText("$42.00");
+  expect(cloudState.writes).toHaveLength(4);
+  expect(cloudState.writes[2].client_operation_id).toBe(cloudState.writes[3].client_operation_id);
+  expect(cloudState.writes[2].client_operation_id).not.toBe(cloudState.writes[0].client_operation_id);
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")))).operations).toEqual([]);
+
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Cloud ledger refreshed.");
+  cloudState.replaceMode = "applied";
+  cloudState.replaceFailuresRemaining = 1;
+  await authoritativeCard.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("44");
+  await page.getByRole("button", { name: "Commit changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Cloud change saved on this device / attempt 1");
+  await page.getByRole("button", { name: "Discard local change", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Discarding removes this unsynchronized browser change");
+  await page.getByRole("button", { name: "Confirm discard", exact: true }).click();
+  await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
+  await expect(page.getByText("Remote Winner", { exact: true })).toHaveCount(0);
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("outflow:cloud-write-outbox:v1")))).operations).toEqual([]);
 });
 
 test("account display name stays private and refreshes shared attribution through Realtime", async ({ browser, page }, testInfo) => {

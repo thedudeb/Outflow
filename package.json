@@ -8,6 +8,7 @@
     "build": "vite build",
     "test:account-prompts": "node --test tests/account-prompt.test.js",
     "test:feature-access": "node --test tests/feature-access.test.js",
+    "test:cloud-outbox": "node --test tests/cloud-outbox.test.js",
     "test:service-readiness": "node --test tests/service-readiness.test.js",
     "test:staging-boundaries": "node --test tests/staging-boundaries.test.js",
     "check:staging-boundaries": "node scripts/check-staging-boundaries.mjs",

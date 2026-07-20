@@ -23,7 +23,7 @@ Outflow's responsive web experience is an installable progressive web app. The g
 - Same-origin shell assets use the installed cache and can populate it after successful online requests.
 - Subscription data remains in the versioned localStorage workspace rather than in the service-worker cache. Offline edits therefore use the same validation and persistence path as online local edits.
 - Landing and tracker URLs both relaunch from the cached shell, and the dashboard visibly reports online/offline state.
-- Cloud reads and writes are not queued by the service worker. Account-backed synchronization retains the explicit failure and conflict boundary in [cloud-sync.md](cloud-sync.md).
+- The service worker never handles cloud data or queues network requests. The signed-in application can retain one strict, account-bound subscription snapshot per cloud ledger for idempotent foreground retry under the explicit persistence and conflict boundary in [cloud-sync.md](cloud-sync.md).
 
 ## Automated Production Contract
 
