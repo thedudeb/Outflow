@@ -114,6 +114,8 @@ test("the protected macOS workflow retains only an exact-commit verified release
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /OUTFLOW_MACOS_EXPECTED_COMMIT: \$\{\{ github\.sha \}\}/);
   assert.match(workflow, /OUTFLOW_MACOS_REQUIRE_CERTIFICATE: "true"/);
+  assert.doesNotMatch(workflow, /^\s{6}APPLE_API_KEY_PATH:/m);
+  assert.equal(workflow.match(/APPLE_API_KEY_PATH: \$\{\{ runner\.temp \}\}/g)?.length, 4);
   assert.match(workflow, /install -m 600 \/dev\/null "\$APPLE_API_KEY_PATH"/);
   assert.match(workflow, /npm run check:desktop:release-environment/);
   assert.match(workflow, /OUTFLOW_MACOS_EXPECT_DISTRIBUTABLE: "true"/);
