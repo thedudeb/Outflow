@@ -93,7 +93,9 @@ jobs:
       - run: npm ci
       - run: npm run test:device-notifications
       - run: npm run test:desktop-shell
-      - run: npm run desktop:build
+      - run: npm run test:desktop-release
+      - run: npm run desktop:release
+      - run: npm run check:desktop:release
 
   ios:
     runs-on: macos-latest

@@ -87,25 +87,42 @@ test("the native backend exposes only the notification plugin and no commands", 
 
 test("desktop builds use the shared frontend and remain a tested release gate", () => {
   const packageJson = JSON.parse(read("package.json"));
+  const macosConfig = JSON.parse(read("src-tauri/tauri.macos.conf.json"));
   const vite = read("vite.config.js");
   const app = read("src/App.jsx");
+  const releaseBuilder = read("scripts/build-macos-release.mjs");
+  const releaseInspector = read("scripts/check-macos-release.mjs");
+  const releaseEnvironment = read("scripts/check-macos-release-environment.mjs");
   const quality = read(".github/workflows/quality.yml");
 
   assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.11.4");
   assert.equal(packageJson.dependencies["@tauri-apps/plugin-notification"], "2.3.3");
   assert.equal(packageJson.scripts["desktop:dev"], "tauri dev");
   assert.equal(packageJson.scripts["desktop:build"], "tauri build --bundles app");
+  assert.equal(packageJson.scripts["desktop:release"], "node scripts/build-macos-release.mjs");
   assert.equal(packageJson.scripts["test:desktop-shell"], "node --test tests/desktop-shell.test.js");
+  assert.equal(packageJson.scripts["test:desktop-release"], "node --test tests/macos-release.test.js");
+  assert.equal(packageJson.scripts["check:desktop:release"], "node scripts/check-macos-release.mjs");
+  assert.equal(packageJson.scripts["check:desktop:release-environment"], "node scripts/check-macos-release-environment.mjs");
+  assert.deepEqual(macosConfig.bundle.macOS, { hardenedRuntime: true, signingIdentity: "-" });
   assert.match(vite, /envPrefix: \["VITE_", "TAURI_ENV_\*"\]/);
   assert.match(vite, /ignored: \["\*\*\/src-tauri\/\*\*"\]/);
   assert.match(app, /nativeApp = Boolean\(import\.meta\.env\.TAURI_ENV_PLATFORM\)/);
   assert.match(app, /!nativeApp && import\.meta\.env\.PROD/);
   assert.match(app, /pwa\.nativeApp \? "Native local" : "Offline ready"/);
   assert.match(app, /sendDeviceNotification/);
+  assert.match(releaseBuilder, /LANG: "C"/);
+  assert.match(releaseBuilder, /--keepParent/);
+  assert.match(releaseInspector, /release-readiness app must not contain a notarization ticket/);
+  assert.match(releaseInspector, /source=Notarized Developer ID/);
+  assert.match(releaseEnvironment, /configure exactly one authentication mode/);
+  assert.match(releaseEnvironment, /private key must be stored outside the repository/);
   assert.match(quality, /desktop:\n\s+runs-on: macos-latest/);
   assert.match(quality, /persist-credentials: false/);
   assert.match(quality, /npm run test:desktop-shell/);
   assert.match(quality, /npm run test:device-notifications/);
-  assert.match(quality, /npm run desktop:build/);
+  assert.match(quality, /npm run test:desktop-release/);
+  assert.match(quality, /npm run desktop:release/);
+  assert.match(quality, /npm run check:desktop:release/);
   assert.doesNotMatch(quality, /VITE_SUPABASE|SUPABASE_SECRET|SERVICE_ROLE|STRIPE_|RESEND_/);
 });
