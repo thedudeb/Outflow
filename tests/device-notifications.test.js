@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   claimDeviceNotification,
   initialDeviceNotificationPermission,
-  isNativeDesktopRuntime,
+  isNativeRuntime,
   readDeviceNotificationPermission,
   releaseDeviceNotification,
   requestDeviceNotificationPermission,
@@ -11,8 +11,9 @@ import {
 } from "../src/deviceNotifications.js";
 
 test("runtime and initial permission detection preserve native settings while permission loads", () => {
-  assert.equal(isNativeDesktopRuntime({ TAURI_ENV_PLATFORM: "darwin" }), true);
-  assert.equal(isNativeDesktopRuntime({}), false);
+  assert.equal(isNativeRuntime({ TAURI_ENV_PLATFORM: "darwin" }), true);
+  assert.equal(isNativeRuntime({ TAURI_ENV_PLATFORM: "ios" }), true);
+  assert.equal(isNativeRuntime({}), false);
   assert.equal(initialDeviceNotificationPermission({ native: true }), "checking");
   assert.equal(initialDeviceNotificationPermission({
     native: false,

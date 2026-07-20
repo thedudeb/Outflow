@@ -98,9 +98,9 @@ test("desktop builds use the shared frontend and remain a tested release gate", 
   assert.equal(packageJson.scripts["test:desktop-shell"], "node --test tests/desktop-shell.test.js");
   assert.match(vite, /envPrefix: \["VITE_", "TAURI_ENV_\*"\]/);
   assert.match(vite, /ignored: \["\*\*\/src-tauri\/\*\*"\]/);
-  assert.match(app, /nativeDesktop = Boolean\(import\.meta\.env\.TAURI_ENV_PLATFORM\)/);
-  assert.match(app, /!nativeDesktop && import\.meta\.env\.PROD/);
-  assert.match(app, /nativeDesktop \? "Desktop embedded" : "Offline ready"/);
+  assert.match(app, /nativeApp = Boolean\(import\.meta\.env\.TAURI_ENV_PLATFORM\)/);
+  assert.match(app, /!nativeApp && import\.meta\.env\.PROD/);
+  assert.match(app, /pwa\.nativeApp \? "Native local" : "Offline ready"/);
   assert.match(app, /sendDeviceNotification/);
   assert.match(quality, /desktop:\n\s+runs-on: macos-latest/);
   assert.match(quality, /persist-credentials: false/);

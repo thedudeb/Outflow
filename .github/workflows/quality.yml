@@ -94,3 +94,22 @@ jobs:
       - run: npm run test:device-notifications
       - run: npm run test:desktop-shell
       - run: npm run desktop:build
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: rustup target add aarch64-apple-ios-sim
+      - run: npm run test:device-notifications
+      - run: npm run test:mobile-shell
+      - run: npm run mobile:ios:build
+      - run: npm run check:mobile:ios-bundle

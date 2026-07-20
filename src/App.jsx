@@ -1222,12 +1222,12 @@ function useDialogLifecycle(open, onClose, closeDisabled = false) {
 }
 
 function useInstallableApp() {
-  const nativeDesktop = Boolean(import.meta.env.TAURI_ENV_PLATFORM);
+  const nativeApp = Boolean(import.meta.env.TAURI_ENV_PLATFORM);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [waitingWorker, setWaitingWorker] = useState(null);
-  const [standalone, setStandalone] = useState(() => nativeDesktop || window.matchMedia("(display-mode: standalone)").matches);
-  const [offlineReady, setOfflineReady] = useState(() => nativeDesktop || Boolean(navigator.serviceWorker?.controller));
+  const [standalone, setStandalone] = useState(() => nativeApp || window.matchMedia("(display-mode: standalone)").matches);
+  const [offlineReady, setOfflineReady] = useState(() => nativeApp || Boolean(navigator.serviceWorker?.controller));
   const reloadForUpdate = useRef(false);
 
   useEffect(() => {
@@ -1251,7 +1251,7 @@ function useInstallableApp() {
     window.addEventListener("beforeinstallprompt", handleInstallPrompt);
     window.addEventListener("appinstalled", handleInstalled);
 
-    if (!nativeDesktop && import.meta.env.PROD && "serviceWorker" in navigator) {
+    if (!nativeApp && import.meta.env.PROD && "serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).then((registration) => {
         if (registration.waiting) setWaitingWorker(registration.waiting);
@@ -1272,7 +1272,7 @@ function useInstallableApp() {
       window.removeEventListener("appinstalled", handleInstalled);
       navigator.serviceWorker?.removeEventListener("controllerchange", handleControllerChange);
     };
-  }, [nativeDesktop]);
+  }, [nativeApp]);
 
   async function install() {
     if (!installPrompt) return false;
@@ -1290,7 +1290,7 @@ function useInstallableApp() {
 
   return {
     online,
-    nativeDesktop,
+    nativeApp,
     standalone,
     offlineReady,
     canInstall: Boolean(installPrompt) && !standalone,
@@ -4006,7 +4006,7 @@ function Tracker({ onExit, pwa }) {
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 {pwa.offlineReady && (
                   <span className="border border-emerald-900 px-2 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-400">
-                    {pwa.nativeDesktop ? "Desktop embedded" : "Offline ready"}
+                    {pwa.nativeApp ? "Native local" : "Offline ready"}
                   </span>
                 )}
                 {pwa.canInstall && (

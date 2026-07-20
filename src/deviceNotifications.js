@@ -1,11 +1,11 @@
 const inFlightDeliveryIds = new Set();
 
-export function isNativeDesktopRuntime(environment = import.meta.env) {
+export function isNativeRuntime(environment = import.meta.env) {
   return Boolean(environment?.TAURI_ENV_PLATFORM);
 }
 
 export function initialDeviceNotificationPermission({
-  native = isNativeDesktopRuntime(),
+  native = isNativeRuntime(),
   browser = globalThis.window,
 } = {}) {
   if (native) return "checking";
@@ -17,7 +17,7 @@ async function nativeNotifications(adapter) {
 }
 
 export async function readDeviceNotificationPermission({
-  native = isNativeDesktopRuntime(),
+  native = isNativeRuntime(),
   browser = globalThis.window,
   nativeAdapter,
 } = {}) {
@@ -29,7 +29,7 @@ export async function readDeviceNotificationPermission({
 }
 
 export async function requestDeviceNotificationPermission({
-  native = isNativeDesktopRuntime(),
+  native = isNativeRuntime(),
   browser = globalThis.window,
   nativeAdapter,
 } = {}) {
@@ -43,7 +43,7 @@ export async function requestDeviceNotificationPermission({
 }
 
 export async function sendDeviceNotification({ title, body, deliveryId }, {
-  native = isNativeDesktopRuntime(),
+  native = isNativeRuntime(),
   browser = globalThis.window,
   nativeAdapter,
 } = {}) {
