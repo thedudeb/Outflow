@@ -4,8 +4,66 @@ insert into auth.users (id, email) values
   ('11111111-1111-4111-8111-111111111111', 'owner@example.com'),
   ('22222222-2222-4222-8222-222222222222', 'stranger@example.com');
 
+set role anon;
+do $$
+begin
+  perform public.save_account_profile('Anonymous');
+  raise exception 'anonymous profile write unexpectedly succeeded';
+exception
+  when insufficient_privilege then null;
+end;
+$$;
+
+reset role;
 set role authenticated;
 select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+
+select public.save_account_profile('  Avery   Owner  ') as normalized_owner_profile;
+do $$
+begin
+  if (select display_name from public.profiles where id = auth.uid()) <> 'Avery Owner' then
+    raise exception 'account profile display name was not normalized';
+  end if;
+  begin
+    update public.profiles set display_name = 'Bypassed RPC' where id = auth.uid();
+    raise exception 'direct profile update unexpectedly succeeded';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.save_account_profile(repeat('x', 61));
+    raise exception 'oversized profile display name unexpectedly succeeded';
+  exception
+    when invalid_parameter_value then null;
+  end;
+end;
+$$;
+
+select public.save_account_profile(null) as cleared_owner_profile;
+do $$
+begin
+  if (select display_name from public.profiles where id = auth.uid()) is not null then
+    raise exception 'account profile display name was not removable';
+  end if;
+end;
+$$;
+select public.save_account_profile('Avery Owner') as restored_owner_profile;
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', '22222222-2222-4222-8222-222222222222', false);
+select public.save_account_profile('Morgan Member') as stranger_profile;
+
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'profiles'
+  ) then
+    raise exception 'profile changes are missing from the Realtime publication';
+  end if;
+end;
+$$;
 
 select public.migrate_guest_workspace($workspace$
 {
@@ -741,12 +799,12 @@ insert into public.subscriptions (
   trial_end_date, reminder_lead_days, paused, created_by, updated_by, source_created_by, source_updated_by
 ) values
   (
-    'personal-ledger', 'email-due', 'Linear', 10, 'USD', 'monthly', current_date + 45,
-    'Software', array['work'], '#8b5cf6', current_date + 1, array[45, 1], false,
+    'personal-ledger', 'email-due', 'Linear', 10, 'USD', 'monthly', (now() at time zone 'UTC')::date + 45,
+    'Software', array['work'], '#8b5cf6', (now() at time zone 'UTC')::date + 1, array[45, 1], false,
     '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
   ),
   (
-    'personal-ledger', 'email-paused', 'Paused service', 4, 'USD', 'monthly', current_date + 3,
+    'personal-ledger', 'email-paused', 'Paused service', 4, 'USD', 'monthly', (now() at time zone 'UTC')::date + 3,
     'Software', array[]::text[], '#94a3b8', null, array[3], true,
     '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
   );
@@ -758,8 +816,8 @@ begin
       ledger_id, id, name, amount, currency, cycle, next_billing_date, category, tags, color,
       trial_end_date, reminder_lead_days, paused, created_by, updated_by, source_created_by, source_updated_by
     ) values (
-      'personal-ledger', 'invalid-trial-order', 'Early charge', 12, 'USD', 'monthly', current_date + 2,
-      'Software', array[]::text[], '#ef4444', current_date + 3, array[1], false,
+      'personal-ledger', 'invalid-trial-order', 'Early charge', 12, 'USD', 'monthly', (now() at time zone 'UTC')::date + 2,
+      'Software', array[]::text[], '#ef4444', (now() at time zone 'UTC')::date + 3, array[1], false,
       '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', 'Owner', 'Owner'
     );
     raise exception 'subscription accepted a first paid charge before its trial end';

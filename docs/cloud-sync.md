@@ -25,7 +25,7 @@ Signing in does not synchronize or upload the local workspace. A recovered brows
 
 ## Realtime And Editing
 
-Supabase Realtime watches the active ledger, subscriptions, and membership rows. Remote events refresh automatically when no local edit is active. If an edit or write is in progress, Outflow marks the ledger `stale` and requires an explicit refresh so an unfinished form is never silently discarded.
+Supabase Realtime watches the active ledger, subscriptions, membership rows, and readable shared-profile updates. Remote events refresh automatically when no local edit is active; profile changes refresh human-readable attribution without advancing the ledger revision. If an edit or write is in progress, Outflow marks the ledger `stale` and requires an explicit refresh so an unfinished form is never silently discarded.
 
 Channel errors, timeouts, and unexpected closures visibly mark the cloud connection `offline`. When the channel resubscribes, Outflow performs an authoritative snapshot refresh; a reconnect during an active edit follows the same `stale` path instead of replacing the form.
 
@@ -48,6 +48,7 @@ The visible runtime states are:
 
 - Opening a cloud team ledger replaces, rather than combines with, the active local totals while leaving the serialized local workspace unchanged.
 - Shared records display distinct server-resolved creator and updater identities.
+- A normalized self-profile update reaches a second isolated collaborator over Realtime, updates shared attribution, exposes no account email, and leaves both local workspaces byte-for-byte unchanged.
 - A write sends the full snapshot, expected revision, and a fresh operation UUID, then adopts the confirmed authoritative revision.
 - A conflict rejects the optimistic value, loads the server winner, announces the conflict, and blocks another write until refresh.
 - Two isolated browser contexts receive protocol-level Realtime changes, refresh to the same server revision, and keep local workspaces separate.

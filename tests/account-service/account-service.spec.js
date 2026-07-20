@@ -34,6 +34,11 @@ const invitedUser = {
   id: invitedUserId,
   email: "invited@example.com",
 };
+const editorUser = {
+  ...fixtureUser,
+  id: editorUserId,
+  email: "editor@example.com",
+};
 
 function storedSession(user = fixtureUser) {
   return {
@@ -67,6 +72,7 @@ function createCloudState({
     checkoutRequests: [],
     accountExportRequests: 0,
     accountExportOverride: undefined,
+    profileWrites: [],
     deleteRequests: 0,
     deleted: false,
     writes: [],
@@ -413,7 +419,15 @@ async function installCloudFixture(page, {
       }
       return reply(cloudState?.accessGranted ? cloudState.members : []);
     }
-    if (url.pathname.endsWith("/rest/v1/profiles")) return reply(cloudState?.accessGranted ? cloudState.profiles : []);
+    if (url.pathname.endsWith("/rest/v1/profiles")) {
+      const idFilter = url.searchParams.get("id") || "";
+      if (idFilter.startsWith("eq.")) {
+        const targetUserId = idFilter.slice(3);
+        const profile = cloudState?.profiles.find((candidate) => candidate.id === targetUserId);
+        return profile ? reply(profile) : reply([], 200, { "Content-Range": "0-0/0" });
+      }
+      return reply(cloudState?.accessGranted ? cloudState.profiles : []);
+    }
     if (url.pathname.endsWith("/rest/v1/ledger_invitations")) {
       if (entry.method === "DELETE" && cloudState) {
         const invitationId = (url.searchParams.get("id") || "").replace(/^eq\./, "");
@@ -431,6 +445,21 @@ async function installCloudFixture(page, {
       return reply(cloudState.accountExportOverride === undefined
         ? accountExportFromCloudState(cloudState)
         : cloudState.accountExportOverride);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/save_account_profile") && cloudState && verifiedUser) {
+      const normalized = String(entry.body?.requested_display_name || "").trim().replace(/\s+/g, " ");
+      if (normalized.length > 60) return reply({ message: "Display name is invalid." }, 400);
+      const updatedAt = new Date().toISOString();
+      const existing = cloudState.profiles.find((profile) => profile.id === verifiedUser.id);
+      if (existing) {
+        existing.display_name = normalized || null;
+        existing.updated_at = updatedAt;
+      } else {
+        cloudState.profiles.push({ id: verifiedUser.id, display_name: normalized || null, updated_at: updatedAt });
+      }
+      cloudState.profileWrites.push({ userId: verifiedUser.id, displayName: normalized });
+      realtimeState.emitChange({ table: "profiles" });
+      return reply({ displayName: normalized || null, updatedAt });
     }
     if (url.pathname.endsWith("/rest/v1/rpc/can_sync_ledger")) {
       return reply(Boolean(cloudState?.accessGranted && cloudState.canSync));
@@ -615,8 +644,8 @@ function violationSummary(violations) {
     .join("\n\n");
 }
 
-async function openStudioCloud(page) {
-  await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+async function openStudioCloud(page, email = "owner@example.com") {
+  await page.getByRole("button", { name: `Open account controls for ${email}`, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Studio Cloud");
   await dialog.getByRole("button", { name: "Open", exact: true }).click();
@@ -736,6 +765,66 @@ test("cloud ledger stays isolated, synchronizes one revision, and sign-out resto
   await expect(page.getByRole("article").filter({ hasText: "Netflix" })).toHaveCount(1);
   await expect(monthlyOutflow(page)).toContainText("$39.47");
   await expect(page.getByText("Figma Cloud", { exact: true })).toHaveCount(0);
+});
+
+test("account display name stays private and refreshes shared attribution through Realtime", async ({ browser, page }, testInfo) => {
+  const cloudState = createCloudState();
+  const realtimeState = createRealtimeState();
+  const projectUse = testInfo.project.use;
+  const peerOptions = { baseURL: "http://127.0.0.1:4181" };
+  ["viewport", "userAgent", "deviceScaleFactor", "isMobile", "hasTouch"].forEach((key) => {
+    if (projectUse[key] !== undefined) peerOptions[key] = projectUse[key];
+  });
+
+  await installCloudFixture(page, {
+    verifiedUser: fixtureUser,
+    cloudState,
+    realtimeState,
+    realtimeClientId: "profile-owner",
+  });
+  await seedStoredSession(page);
+
+  const peerContext = await browser.newContext(peerOptions);
+  const peerPage = await peerContext.newPage();
+  await installCloudFixture(peerPage, {
+    verifiedUser: editorUser,
+    cloudState,
+    realtimeState,
+    realtimeClientId: "profile-editor",
+  });
+  await seedStoredSession(peerPage, storedSession(editorUser));
+
+  try {
+    await openTracker(page);
+    await openStudioCloud(page);
+    await openTracker(peerPage);
+    await openStudioCloud(peerPage, editorUser.email);
+    await expect.poll(() => realtimeState.joinedCount()).toBe(2);
+
+    const peerCard = peerPage.getByRole("article").filter({ hasText: "Figma Cloud" });
+    await expect(peerCard).toContainText("Added by You / Updated by Avery Owner");
+    await expect(peerPage.getByText(fixtureUser.email, { exact: true })).toHaveCount(0);
+    const ownerWorkspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
+    const editorWorkspace = await peerPage.evaluate(() => localStorage.getItem("outflow:workspace"));
+
+    await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Account / Pro" });
+    const displayName = dialog.getByRole("textbox", { name: "Shared display name", exact: true });
+    await expect(displayName).toHaveValue("Avery Owner");
+    await displayName.fill("  Avery   Ledger  ");
+    await dialog.getByRole("button", { name: "Save profile", exact: true }).click();
+
+    await expect(dialog.getByText("Profile saved. Shared ledgers now identify you as Avery Ledger.", { exact: true })).toBeVisible();
+    await expect(displayName).toHaveValue("Avery Ledger");
+    await expect(peerPage.getByRole("status")).toContainText("Remote changes applied.");
+    await expect(peerCard).toContainText("Added by You / Updated by Avery Ledger");
+    await expect(peerPage.getByText(fixtureUser.email, { exact: true })).toHaveCount(0);
+    expect(cloudState.profileWrites).toEqual([{ userId: fixtureUser.id, displayName: "Avery Ledger" }]);
+    expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(ownerWorkspace);
+    expect(await peerPage.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(editorWorkspace);
+  } finally {
+    await peerContext.close();
+  }
 });
 
 test("isolated browser clients refresh through Realtime and protect an active stale edit", async ({ browser, page }, testInfo) => {
@@ -919,6 +1008,7 @@ test("refunded owner keeps data-control removal while Pro collaboration actions 
   await page.getByRole("button", { name: "Open account controls for owner@example.com", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Account / Pro" });
   await expect(dialog).toContainText("Entitlement Free");
+  await expect(dialog.getByRole("textbox", { name: "Shared display name", exact: true })).toBeEnabled();
   await expect(dialog.getByRole("button", { name: "Download account data", exact: true })).toBeEnabled();
   await dialog.getByRole("button", { name: "Members", exact: true }).click();
   await expect(dialog).toContainText("Pro is required for new invitations and role changes.");

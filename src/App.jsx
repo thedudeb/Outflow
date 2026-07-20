@@ -11,6 +11,7 @@ import {
   hostedCalendarFeedUrl,
   publishHostedCalendarFeed,
   readAccountDataExport,
+  readAccountProfile,
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
   readHostedCalendarFeed,
@@ -24,6 +25,7 @@ import {
   revokeCloudLedgerInvitation,
   revokeHostedCalendarFeed,
   saveHostedCalendarFeedOptions,
+  saveAccountProfile,
   sendCloudLedgerInvitation,
   saveNotificationPreferences,
   subscribeToCloudLedger,
@@ -1504,6 +1506,9 @@ function Tracker({ onExit, pwa }) {
   });
   const [accountEmail, setAccountEmail] = useState("");
   const [accountSession, setAccountSession] = useState(null);
+  const [accountProfile, setAccountProfile] = useState({ displayName: "", updatedAt: "" });
+  const [accountDisplayName, setAccountDisplayName] = useState("");
+  const [accountProfileLoading, setAccountProfileLoading] = useState(false);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
   const [emailPreferences, setEmailPreferences] = useState(() => ({
@@ -1653,6 +1658,33 @@ function Tracker({ onExit, pwa }) {
       authSubscription?.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const userId = accountSession?.user?.id;
+    if (!userId) {
+      setAccountProfile({ displayName: "", updatedAt: "" });
+      setAccountDisplayName("");
+      setAccountProfileLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setAccountProfileLoading(true);
+    readAccountProfile(userId)
+      .then((profile) => {
+        if (!active) return;
+        setAccountProfile(profile);
+        setAccountDisplayName(profile.displayName);
+      })
+      .catch((error) => {
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read the account profile.");
+      })
+      .finally(() => {
+        if (active) setAccountProfileLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountSession?.user?.id]);
 
   useEffect(() => {
     if (!accountSession?.user?.id) {
@@ -2767,6 +2799,7 @@ function Tracker({ onExit, pwa }) {
     setDeleteAccountArmed(false);
     setRemoveMemberArmed("");
     setRevokeInviteArmed("");
+    setAccountDisplayName(accountProfile.displayName);
     setAccountError("");
     setAccountMessage("");
   }
@@ -2866,6 +2899,28 @@ function Tracker({ onExit, pwa }) {
         : "Email reminders disabled. Device alert settings were not changed.");
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Outflow could not save email reminder settings.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function saveAccountIdentity(event) {
+    event.preventDefault();
+    if (!accountSession || accountBusy || accountProfileLoading) return;
+    const displayName = accountDisplayName.trim().replace(/\s+/g, " ");
+    setAccountBusy("profile");
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const saved = await saveAccountProfile(displayName);
+      setAccountProfile(saved);
+      setAccountDisplayName(saved.displayName);
+      setCloudAccessRefresh((current) => current + 1);
+      setAccountMessage(saved.displayName
+        ? `Profile saved. Shared ledgers now identify you as ${saved.displayName}.`
+        : "Display name removed. Shared ledgers will use your member identifier.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not save the account profile.");
     } finally {
       setAccountBusy("");
     }
@@ -4199,7 +4254,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-controls-title"
-            aria-busy={Boolean(accountBusy) || accountLoading || accountEntitlementLoading || emailPreferencesLoading || proOfferLoading || cloudLedgersLoading}
+            aria-busy={Boolean(accountBusy) || accountLoading || accountProfileLoading || accountEntitlementLoading || emailPreferencesLoading || proOfferLoading || cloudLedgersLoading}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-2xl"
           >
@@ -4379,6 +4434,31 @@ function Tracker({ onExit, pwa }) {
                       {accountBusy === "signout" ? "Signing out..." : "Sign out"}
                     </button>
                   </section>
+
+                  <form onSubmit={saveAccountIdentity} className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <Field label="Shared display name">
+                      <input
+                        type="text"
+                        value={accountDisplayName}
+                        maxLength={60}
+                        autoComplete="name"
+                        placeholder="Your name"
+                        disabled={accountProfileLoading}
+                        onChange={(event) => setAccountDisplayName(event.target.value.slice(0, 60))}
+                        className="h-10 min-w-0 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-amber-400 disabled:opacity-40"
+                      />
+                    </Field>
+                    <button
+                      type="submit"
+                      disabled={Boolean(accountBusy) || accountProfileLoading || accountDisplayName.trim().replace(/\s+/g, " ") === accountProfile.displayName}
+                      className="h-10 border border-cyan-800 bg-black px-4 text-xs font-black uppercase tracking-[0.1em] text-cyan-300 hover:border-cyan-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                    >
+                      {accountBusy === "profile" ? "Saving..." : "Save profile"}
+                    </button>
+                    <div className="font-mono text-[9px] uppercase leading-4 text-zinc-700 sm:col-span-2">
+                      Used for member lists and subscription change attribution. Your sign-in email stays private from collaborators. Blank removes the name.
+                    </div>
+                  </form>
 
                   <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div className="min-w-0">

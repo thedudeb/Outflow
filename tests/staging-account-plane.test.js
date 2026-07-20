@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildAccountPlaneReport,
+  openProfileRealtimeProbe,
   openRealtimeProbe,
   probeHostedCalendarLifecycle,
   probeHostedRealtimeReconnect,
@@ -56,6 +57,7 @@ test("account-plane report records bounded evidence without synthetic identities
     "cross-user write isolation",
     "invitation authorization",
     "private invitation acceptance",
+    "shared profile attribution",
     "viewer write denial",
     "editor revision write",
     "two-client Realtime delivery",
@@ -86,7 +88,7 @@ test("account-plane report records bounded evidence without synthetic identities
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /PASS\*\* \(21 authenticated checks\)/);
+  assert.match(report, /PASS\*\* \(22 authenticated checks\)/);
   assert.match(report, /PASS \/ cross-user ledger isolation/);
   assert.match(report, /PASS \/ two-client Realtime delivery/);
   assert.match(report, /PASS \/ authoritative reconnect catch-up/);
@@ -158,6 +160,49 @@ test("Realtime probe waits for the exact authenticated insert and removes its ch
     schema: "public",
     table: "subscriptions",
   });
+  assert.equal(await probe.close(), "ok");
+  assert.equal(removedChannel, channel);
+});
+
+test("profile Realtime probe waits for the exact shared profile update", async () => {
+  const userId = "22222222-2222-4222-8222-222222222222";
+  let changeHandler;
+  let statusHandler;
+  let removedChannel;
+  const channel = {
+    on(type, filter, handler) {
+      assert.equal(type, "postgres_changes");
+      assert.deepEqual(filter, {
+        event: "UPDATE",
+        schema: "public",
+        table: "profiles",
+        filter: `id=eq.${userId}`,
+      });
+      changeHandler = handler;
+      return this;
+    },
+    subscribe(handler) {
+      statusHandler = handler;
+      return this;
+    },
+  };
+  const client = {
+    channel(name) {
+      assert.match(name, /^outflow-profile-acceptance-[0-9a-f-]{36}$/);
+      return channel;
+    },
+    async removeChannel(target) {
+      removedChannel = target;
+      return "ok";
+    },
+  };
+
+  const probe = openProfileRealtimeProbe(client, userId, 1_000);
+  statusHandler("SUBSCRIBED");
+  assert.equal(await probe.subscribed, "SUBSCRIBED");
+  changeHandler({ eventType: "UPDATE", schema: "public", table: "profiles", new: { id: "11111111-1111-4111-8111-111111111111" } });
+  changeHandler({ eventType: "UPDATE", schema: "public", table: "profiles", new: { id: userId, display_name: "private value" } });
+  assert.deepEqual(await probe.delivered, { eventType: "UPDATE", schema: "public", table: "profiles" });
   assert.equal(await probe.close(), "ok");
   assert.equal(removedChannel, channel);
 });
@@ -365,6 +410,8 @@ test("the live harness uses authenticated sessions, fixed assertions, and finall
   assert.match(source, /signInWithPassword/);
   assert.match(source, /migrate_guest_workspace/);
   assert.match(source, /accept_ledger_invitation/);
+  assert.match(source, /save_account_profile/);
+  assert.match(source, /openProfileRealtimeProbe/);
   assert.match(source, /replace_ledger_snapshot/);
   assert.match(source, /postgres_changes/);
   assert.match(source, /event = "INSERT"/);

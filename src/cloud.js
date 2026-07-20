@@ -78,6 +78,37 @@ export async function requestAccountLink(email) {
   if (error) throw error;
 }
 
+export async function readAccountProfile(userId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud
+    .from("profiles")
+    .select("display_name, updated_at")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return {
+    displayName: typeof data?.display_name === "string" ? data.display_name : "",
+    updatedAt: data?.updated_at || "",
+  };
+}
+
+export async function saveAccountProfile(displayName) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("save_account_profile", {
+    requested_display_name: displayName || null,
+  });
+  if (error) throw error;
+  if (!data || (data.displayName !== null && typeof data.displayName !== "string")) {
+    throw new Error("Outflow returned an invalid account profile.");
+  }
+  return {
+    displayName: data.displayName || "",
+    updatedAt: data.updatedAt || "",
+  };
+}
+
 const accountExportForbiddenKeys = new Set([
   "accessToken",
   "access_token",
@@ -444,6 +475,7 @@ export async function subscribeToCloudLedger(ledgerId, onChange, onStatus = () =
     .on("postgres_changes", { event: "*", schema: "public", table: "ledgers", filter: `id=eq.${ledgerId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "subscriptions", filter: `ledger_id=eq.${ledgerId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "ledger_members", filter: `ledger_id=eq.${ledgerId}` }, onChange)
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles" }, onChange)
     .subscribe(onStatus);
   return () => {
     cloud.removeChannel(channel);

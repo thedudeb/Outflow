@@ -13,6 +13,7 @@ const expectedCheckNames = Object.freeze([
   "cross-user write isolation",
   "invitation authorization",
   "private invitation acceptance",
+  "shared profile attribution",
   "viewer write denial",
   "editor revision write",
   "two-client Realtime delivery",
@@ -228,6 +229,41 @@ export function openRealtimeProbe(client, ledgerId, expectedSubscriptionId, time
       filter: `ledger_id=eq.${ledgerId}`,
     }, (payload) => {
       if (payload?.eventType === event && payload?.new?.ledger_id === ledgerId && payload?.new?.id === expectedSubscriptionId) {
+        delivered.resolve({ eventType: payload.eventType, schema: payload.schema, table: payload.table });
+      }
+    })
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") subscribed.resolve(status);
+      if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+        subscribed.reject();
+        delivered.reject();
+      }
+    });
+
+  return {
+    subscribed: subscribed.promise,
+    delivered: delivered.promise,
+    async close() {
+      subscribed.cancel();
+      delivered.cancel();
+      return client.removeChannel(channel);
+    },
+  };
+}
+
+export function openProfileRealtimeProbe(client, userId, timeoutMs = 15_000) {
+  assert(/^[0-9a-f-]{36}$/.test(userId), "profile Realtime probe user");
+  const subscribed = deferredTimeout("Profile Realtime subscription", timeoutMs);
+  const delivered = deferredTimeout("Profile Realtime delivery", timeoutMs);
+  const channel = client
+    .channel(`outflow-profile-acceptance-${randomUUID()}`)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "profiles",
+      filter: `id=eq.${userId}`,
+    }, (payload) => {
+      if (payload?.eventType === "UPDATE" && payload?.new?.id === userId) {
         delivered.resolve({ eventType: payload.eventType, schema: payload.schema, table: payload.table });
       }
     })
@@ -633,6 +669,32 @@ export async function runAccountDataPlaneAcceptance(config, { fetchImpl = fetch 
     const sharedRows = remoteResult(await member.client.from("subscriptions").select("id").eq("ledger_id", fixture.teamId), "shared ledger read");
     assert(sharedRows?.length === 1, "private invitation acceptance");
     completed.push("private invitation acceptance");
+
+    const ownerProfile = remoteResult(await owner.client.rpc("save_account_profile", {
+      requested_display_name: "Outflow acceptance owner",
+    }), "owner profile setup");
+    assert(ownerProfile?.displayName === "Outflow acceptance owner", "shared profile attribution");
+    const profileRealtime = openProfileRealtimeProbe(owner.client, memberUser.id);
+    closeRealtime = profileRealtime.close;
+    assert(await profileRealtime.subscribed === "SUBSCRIBED", "shared profile attribution");
+    const memberProfile = remoteResult(await member.client.rpc("save_account_profile", {
+      requested_display_name: "  Outflow   acceptance   editor  ",
+    }), "member profile setup");
+    assert(memberProfile?.displayName === "Outflow acceptance editor", "shared profile attribution");
+    const profileEvent = await profileRealtime.delivered;
+    assert(profileEvent?.eventType === "UPDATE" && profileEvent?.table === "profiles", "shared profile attribution");
+    assert(await profileRealtime.close() === "ok", "shared profile attribution");
+    closeRealtime = async () => {};
+    const sharedProfiles = remoteResult(await owner.client.from("profiles")
+      .select("id, display_name")
+      .in("id", [ownerUser.id, memberUser.id]), "shared profile read");
+    assert(
+      sharedProfiles?.length === 2
+        && sharedProfiles.some((profile) => profile.id === ownerUser.id && profile.display_name === "Outflow acceptance owner")
+        && sharedProfiles.some((profile) => profile.id === memberUser.id && profile.display_name === "Outflow acceptance editor"),
+      "shared profile attribution",
+    );
+    completed.push("shared profile attribution");
 
     const viewerWrite = await member.client.rpc("replace_ledger_snapshot", {
       target_ledger_id: fixture.teamId,

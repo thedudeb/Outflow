@@ -20,6 +20,9 @@ Outflow uses three fixed shared-ledger roles. Database Row Level Security and tr
 - Creating shared ledgers, sending invitations, and changing collaborator roles require the owner's active lifetime Pro entitlement.
 - Existing members retain read access if Pro is later refunded or revoked. The owner can still remove members so data control is never gated.
 - Shared subscription cards show both the member who originally added the record and the member who last updated it. The configured-service browser contract resolves two distinct member profiles and verifies this attribution in desktop Chromium, mobile Chromium, desktop Firefox, and desktop WebKit.
+- Every account can optionally set or remove a 60-character shared display name without Pro. `save_account_profile` normalizes whitespace and can modify only `auth.uid()`; direct browser table updates are not permitted.
+- Shared-profile RLS exposes display names, opaque member IDs, roles, and join times to current collaborators. Sign-in emails are never part of the member/profile query, and a missing name falls back to a shortened member identifier rather than an email.
+- Profile updates are published through authenticated Realtime. An open shared ledger refreshes member lists and creator/updater labels without advancing the ledger revision or changing browser-local data.
 
 ## Invitation Lifecycle
 
@@ -39,6 +42,7 @@ Owners can view invitation metadata but cannot select token hashes. Browsers can
 - A Pro owner can change an editor/viewer role, send a normalized email invitation, revoke it with confirmation, and remove a member; each mutation is reloaded from authoritative service state.
 - After a Pro refund, invitation and role controls remain locked while member removal stays available so data control is never paywalled.
 - A signed-in recipient can explicitly accept a valid private token, see the newly granted shared-ledger access, and retain the exact serialized local workspace.
+- A member can change an optional display name and a second isolated account receives the new shared attribution over Realtime without receiving the member's email or changing either local workspace.
 - The authenticated member and invitation panel passes the automated WCAG 2.0, 2.1, and 2.2 A/AA ruleset in both viewport profiles.
 
 The database contract independently verifies owner/editor/viewer RLS, owner invariants, entitlement checks, hashed-token acceptance, recipient-email matching, expiry, one-time use, and deletion behavior through `npm run test:account-foundation`.
@@ -47,4 +51,4 @@ The database contract independently verifies owner/editor/viewer RLS, owner inva
 
 ## Current Boundary
 
-The browser can list cloud ledger access, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime and protected provider acceptance are implemented, but no passing external staging run is recorded and the default build remains fully local. A test-address pass proves the deployed invitation path and one-use acceptance; delivery to human mailbox providers remains a release check. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.
+The browser can list cloud ledger access, manage its email-private shared display name, open a cloud ledger, synchronize Pro-authorized changes, manage members, send invitations, revoke pending invitations, and accept private invite links when Supabase and Resend are configured. The runtime and protected provider acceptance are implemented, but no passing external staging run is recorded and the default build remains fully local. A test-address pass proves the deployed invitation path and one-use acceptance; delivery to human mailbox providers remains a release check. See [Cloud Ledger Synchronization](cloud-sync.md) for revision and conflict behavior.
