@@ -72,5 +72,6 @@ jobs:
       - run: npm run test:reminder-incident
       - run: npm run test:account-service
       - run: npm run test:pwa-cache
+      - run: npm run test:pages-deployment
       - run: npm run test:pwa
       - run: npm run test:e2e

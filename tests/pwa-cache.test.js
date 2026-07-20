@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cacheVersion } from "../vite.config.js";
+import { cacheVersion, normalizePublicBase } from "../vite.config.js";
+
+test("public bases are canonical path-only scopes", () => {
+  assert.equal(normalizePublicBase(), "/");
+  assert.equal(normalizePublicBase("/Outflow"), "/Outflow/");
+  assert.equal(normalizePublicBase("//Outflow//preview/"), "/Outflow/preview/");
+  assert.throws(() => normalizePublicBase("https://outflow.example/"), /absolute path/);
+  assert.throws(() => normalizePublicBase("/Outflow/?draft=true"), /without a query or fragment/);
+});
 
 test("cache fingerprints are deterministic regardless of asset order", () => {
   const entries = [

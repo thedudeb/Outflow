@@ -1244,7 +1244,7 @@ function useInstallableApp() {
 
     if (import.meta.env.PROD && "serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
-      navigator.serviceWorker.register("/sw.js").then((registration) => {
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).then((registration) => {
         if (registration.waiting) setWaitingWorker(registration.waiting);
         navigator.serviceWorker.ready.then(() => setOfflineReady(Boolean(navigator.serviceWorker.controller)));
         registration.addEventListener("updatefound", () => {

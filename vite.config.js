@@ -17,9 +17,18 @@ export function cacheVersion(entries) {
   return hash.digest("hex").slice(0, 12);
 }
 
+export function normalizePublicBase(value = "/") {
+  const candidate = String(value || "/").trim();
+  if (!candidate.startsWith("/") || candidate.includes("?") || candidate.includes("#")) {
+    throw new Error("OUTFLOW_PUBLIC_BASE must be an absolute path without a query or fragment.");
+  }
+  return `${candidate.replace(/\/{2,}/g, "/").replace(/\/$/, "")}/`;
+}
+
 function outflowServiceWorker() {
   let projectRoot = "";
   let publicDir = "";
+  let publicBase = "/";
 
   return {
     name: "outflow-service-worker",
@@ -27,30 +36,36 @@ function outflowServiceWorker() {
     configResolved(config) {
       projectRoot = config.root;
       publicDir = config.publicDir;
+      publicBase = normalizePublicBase(config.base);
     },
     generateBundle(_options, bundle) {
+      const publicAssetNames = [
+        "manifest.webmanifest",
+        "outflow-icon.svg",
+        "outflow-icon-192.png",
+        "outflow-icon-512.png",
+        "apple-touch-icon.png",
+        "og.png",
+      ];
+      const indexPath = `${publicBase}index.html`;
       const publicAssets = [
-        "/",
-        "/index.html",
-        "/manifest.webmanifest",
-        "/outflow-icon.svg",
-        "/outflow-icon-192.png",
-        "/outflow-icon-512.png",
-        "/apple-touch-icon.png",
-        "/og.png",
+        publicBase,
+        indexPath,
+        ...publicAssetNames.map((name) => `${publicBase}${name}`),
       ];
       const generatedEntries = Object.values(bundle)
         .map((entry) => ({
-          path: `/${entry.fileName}`,
+          path: `${publicBase}${entry.fileName}`,
           content: entry.type === "asset" ? entry.source : entry.code,
         }));
       const contentByPath = new Map(generatedEntries.map((entry) => [entry.path, entry.content]));
       const indexContent = readFileSync(resolve(projectRoot, "index.html"));
-      contentByPath.set("/index.html", indexContent);
+      contentByPath.set(indexPath, indexContent);
+      contentByPath.set(publicBase, indexContent);
 
-      publicAssets.forEach((path) => {
-        if (contentByPath.has(path)) return;
-        contentByPath.set(path, path === "/" ? indexContent : readFileSync(resolve(publicDir, path.slice(1))));
+      publicAssetNames.forEach((name) => {
+        const path = `${publicBase}${name}`;
+        if (!contentByPath.has(path)) contentByPath.set(path, readFileSync(resolve(publicDir, name)));
       });
 
       const generatedAssets = generatedEntries.map((entry) => entry.path);
@@ -58,6 +73,7 @@ function outflowServiceWorker() {
       const cacheName = `outflow-${cacheVersion([...contentByPath].map(([path, content]) => ({ path, content })))}`;
       const source = `const CACHE_NAME = ${JSON.stringify(cacheName)};
 const PRECACHE = ${JSON.stringify(precache)};
+const INDEX_URL = ${JSON.stringify(indexPath)};
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE)));
@@ -85,10 +101,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", response.clone()));
+          if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(INDEX_URL, response.clone()));
           return response;
         })
-        .catch(() => caches.match("/index.html")),
+        .catch(() => caches.match(INDEX_URL)),
     );
     return;
   }
@@ -109,6 +125,9 @@ self.addEventListener("fetch", (event) => {
   };
 }
 
+const publicBase = normalizePublicBase(process.env.OUTFLOW_PUBLIC_BASE);
+
 export default defineConfig({
+  base: publicBase,
   plugins: [react(), outflowServiceWorker()],
 });
