@@ -110,6 +110,7 @@ const NOTIFIED_ALERTS_KEY = "outflow:notified-alerts";
 const ALERT_SETTINGS_KEY = "outflow:alert-settings";
 const LEDGER_META_KEY = "outflow:ledger-meta";
 const WORKSPACE_KEY = "outflow:workspace";
+const CUSTOM_PACKS_KEY = "outflow:custom-packs";
 const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
@@ -200,6 +201,8 @@ const csvImportFields = [
   { key: "color", label: "Color", aliases: ["color", "colour", "tagcolor"] },
 ];
 const MAX_SUBSCRIPTIONS = 500;
+const MAX_CUSTOM_PACKS = 20;
+const MAX_CUSTOM_PACK_ITEMS = 50;
 const MAX_DATE_ADVANCES = 50000;
 const MAX_TAGS = 10;
 const MAX_CSV_BYTES = 2 * 1024 * 1024;
@@ -493,6 +496,133 @@ function sanitizeSubscriptions(value) {
   return value.slice(0, MAX_SUBSCRIPTIONS).map(sanitizeSubscription).filter(Boolean);
 }
 
+function sanitizeCustomPackItem(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const name = typeof value.name === "string" ? value.name.trim().slice(0, 100) : "";
+  const amount = Number(value.amount);
+  const category = typeof value.category === "string" ? value.category.trim().slice(0, 60) : "Unsorted";
+  const rawTags = Array.isArray(value.tags)
+    ? value.tags
+    : typeof value.tags === "string"
+      ? value.tags.split(",")
+      : [];
+  const tags = [...new Set(
+    rawTags
+      .filter((tag) => typeof tag === "string")
+      .map((tag) => tag.trim().toLowerCase().slice(0, 24))
+      .filter(Boolean),
+  )].slice(0, MAX_TAGS);
+  if (
+    !name
+    || !Number.isFinite(amount)
+    || amount <= 0
+    || amount > 1000000000
+    || !validCurrencies.has(value.currency)
+    || !validCycles.has(value.cycle)
+  ) return null;
+  return {
+    id: typeof value.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(value.id) ? value.id : crypto.randomUUID(),
+    catalogId: typeof value.catalogId === "string" && subscriptionCatalog.some((service) => service.id === value.catalogId) ? value.catalogId : "",
+    name,
+    amount,
+    currency: value.currency,
+    cycle: value.cycle,
+    category: category || "Unsorted",
+    tags,
+    color: validColors.has(value.color) ? value.color : colorTags[0].value,
+  };
+}
+
+function sanitizeCustomPack(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const name = typeof value.name === "string" ? value.name.trim().slice(0, 60) : "";
+  if (!name || !Array.isArray(value.items) || value.items.length < 1 || value.items.length > MAX_CUSTOM_PACK_ITEMS) return null;
+  const items = value.items.map(sanitizeCustomPackItem);
+  if (items.some((item) => !item) || new Set(items.map((item) => item.id)).size !== items.length) return null;
+  const now = new Date().toISOString();
+  return {
+    id: typeof value.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(value.id) ? value.id : crypto.randomUUID(),
+    name,
+    items,
+    createdAt: isValidTimestamp(value.createdAt) ? value.createdAt : now,
+    updatedAt: isValidTimestamp(value.updatedAt) ? value.updatedAt : now,
+  };
+}
+
+function sanitizeCustomPacks(value, { strict = false } = {}) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    if (strict) throw new TypeError("Backup custom packs must be an array.");
+    return [];
+  }
+  if (value.length > MAX_CUSTOM_PACKS) {
+    if (strict) throw new TypeError(`Backups may contain at most ${MAX_CUSTOM_PACKS} custom packs.`);
+  }
+  const source = value.slice(0, MAX_CUSTOM_PACKS);
+  if (strict) {
+    if (source.some((pack) => !pack || typeof pack.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(pack.id))) {
+      throw new TypeError("Every backup custom pack must have an identifier.");
+    }
+    if (new Set(source.map((pack) => pack.id)).size !== source.length) {
+      throw new TypeError("Backup custom pack identifiers must be unique.");
+    }
+    if (source.some((pack) => !Array.isArray(pack.items) || pack.items.some((item) => (
+      !item || typeof item.id !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(item.id)
+    )))) {
+      throw new TypeError("Every backup custom pack item must have an identifier.");
+    }
+  }
+  const packs = source.map(sanitizeCustomPack);
+  if (strict && packs.some((pack) => !pack)) throw new TypeError("One or more backup custom packs are invalid.");
+  const uniqueIds = new Set();
+  return packs.filter((pack) => {
+    if (!pack || uniqueIds.has(pack.id)) return false;
+    uniqueIds.add(pack.id);
+    return true;
+  });
+}
+
+function loadCustomPacks() {
+  try {
+    return sanitizeCustomPacks(JSON.parse(localStorage.getItem(CUSTOM_PACKS_KEY) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function customPackItemFromSubscription(subscription) {
+  const catalogService = subscriptionCatalog.find((service) => service.name.toLocaleLowerCase() === subscription.name.trim().toLocaleLowerCase());
+  return sanitizeCustomPackItem({
+    id: crypto.randomUUID(),
+    catalogId: catalogService?.id || "",
+    name: subscription.name,
+    amount: subscription.amount,
+    currency: subscription.currency,
+    cycle: subscription.cycle,
+    category: subscription.category,
+    tags: subscription.tags,
+    color: subscription.color,
+  });
+}
+
+function customPackItemService(item) {
+  const catalogService = subscriptionCatalog.find((service) => service.id === item.catalogId);
+  return { ...catalogService, ...item, id: item.id };
+}
+
+function customPackDuplicateKey(pack) {
+  return `${pack.name.toLocaleLowerCase()}::${pack.items.map((item) => [
+    item.catalogId,
+    item.name.toLocaleLowerCase(),
+    item.amount,
+    item.currency,
+    item.cycle,
+    item.category.toLocaleLowerCase(),
+    [...item.tags].sort().join(","),
+    item.color,
+  ].join("|")).sort().join("::")}`;
+}
+
 function sanitizeWorkspace(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Workspace root must be an object.");
   if (value.schemaVersion !== WORKSPACE_SCHEMA_VERSION) throw new TypeError("Workspace version is not supported.");
@@ -618,7 +748,7 @@ function loadWorkspace() {
   };
 }
 
-function createLedgerBackup(ledger, subscriptions, alertSettings) {
+function createLedgerBackup(ledger, subscriptions, alertSettings, customPacks) {
   return {
     product: "Outflow",
     schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -629,6 +759,7 @@ function createLedgerBackup(ledger, subscriptions, alertSettings) {
       includePausedSchedules: alertSettings.includePausedSchedules === true,
     },
     subscriptions,
+    customPacks: sanitizeCustomPacks(customPacks),
   };
 }
 
@@ -654,6 +785,8 @@ function parseLedgerBackup(value, permission = "default") {
 
   const subscriptions = value.subscriptions.map(sanitizeSubscription);
   if (subscriptions.some((subscription) => !subscription)) throw new TypeError("One or more backup subscriptions are invalid.");
+  const includesCustomPacks = Object.prototype.hasOwnProperty.call(value, "customPacks");
+  const customPacks = sanitizeCustomPacks(value.customPacks, { strict: true });
   if (value.subscriptions.some((subscription) => (
     isValidDate(subscription?.nextBillingDate)
       && isValidDate(subscription?.trialEndDate)
@@ -667,6 +800,8 @@ function parseLedgerBackup(value, permission = "default") {
     ledger: sanitizeLedgerMeta(value.ledger),
     alertSettings: sanitizeAlertSettings(value.alertSettings, permission),
     subscriptions,
+    customPacks,
+    includesCustomPacks,
   };
 }
 
@@ -1169,11 +1304,16 @@ function subscriptionCatalogMatches(value) {
 
 function buildStarterPackDraft(pack, subscriptions) {
   const trackedNames = new Set(subscriptions.map((subscription) => subscription.name.trim().toLocaleLowerCase()));
-  return pack.serviceIds.map((serviceId) => {
-    const service = subscriptionCatalog.find((entry) => entry.id === serviceId);
+  const services = Array.isArray(pack?.serviceIds)
+    ? pack.serviceIds.map((serviceId) => subscriptionCatalog.find((entry) => entry.id === serviceId)).filter(Boolean)
+    : Array.isArray(pack?.items)
+      ? pack.items.map(customPackItemService)
+      : [];
+  return services.map((service) => {
     const tracked = trackedNames.has(service.name.toLocaleLowerCase());
     return {
-      serviceId,
+      itemId: service.id,
+      service,
       selected: !tracked,
       tracked,
       amount: String(service.amount),
@@ -2239,6 +2379,7 @@ function LandingPage({ onOpen, pwa }) {
 
 function Tracker({ onExit, pwa }) {
   const [workspace, setWorkspace] = useState(loadWorkspace);
+  const [customPacks, setCustomPacks] = useState(loadCustomPacks);
   const [cloudLedgerSession, setCloudLedgerSession] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState("off");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
@@ -2368,6 +2509,11 @@ function Tracker({ onExit, pwa }) {
   const [starterPackId, setStarterPackId] = useState(starterPacks[0].id);
   const [starterPackDraft, setStarterPackDraft] = useState([]);
   const [starterPackError, setStarterPackError] = useState("");
+  const [customPackEditorMode, setCustomPackEditorMode] = useState("");
+  const [customPackName, setCustomPackName] = useState("");
+  const [customPackItemDraft, setCustomPackItemDraft] = useState([]);
+  const [customPackEditorError, setCustomPackEditorError] = useState("");
+  const [deleteCustomPackId, setDeleteCustomPackId] = useState("");
   const [forecastHorizon, setForecastHorizon] = useState(30);
   const [mobileView, setMobileView] = useState(() => {
     const storedView = sessionStorage.getItem(TRACKER_VIEW_KEY);
@@ -2416,7 +2562,10 @@ function Tracker({ onExit, pwa }) {
     [form.name],
   );
   const catalogVisible = catalogOpen && catalogSuggestions.length > 0;
-  const selectedStarterPack = starterPacks.find((pack) => pack.id === starterPackId) || starterPacks[0];
+  const selectedStarterPack = starterPacks.find((pack) => pack.id === starterPackId)
+    || customPacks.find((pack) => pack.id === starterPackId)
+    || null;
+  const starterPackIsMine = starterPackId === "mine" || customPacks.some((pack) => pack.id === starterPackId);
   const selectedStarterPackRows = starterPackDraft.filter((row) => row.selected && !row.tracked);
   const starterPackHasInvalidRows = selectedStarterPackRows.some((row) => (
     !isValidDate(row.nextBillingDate)
@@ -2425,6 +2574,8 @@ function Tracker({ onExit, pwa }) {
     || Number(row.amount) > 1000000000
   ));
   const starterPackExceedsCapacity = selectedStarterPackRows.length > Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
+  const starterPackHasRestrictedCurrency = selectedStarterPackRows.some((row) => !canUseCurrency(row.service.currency, accountEntitlement));
+  const selectedCustomPackItems = customPackItemDraft.filter((row) => row.selected);
   const accountDialogRef = useDialogLifecycle(accountOpen, closeAccountControls, Boolean(accountBusy));
   const calendarDialogRef = useDialogLifecycle(calendarExportOpen, closeCalendarExport, Boolean(calendarFeedBusy));
   const ledgerDialogRef = useDialogLifecycle(ledgerOpen, closeLedgerControls);
@@ -2435,6 +2586,10 @@ function Tracker({ onExit, pwa }) {
   useEffect(() => {
     localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
   }, [workspace]);
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOM_PACKS_KEY, JSON.stringify(customPacks));
+  }, [customPacks]);
 
   useEffect(() => {
     localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
@@ -2993,13 +3148,23 @@ function Tracker({ onExit, pwa }) {
       (subscription) => !existingIds.has(subscription.id) && !existingKeys.has(importDuplicateKey(subscription)),
     );
   }, [backupSession, subscriptions]);
+  const backupPackMergeCandidates = useMemo(() => {
+    if (!backupSession) return [];
+    const existingIds = new Set(customPacks.map((pack) => pack.id));
+    const existingKeys = new Set(customPacks.map(customPackDuplicateKey));
+    return backupSession.customPacks.filter(
+      (pack) => !existingIds.has(pack.id) && !existingKeys.has(customPackDuplicateKey(pack)),
+    );
+  }, [backupSession, customPacks]);
   const importableCandidates = csvCandidates.filter((candidate) => candidate.subscription && !candidate.duplicate);
   const invalidImportCount = csvCandidates.filter((candidate) => candidate.errors.length > 0).length;
   const duplicateImportCount = csvCandidates.filter((candidate) => candidate.duplicate).length;
   const configuredAlertCount = subscriptions.filter((subscription) => subscription.reminderLeadDays.length > 0).length;
   const backupDuplicateCount = backupSession ? backupSession.subscriptions.length - backupMergeCandidates.length : 0;
+  const backupPackDuplicateCount = backupSession ? backupSession.customPacks.length - backupPackMergeCandidates.length : 0;
   const availableImportSlots = Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
   const backupMergeCount = Math.min(backupMergeCandidates.length, availableImportSlots);
+  const backupPackMergeCount = Math.min(backupPackMergeCandidates.length, Math.max(MAX_CUSTOM_PACKS - customPacks.length, 0));
   const backupCapacityOmittedCount = backupMergeCandidates.length - backupMergeCount;
   const importConfirmCount = Math.min(importableCandidates.length, availableImportSlots);
   const workspaceRecordCount = workspace.ledgers.reduce((total, entry) => total + entry.subscriptions.length, 0);
@@ -3174,29 +3339,137 @@ function Tracker({ onExit, pwa }) {
   }
 
   function chooseStarterPack(packId) {
-    const pack = starterPacks.find((entry) => entry.id === packId) || starterPacks[0];
+    const pack = starterPacks.find((entry) => entry.id === packId) || customPacks.find((entry) => entry.id === packId);
+    if (!pack) {
+      setStarterPackId("mine");
+      setStarterPackDraft([]);
+      setStarterPackError("");
+      return;
+    }
     setStarterPackId(pack.id);
     setStarterPackDraft(buildStarterPackDraft(pack, subscriptions));
     setStarterPackError("");
+    setCustomPackEditorMode("");
+    setDeleteCustomPackId("");
+  }
+
+  function showCustomPacks() {
+    chooseStarterPack(customPacks[0]?.id || "mine");
   }
 
   function openStarterPacks() {
     if (cloudLedgerWriteDisabled) return;
     setCatalogOpen(false);
-    chooseStarterPack(starterPackId);
+    const selectedPackExists = starterPacks.some((pack) => pack.id === starterPackId) || customPacks.some((pack) => pack.id === starterPackId);
+    chooseStarterPack(selectedPackExists ? starterPackId : starterPacks[0].id);
     setStarterPackOpen(true);
   }
 
   function closeStarterPacks() {
     setStarterPackOpen(false);
     setStarterPackError("");
+    setCustomPackEditorMode("");
+    setCustomPackEditorError("");
+    setDeleteCustomPackId("");
   }
 
-  function updateStarterPackRow(serviceId, field, value) {
+  function updateStarterPackRow(itemId, field, value) {
     setStarterPackDraft((current) => current.map((row) => (
-      row.serviceId === serviceId ? { ...row, [field]: value } : row
+      row.itemId === itemId ? { ...row, [field]: value } : row
     )));
     setStarterPackError("");
+  }
+
+  function openCustomPackEditor(mode, pack = null) {
+    if (mode === "create") {
+      const items = subscriptions.slice(0, MAX_CUSTOM_PACK_ITEMS).map(customPackItemFromSubscription).filter(Boolean);
+      setCustomPackName(ledgerMeta.kind === "personal" ? "My stack" : `${ledgerMeta.name} stack`);
+      setCustomPackItemDraft(items.map((item) => ({ itemId: item.id, service: customPackItemService(item), selected: true })));
+    } else if (pack) {
+      setCustomPackName(pack.name);
+      setCustomPackItemDraft(pack.items.map((item) => ({ itemId: item.id, service: customPackItemService(item), selected: true })));
+    }
+    setCustomPackEditorMode(mode);
+    setCustomPackEditorError("");
+    setDeleteCustomPackId("");
+  }
+
+  function updateCustomPackEditorItem(itemId, selected) {
+    setCustomPackItemDraft((current) => current.map((row) => row.itemId === itemId ? { ...row, selected } : row));
+    setCustomPackEditorError("");
+  }
+
+  function saveCustomPack(event) {
+    event.preventDefault();
+    const name = customPackName.trim();
+    const editingPack = customPackEditorMode === "edit" ? selectedStarterPack : null;
+    if (!name) {
+      setCustomPackEditorError("Enter a pack name.");
+      return;
+    }
+    if (!selectedCustomPackItems.length) {
+      setCustomPackEditorError("Select at least one subscription.");
+      return;
+    }
+    if (!editingPack && customPacks.length >= MAX_CUSTOM_PACKS) {
+      setCustomPackEditorError(`You can save up to ${MAX_CUSTOM_PACKS} custom packs.`);
+      return;
+    }
+    if (customPacks.some((pack) => pack.id !== editingPack?.id && pack.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      setCustomPackEditorError("A custom pack already uses that name.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const pack = sanitizeCustomPack({
+      id: editingPack?.id || crypto.randomUUID(),
+      name,
+      items: selectedCustomPackItems.map((row) => ({ ...row.service, id: row.itemId })),
+      createdAt: editingPack?.createdAt || now,
+      updatedAt: now,
+    });
+    if (!pack) {
+      setCustomPackEditorError("Outflow could not save this pack.");
+      return;
+    }
+    setCustomPacks((current) => editingPack
+      ? current.map((entry) => entry.id === pack.id ? pack : entry)
+      : [...current, pack].slice(0, MAX_CUSTOM_PACKS));
+    setStarterPackId(pack.id);
+    setStarterPackDraft(buildStarterPackDraft(pack, subscriptions));
+    setCustomPackEditorMode("");
+    setCustomPackEditorError("");
+  }
+
+  function duplicateCustomPack(pack) {
+    if (!pack || customPacks.length >= MAX_CUSTOM_PACKS) return;
+    const existingNames = new Set(customPacks.map((entry) => entry.name.toLocaleLowerCase()));
+    const baseName = `${pack.name} copy`.slice(0, 60);
+    let name = baseName;
+    let suffix = 2;
+    while (existingNames.has(name.toLocaleLowerCase())) {
+      const suffixLabel = ` ${suffix}`;
+      name = `${baseName.slice(0, 60 - suffixLabel.length)}${suffixLabel}`;
+      suffix += 1;
+    }
+    const now = new Date().toISOString();
+    const duplicate = sanitizeCustomPack({ ...pack, id: crypto.randomUUID(), name, createdAt: now, updatedAt: now });
+    if (!duplicate) return;
+    setCustomPacks((current) => [...current, duplicate].slice(0, MAX_CUSTOM_PACKS));
+    setStarterPackId(duplicate.id);
+    setStarterPackDraft(buildStarterPackDraft(duplicate, subscriptions));
+    setDeleteCustomPackId("");
+  }
+
+  function deleteCustomPack(pack) {
+    if (!pack) return;
+    if (deleteCustomPackId !== pack.id) {
+      setDeleteCustomPackId(pack.id);
+      return;
+    }
+    const remaining = customPacks.filter((entry) => entry.id !== pack.id);
+    setCustomPacks(remaining);
+    setDeleteCustomPackId("");
+    chooseStarterPack(remaining[0]?.id || "mine");
   }
 
   function addStarterPackSubscriptions(event) {
@@ -3214,23 +3487,26 @@ function Tracker({ onExit, pwa }) {
       setStarterPackError(`This list has room for ${Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0)} more subscriptions.`);
       return;
     }
+    if (starterPackHasRestrictedCurrency) {
+      setStarterPackError("This pack contains currencies that require Lifetime Pro.");
+      return;
+    }
 
     const existingNames = new Set(subscriptions.map((subscription) => subscription.name.trim().toLocaleLowerCase()));
     const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
     const timestamp = new Date().toISOString();
     const additions = selectedStarterPackRows
-      .map((row) => ({ row, service: subscriptionCatalog.find((service) => service.id === row.serviceId) }))
-      .filter(({ service }) => service && !existingNames.has(service.name.toLocaleLowerCase()))
-      .map(({ row, service }) => sanitizeSubscription({
+      .filter((row) => !existingNames.has(row.service.name.toLocaleLowerCase()))
+      .map((row) => sanitizeSubscription({
         id: crypto.randomUUID(),
-        name: service.name,
+        name: row.service.name,
         amount: Number(row.amount),
-        currency: service.currency,
-        cycle: service.cycle,
+        currency: row.service.currency,
+        cycle: row.service.cycle,
         nextBillingDate: row.nextBillingDate,
-        category: service.category,
-        tags: service.tags,
-        color: service.color,
+        category: row.service.category,
+        tags: row.service.tags,
+        color: row.service.color,
         trialEndDate: "",
         reminderLeadDays: [7],
         paused: false,
@@ -4457,7 +4733,7 @@ function Tracker({ onExit, pwa }) {
   }
 
   function exportLedgerBackup() {
-    const backup = createLedgerBackup(ledgerMeta, subscriptions, alertSettings);
+    const backup = createLedgerBackup(ledgerMeta, subscriptions, alertSettings, customPacks);
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -4498,11 +4774,14 @@ function Tracker({ onExit, pwa }) {
   }
 
   function mergeLedgerBackup() {
-    if (!backupMergeCount || cloudLedgerWriteDisabled) return;
+    if ((!backupMergeCount && !backupPackMergeCount) || cloudLedgerWriteDisabled) return;
     const additions = backupMergeCandidates
       .slice(0, availableImportSlots)
       .map((subscription) => normalizeBillingDate(subscription));
-    setSubscriptions((current) => [...current, ...additions].slice(0, MAX_SUBSCRIPTIONS));
+    if (additions.length) setSubscriptions((current) => [...current, ...additions].slice(0, MAX_SUBSCRIPTIONS));
+    if (backupPackMergeCount) {
+      setCustomPacks((current) => [...current, ...backupPackMergeCandidates.slice(0, backupPackMergeCount)].slice(0, MAX_CUSTOM_PACKS));
+    }
     recordGuestAccountActivity();
     closeLedgerControls();
   }
@@ -4510,6 +4789,7 @@ function Tracker({ onExit, pwa }) {
   function replaceLedgerFromBackup() {
     if (!backupSession || usingCloudLedger) return;
     setSubscriptions(backupSession.subscriptions.map((subscription) => normalizeBillingDate(subscription)));
+    if (backupSession.includesCustomPacks) setCustomPacks(backupSession.customPacks);
     setAlertSettings(backupSession.alertSettings);
     setLedgerMeta((current) => ({
       ...current,
@@ -5738,118 +6018,226 @@ function Tracker({ onExit, pwa }) {
               </button>
             </header>
 
-            <div className="grid grid-cols-2 border-b border-zinc-800 sm:grid-cols-5" aria-label="Available starter packs">
-              {starterPacks.map((pack, index) => (
-                <button
-                  key={pack.id}
-                  type="button"
-                  aria-label={pack.name}
-                  aria-pressed={starterPackId === pack.id}
-                  onClick={() => chooseStarterPack(pack.id)}
-                  className={`min-h-14 border-zinc-800 px-3 py-2 text-left font-mono ${
-                    index % 2 === 0 && index < starterPacks.length - 1 ? "border-r" : ""
-                  } ${index < 4 ? "border-b" : ""} ${index < starterPacks.length - 1 ? "sm:border-r sm:border-b-0" : "sm:border-r-0 sm:border-b-0"} ${
-                    starterPackId === pack.id ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:bg-zinc-950 hover:text-zinc-100"
-                  }`}
-                >
-                  <span className="block text-[9px] font-black">{pack.code}</span>
-                  <span className="mt-1 block text-[11px] font-black uppercase">{pack.name}</span>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 border-b border-zinc-800 sm:grid-cols-6" aria-label="Available starter packs">
+              {[...starterPacks, { id: "mine", code: "USR", name: "Mine" }].map((pack, index) => {
+                const active = pack.id === "mine" ? starterPackIsMine : starterPackId === pack.id;
+                return (
+                  <button
+                    key={pack.id}
+                    type="button"
+                    aria-label={pack.name}
+                    aria-pressed={active}
+                    onClick={() => pack.id === "mine" ? showCustomPacks() : chooseStarterPack(pack.id)}
+                    className={`min-h-14 border-zinc-800 px-3 py-2 text-left font-mono ${
+                      index % 2 === 0 ? "border-r" : ""
+                    } ${index < 4 ? "border-b" : ""} ${index < 5 ? "sm:border-r sm:border-b-0" : "sm:border-r-0 sm:border-b-0"} ${
+                      active ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:bg-zinc-950 hover:text-zinc-100"
+                    }`}
+                  >
+                    <span className="block text-[9px] font-black">{pack.code}</span>
+                    <span className="mt-1 block text-[11px] font-black uppercase">{pack.name}</span>
+                  </button>
+                );
+              })}
             </div>
 
-            <form onSubmit={addStarterPackSubscriptions} className="flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-auto">
-                <div className="border-b border-zinc-800 px-4 py-3">
-                  <div className="text-sm font-black uppercase tracking-[0.08em] text-zinc-100">{selectedStarterPack.name} pack</div>
-                  <div className="mt-1 font-mono text-[10px] uppercase leading-4 text-zinc-600">{selectedStarterPack.description}</div>
+            {customPackEditorMode ? (
+              <form onSubmit={saveCustomPack} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <div className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                      Pack name
+                      <input
+                        value={customPackName}
+                        onChange={(event) => {
+                          setCustomPackName(event.target.value.slice(0, 60));
+                          setCustomPackEditorError("");
+                        }}
+                        maxLength={60}
+                        required
+                        className="h-10 border border-zinc-700 bg-black px-3 text-sm normal-case tracking-normal text-zinc-100 outline-none focus:border-amber-400"
+                      />
+                    </label>
+                    <div className="font-mono text-[10px] uppercase text-zinc-500">
+                      {selectedCustomPackItems.length} selected / {MAX_CUSTOM_PACK_ITEMS} max
+                    </div>
+                  </div>
+                  <div className="divide-y divide-zinc-800">
+                    {customPackItemDraft.map((row) => (
+                      <label key={row.itemId} className={`grid min-h-16 cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 ${row.selected ? "bg-zinc-950/50" : "bg-black"}`}>
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={(event) => updateCustomPackEditorItem(row.itemId, event.target.checked)}
+                          aria-label={`Save ${row.service.name} in pack`}
+                          className="h-6 w-6 accent-amber-400"
+                        />
+                        <SubscriptionMark service={row.service} name={row.service.name} />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-black text-zinc-100">{row.service.name}</span>
+                          <span className="mt-0.5 block truncate font-mono text-[9px] uppercase text-zinc-500">{row.service.category} / {row.service.cycle}</span>
+                        </span>
+                        <span className="font-mono text-xs font-black text-amber-300">{money(row.service.amount, row.service.currency)}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
+                {customPackEditorError && (
+                  <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/30 px-4 py-2 text-xs text-red-200">
+                    {customPackEditorError}
+                  </LiveMessage>
+                )}
+                <footer className="grid grid-cols-2 gap-2 border-t border-zinc-800 p-4">
+                  <button
+                    type="button"
+                    onClick={() => setCustomPackEditorMode("")}
+                    className="h-10 border border-zinc-700 bg-black px-3 text-xs font-black uppercase text-zinc-300 hover:border-zinc-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!customPackName.trim() || !selectedCustomPackItems.length}
+                    className="h-10 border border-amber-400 bg-amber-400 px-3 text-xs font-black uppercase text-black hover:bg-amber-300 disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                  >
+                    {customPackEditorMode === "edit" ? "Save changes" : "Save pack"}
+                  </button>
+                </footer>
+              </form>
+            ) : selectedStarterPack ? (
+              <form onSubmit={addStarterPackSubscriptions} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 overflow-auto">
+                  {starterPackIsMine && (
+                    <div className="grid gap-2 border-b border-zinc-800 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] sm:items-end">
+                      <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-500">
+                        Saved pack
+                        <select
+                          value={selectedStarterPack.id}
+                          onChange={(event) => chooseStarterPack(event.target.value)}
+                          aria-label="Saved custom pack"
+                          className="h-9 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
+                        >
+                          {customPacks.map((pack) => <option key={pack.id} value={pack.id}>{pack.name}</option>)}
+                        </select>
+                      </label>
+                      <button type="button" onClick={() => openCustomPackEditor("create")} className="h-9 border border-amber-800 px-2 font-mono text-[9px] font-black uppercase text-amber-300 hover:border-amber-400">Save current</button>
+                      <button type="button" onClick={() => openCustomPackEditor("edit", selectedStarterPack)} className="h-9 border border-zinc-700 px-2 font-mono text-[9px] font-black uppercase text-zinc-300 hover:border-zinc-400">Edit</button>
+                      <button type="button" onClick={() => duplicateCustomPack(selectedStarterPack)} disabled={customPacks.length >= MAX_CUSTOM_PACKS} className="h-9 border border-zinc-700 px-2 font-mono text-[9px] font-black uppercase text-zinc-300 hover:border-zinc-400 disabled:text-zinc-700">Duplicate</button>
+                      <button type="button" onClick={() => deleteCustomPack(selectedStarterPack)} className={`h-9 border px-2 font-mono text-[9px] font-black uppercase ${deleteCustomPackId === selectedStarterPack.id ? "border-red-500 bg-red-950/30 text-red-100" : "border-red-950 text-red-400 hover:border-red-700"}`}>{deleteCustomPackId === selectedStarterPack.id ? "Confirm" : "Delete"}</button>
+                    </div>
+                  )}
+                  <div className="border-b border-zinc-800 px-4 py-3">
+                    <div className="text-sm font-black uppercase tracking-[0.08em] text-zinc-100">{selectedStarterPack.name} pack</div>
+                    <div className="mt-1 font-mono text-[10px] uppercase leading-4 text-zinc-500">
+                      {starterPackIsMine ? `${selectedStarterPack.items.length} saved subscriptions / on this device` : selectedStarterPack.description}
+                    </div>
+                  </div>
 
-                <div className="divide-y divide-zinc-800">
-                  {starterPackDraft.map((row) => {
-                    const service = subscriptionCatalog.find((entry) => entry.id === row.serviceId);
-                    if (!service) return null;
-                    return (
-                      <div key={service.id} className={`px-4 py-3 ${row.selected && !row.tracked ? "bg-zinc-950/50" : "bg-black"}`}>
-                        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={row.selected}
-                            disabled={row.tracked}
-                            onChange={(event) => updateStarterPackRow(service.id, "selected", event.target.checked)}
-                            aria-label={row.tracked ? `${service.name} is already tracked` : `Include ${service.name}`}
-                            className="h-6 w-6 accent-amber-400"
-                          />
-                          <div className="flex min-w-0 items-center gap-3">
-                            <SubscriptionMark service={service} name={service.name} />
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-black text-zinc-100">{service.name}</div>
-                              <div className="mt-0.5 truncate font-mono text-[9px] uppercase text-zinc-600">{service.category} / {service.cycle}</div>
+                  <div className="divide-y divide-zinc-800">
+                    {starterPackDraft.map((row) => {
+                      const service = row.service;
+                      return (
+                        <div key={row.itemId} className={`px-4 py-3 ${row.selected && !row.tracked ? "bg-zinc-950/50" : "bg-black"}`}>
+                          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={row.selected}
+                              disabled={row.tracked}
+                              onChange={(event) => updateStarterPackRow(row.itemId, "selected", event.target.checked)}
+                              aria-label={row.tracked ? `${service.name} is already tracked` : `Include ${service.name}`}
+                              className="h-6 w-6 accent-amber-400"
+                            />
+                            <div className="flex min-w-0 items-center gap-3">
+                              <SubscriptionMark service={service} name={service.name} />
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-black text-zinc-100">{service.name}</div>
+                                <div className="mt-0.5 truncate font-mono text-[9px] uppercase text-zinc-500">{service.category} / {service.cycle}</div>
+                              </div>
                             </div>
+                            <span className={`border px-2 py-1 font-mono text-[9px] font-black uppercase ${
+                              row.tracked ? "border-emerald-900 text-emerald-300" : row.selected ? "border-amber-800 text-amber-300" : "border-zinc-800 text-zinc-500"
+                            }`}>
+                              {row.tracked ? "Tracked" : row.selected ? "Include" : "Skip"}
+                            </span>
                           </div>
-                          <span className={`border px-2 py-1 font-mono text-[9px] font-black uppercase ${
-                            row.tracked ? "border-emerald-900 text-emerald-300" : row.selected ? "border-amber-800 text-amber-300" : "border-zinc-800 text-zinc-600"
-                          }`}>
-                            {row.tracked ? "Tracked" : row.selected ? "Include" : "Skip"}
-                          </span>
+
+                          {!row.tracked && (
+                            <div className="mt-3 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 pl-9 sm:pl-[68px]">
+                              <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-500">
+                                Estimated price / {service.currency}
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  max="1000000000"
+                                  step="0.01"
+                                  inputMode="decimal"
+                                  value={row.amount}
+                                  disabled={!row.selected}
+                                  onChange={(event) => updateStarterPackRow(row.itemId, "amount", event.target.value)}
+                                  aria-label={`${service.name} estimated price`}
+                                  required={row.selected}
+                                  className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
+                                />
+                              </label>
+                              <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-500">
+                                Next billing date
+                                <input
+                                  type="date"
+                                  value={row.nextBillingDate}
+                                  disabled={!row.selected}
+                                  onInput={(event) => updateStarterPackRow(row.itemId, "nextBillingDate", event.currentTarget.value)}
+                                  aria-label={`${service.name} next billing date`}
+                                  required={row.selected}
+                                  className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
+                                />
+                              </label>
+                            </div>
+                          )}
                         </div>
-
-                        {!row.tracked && (
-                          <div className="mt-3 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 pl-7 sm:pl-[68px]">
-                            <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-600">
-                              Estimated price / USD
-                              <input
-                                type="number"
-                                min="0.01"
-                                max="1000000000"
-                                step="0.01"
-                                inputMode="decimal"
-                                value={row.amount}
-                                disabled={!row.selected}
-                                onChange={(event) => updateStarterPackRow(service.id, "amount", event.target.value)}
-                                aria-label={`${service.name} estimated price`}
-                                required={row.selected}
-                                className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
-                              />
-                            </label>
-                            <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-600">
-                              Next billing date
-                              <input
-                                type="date"
-                                value={row.nextBillingDate}
-                                disabled={!row.selected}
-                                onInput={(event) => updateStarterPackRow(service.id, "nextBillingDate", event.currentTarget.value)}
-                                aria-label={`${service.name} next billing date`}
-                                required={row.selected}
-                                className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
-                              />
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {starterPackError && (
+                  <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/30 px-4 py-2 text-xs text-red-200">
+                    {starterPackError}
+                  </LiveMessage>
+                )}
+                <footer className="grid gap-3 border-t border-zinc-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="font-mono text-[9px] uppercase leading-4 text-zinc-500">
+                    Prices are editable estimates / fresh dates required / no provider connection
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!selectedStarterPackRows.length || starterPackHasInvalidRows || starterPackExceedsCapacity || starterPackHasRestrictedCurrency}
+                    className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                  >
+                    Add selected / {selectedStarterPackRows.length}
+                  </button>
+                </footer>
+              </form>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="grid min-h-0 flex-1 place-items-center px-6 py-12 text-center">
+                  <div>
+                    <div className="font-mono text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">Mine / 0 packs</div>
+                    <div className="mt-3 text-lg font-black uppercase tracking-[0.08em] text-zinc-100">Save a reusable stack</div>
+                    <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-500">Names, prices, cycles, categories, tags, and colors are saved. Billing dates and reminder settings stay with each subscription list.</div>
+                  </div>
+                </div>
+                <footer className="border-t border-zinc-800 p-4">
+                  <button
+                    type="button"
+                    onClick={() => openCustomPackEditor("create")}
+                    disabled={!subscriptions.length}
+                    className="h-10 w-full border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                  >
+                    Save current list as pack
+                  </button>
+                </footer>
               </div>
-
-              {starterPackError && (
-                <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/30 px-4 py-2 text-xs text-red-200">
-                  {starterPackError}
-                </LiveMessage>
-              )}
-              <footer className="grid gap-3 border-t border-zinc-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div className="font-mono text-[9px] uppercase leading-4 text-zinc-600">
-                  Prices are editable estimates / dates required / no provider connection
-                </div>
-                <button
-                  type="submit"
-                  disabled={!selectedStarterPackRows.length || starterPackHasInvalidRows || starterPackExceedsCapacity}
-                  className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
-                >
-                  Add selected / {selectedStarterPackRows.length}
-                </button>
-              </footer>
-            </form>
+            )}
           </section>
         </DialogOverlay>
       )}
@@ -6995,6 +7383,9 @@ function Tracker({ onExit, pwa }) {
                       <div className="mt-2 font-mono text-xs text-amber-300">
                         {formatCurrencyTotals(totalsByCurrency(backupSession.subscriptions, monthlyEquivalent))} monthly
                       </div>
+                      <div className="mt-1 font-mono text-[10px] uppercase text-zinc-500">
+                        Custom packs {backupSession.customPacks.length} / {backupPackMergeCount} new / {backupPackDuplicateCount} existing
+                      </div>
                       {backupCapacityOmittedCount > 0 && (
                         <div className="mt-2 font-mono text-[10px] uppercase text-red-300">
                           Capacity blocks {backupCapacityOmittedCount} new {backupCapacityOmittedCount === 1 ? "record" : "records"}
@@ -7004,11 +7395,11 @@ function Tracker({ onExit, pwa }) {
                     <div className="grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
-                        disabled={!backupMergeCount}
+                        disabled={!backupMergeCount && !backupPackMergeCount}
                         onClick={mergeLedgerBackup}
                         className="h-10 border border-zinc-600 bg-black px-3 text-xs font-black uppercase tracking-[0.1em] text-zinc-200 hover:border-zinc-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
                       >
-                        Merge {backupMergeCount}
+                        Merge {backupMergeCount + backupPackMergeCount}
                       </button>
                       <button
                         type="button"
@@ -7026,7 +7417,7 @@ function Tracker({ onExit, pwa }) {
             {!backupSession && (
               <footer className="grid grid-cols-2 border-t border-zinc-800 font-mono text-[10px] uppercase text-zinc-600">
                 <div className="border-r border-zinc-800 px-4 py-3">
-                  Records <span className="text-zinc-200">{subscriptions.length}</span>
+                  Records <span className="text-zinc-200">{subscriptions.length}</span> / Packs <span className="text-zinc-200">{customPacks.length}</span>
                 </div>
                 <div className="px-4 py-3 text-right">
                   Updated <span className="text-zinc-300">{new Date(ledgerMeta.updatedAt).toLocaleDateString()}</span>

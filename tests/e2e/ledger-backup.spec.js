@@ -48,6 +48,27 @@ function backupEnvelope(overrides = {}) {
   };
 }
 
+function backupCustomPack(overrides = {}) {
+  return {
+    id: "backup-pack",
+    name: "Backup stack",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    items: [{
+      id: "backup-pack-linear",
+      catalogId: "",
+      name: "Linear",
+      amount: 8,
+      currency: "USD",
+      cycle: "monthly",
+      category: "Dev Tools",
+      tags: ["work", "development"],
+      color: "#22d3ee",
+    }],
+    ...overrides,
+  };
+}
+
 async function openLedgerControls(page, ledgerName = "Personal") {
   await page.getByRole("button", { name: `Manage ${ledgerName} subscriptions`, exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Subscription lists" });
@@ -93,6 +114,7 @@ test("full-ledger backup exports the complete versioned active ledger envelope",
   });
   expect(backup.exportedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(backup.subscriptions).toHaveLength(5);
+  expect(backup.customPacks).toEqual([]);
   expect(new Set(backup.subscriptions.map((subscription) => subscription.id)).size).toBe(5);
   expect(backup.subscriptions.find((subscription) => subscription.name === "Netflix")).toMatchObject({
     amount: 15.49,
@@ -105,6 +127,41 @@ test("full-ledger backup exports the complete versioned active ledger envelope",
   });
   expect(backup).not.toHaveProperty("notificationPermission");
   expect(backup).not.toHaveProperty("notifiedAlerts");
+});
+
+test("custom packs merge from backups, persist, and export with portable settings only", async ({ page }) => {
+  await openTracker(page);
+  let dialog = await openLedgerControls(page);
+  await uploadBackup(dialog, backupEnvelope({ customPacks: [backupCustomPack()] }), "packs-backup.json");
+
+  await expect(dialog.getByText("Custom packs 1 / 1 new / 0 existing", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Merge 1", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.getByRole("button", { name: "Starter packs", exact: true }).click();
+  let packsDialog = page.getByRole("dialog", { name: "Starter packs", exact: true });
+  await packsDialog.getByRole("button", { name: "Mine", exact: true }).click();
+  await expect(packsDialog.getByText("Backup stack pack", { exact: true })).toBeVisible();
+  await expect(packsDialog.getByLabel("Linear next billing date", { exact: true })).toHaveValue("");
+  await packsDialog.getByRole("button", { name: "Close starter packs", exact: true }).click();
+
+  await page.reload();
+  dialog = await openLedgerControls(page);
+  const exported = await downloadBackup(page, dialog, "personal");
+  expect(exported.customPacks).toHaveLength(1);
+  expect(exported.customPacks[0]).toMatchObject({
+    id: "backup-pack",
+    name: "Backup stack",
+    items: [{
+      name: "Linear",
+      amount: 8,
+      currency: "USD",
+      cycle: "monthly",
+    }],
+  });
+  expect(exported.customPacks[0].items[0]).not.toHaveProperty("nextBillingDate");
+  expect(exported.customPacks[0].items[0]).not.toHaveProperty("reminderLeadDays");
+  expect(exported.customPacks[0].items[0]).not.toHaveProperty("paused");
 });
 
 test("backup merge skips ID and content duplicates while preserving active settings", async ({ page }) => {
@@ -142,6 +199,14 @@ test("backup merge skips ID and content duplicates while preserving active setti
 test("backup replacement restores data and settings without replacing the local slot or permission", async ({ page, context }) => {
   await context.clearPermissions();
   await openTracker(page);
+  await page.getByRole("button", { name: "Starter packs", exact: true }).click();
+  let packsDialog = page.getByRole("dialog", { name: "Starter packs", exact: true });
+  await packsDialog.getByRole("button", { name: "Mine", exact: true }).click();
+  await packsDialog.getByRole("button", { name: "Save current list as pack", exact: true }).click();
+  await packsDialog.getByLabel("Pack name", { exact: true }).fill("Keep on legacy restore");
+  await packsDialog.getByRole("button", { name: "Save pack", exact: true }).click();
+  await packsDialog.getByRole("button", { name: "Close starter packs", exact: true }).click();
+
   let dialog = await openLedgerControls(page);
   const before = await downloadBackup(page, dialog, "personal");
 
@@ -188,6 +253,10 @@ test("backup replacement restores data and settings without replacing the local 
   await page.reload();
   await expect(page.getByRole("article").filter({ hasText: "Restored Service" })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Manage Restored Home subscriptions", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Starter packs", exact: true }).click();
+  packsDialog = page.getByRole("dialog", { name: "Starter packs", exact: true });
+  await packsDialog.getByRole("button", { name: "Mine", exact: true }).click();
+  await expect(packsDialog.getByText("Keep on legacy restore pack", { exact: true })).toBeVisible();
 });
 
 test("invalid and unsupported backups are rejected without changing the ledger", async ({ page }) => {
@@ -210,6 +279,12 @@ test("invalid and unsupported backups are rejected without changing the ledger",
     trialEndDate: "2030-08-11",
   })] }), "invalid-trial-order.json");
   await expect(error).toHaveText("A backup first paid charge cannot precede its trial end date.");
+
+  const duplicateItem = backupCustomPack().items[0];
+  await uploadBackup(dialog, backupEnvelope({
+    customPacks: [backupCustomPack({ items: [duplicateItem, { ...duplicateItem }] })],
+  }), "duplicate-pack-item-ids.json");
+  await expect(error).toHaveText("One or more backup custom packs are invalid.");
   await expect(dialog.getByRole("button", { name: "Replace all", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Close subscription lists", exact: true }).click();
   await expect(page.getByRole("article")).toHaveCount(5);
