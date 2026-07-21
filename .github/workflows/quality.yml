@@ -66,6 +66,7 @@ jobs:
       - run: npm run test:cloud-outbox
       - run: npm run test:github-environments
       - run: npm run test:service-readiness
+      - run: npm run test:integrations
       - run: npm run test:staging-boundaries
       - run: npm run test:staging-account-plane
       - run: npm run test:staging-browser-sync

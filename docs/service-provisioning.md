@@ -23,7 +23,7 @@ npm run test:staging-messaging-plane
 npm run test:reminder-operations
 ```
 
-`test:service-readiness` enforces the seven-function inventory, explicit JWT policy, hosted/local/legacy Supabase key modes, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values. `test:function-runtime` proves named-key precedence, fallback behavior, raw-body Resend signature verification, bounded provider-event parsing, allowlisted/bounded provider-error classification, and opaque-secret header handling without contacting Supabase.
+`test:service-readiness` enforces the eight-function inventory, explicit JWT policy, hosted/local/legacy Supabase key modes, documented environment names, and ordered migration naming. It reports variable names and validation failures, never values. `test:function-runtime` proves named-key precedence, fallback behavior, raw-body Resend signature verification, bounded provider-event parsing, integration route and credential parsing, allowlisted/bounded provider-error classification, and opaque-secret header handling without contacting Supabase.
 
 ## 2. Prepare The Environment
 
@@ -73,12 +73,13 @@ Deploy from the repository root so `supabase/config.toml` supplies the reviewed 
 | `send-due-reminders` | Disabled | Dedicated cron bearer secret |
 | `resend-webhook` | Disabled | Svix raw-body signature and timestamp |
 | `calendar-feed` | Disabled | Hashed, revocable feed token |
+| `integrations-api` | Disabled | Hashed, revocable personal access token plus database membership and entitlement checks |
 
 After deployment, run the repository readiness, function type, and function runtime checks again. A JWT or Supabase key-mode change must update both the shared runtime and `scripts/check-service-readiness.mjs` in the same review.
 
 ## 6. Probe The Deployed Boundary
 
-After migrations, secrets, and all seven functions are deployed, run the non-destructive public boundary probe with the same ignored full-runtime environment file:
+After migrations, secrets, and all eight functions are deployed, run the non-destructive public boundary probe with the same ignored full-runtime environment file:
 
 ```sh
 npm run test:staging-boundaries

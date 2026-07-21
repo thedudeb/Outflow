@@ -186,6 +186,31 @@ export async function probeStagingBoundaries({ projectUrl, publishableKey, appOr
       || response.headers.get("x-content-type-options") !== "nosniff"
     ) throw new Error("calendar-feed private token: Outflow privacy headers were not returned.");
   });
+  await request("integrations-api CORS", "integrations-api/v1/lists", {
+    method: "OPTIONS",
+    headers: { apikey: publishableKey, Origin: appOrigin },
+  }, 204, (response) => {
+    if (response.headers.get("access-control-allow-origin") !== appOrigin) throw new Error("integrations-api CORS: exact origin was not returned.");
+    if (!includesHeaderToken(response.headers.get("vary"), "origin")) throw new Error("integrations-api CORS: Vary must include Origin.");
+    const headers = response.headers.get("access-control-allow-headers");
+    if (!["authorization", "content-type"].every((header) => includesHeaderToken(headers, header))) {
+      throw new Error("integrations-api CORS: allowed headers are incomplete.");
+    }
+    const methods = response.headers.get("access-control-allow-methods");
+    if (!["GET", "POST", "PATCH", "DELETE", "OPTIONS"].every((method) => includesMethod(methods, method))) {
+      throw new Error("integrations-api CORS: allowed methods are incomplete.");
+    }
+  });
+  await request("integrations-api personal token", "integrations-api/v1/lists", {
+    method: "GET",
+    headers: {
+      apikey: publishableKey,
+      Authorization: "Bearer outflow_pat_invalid-staging-probe",
+      Origin: appOrigin,
+    },
+  }, 401, (response) => {
+    if (response.headers.get("cache-control") !== "no-store") throw new Error("integrations-api personal token: Outflow response headers were not returned.");
+  });
 
   return completed;
 }
@@ -223,7 +248,7 @@ export function buildStagingBoundaryReport({
   return [
     "## Outflow Staging Boundary",
     "",
-    `- Result: **PASS** (${completed.length} non-destructive checks across 7 functions)`,
+    `- Result: **PASS** (${completed.length} non-destructive checks across 8 functions)`,
     `- Environment: \`${safeEnvironment}\``,
     `- Supabase project: \`${projectHost}\``,
     `- App origin: \`${appOrigin}\``,
@@ -285,7 +310,7 @@ async function main() {
         runUrl,
       }));
     }
-    console.log(`Staging boundary probe passed: ${completed.length} non-destructive checks across 7 functions.`);
+    console.log(`Staging boundary probe passed: ${completed.length} non-destructive checks across 8 functions.`);
   } catch (error) {
     console.error(`- ${error instanceof Error ? error.message : "Staging boundary probe failed."}`);
     process.exitCode = 1;

@@ -10,6 +10,7 @@ export const FUNCTION_POLICIES = Object.freeze({
   "send-due-reminders": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_API_KEY", "OUTFLOW_CRON_SECRET", "OUTFLOW_OPERATIONS_SECRET", "OUTFLOW_REMINDER_FROM", "OUTFLOW_APP_URL", "OUTFLOW_DEPLOYMENT_COMMIT"] },
   "resend-webhook": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "RESEND_WEBHOOK_SECRET"] },
   "calendar-feed": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL"] },
+  "integrations-api": { verifyJwt: false, supabase: ["secret"], env: ["SUPABASE_URL", "OUTFLOW_ALLOWED_ORIGINS"] },
 });
 
 const supabaseKeyModes = Object.freeze({

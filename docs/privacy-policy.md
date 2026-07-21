@@ -8,7 +8,7 @@ Outflow publishes its privacy policy and user data-control guidance at:
 https://thedudeb.github.io/Outflow/?view=privacy
 ```
 
-The view is part of the same responsive, base-path-portable application shell as the guest tracker. It is linked from the public landing footer and the in-product Account / Pro controls, and it remains available from the installed web app while offline. The current policy version is `2026-07-20`.
+The view is part of the same responsive, base-path-portable application shell as the guest tracker. It is linked from the public landing footer and the in-product Account / Pro controls, and it remains available from the installed web app while offline. The current policy version is `2026-07-21`.
 
 ## Disclosure Boundary
 
@@ -22,9 +22,10 @@ The policy distinguishes the exact current release from optional hosted capabili
 - Configured builds read one public service-availability flag from Supabase on launch, reconnect, focus, foreground resume, and a bounded interval. The response contains only maintenance state and an update timestamp, not subscription or account data.
 - A signed-in tester may submit a limited beta access code to activate Pro. Administrators can see the tester's account email, optional display name, and redemption time in the beta usage report. Plaintext codes are shown once and stored only as hashes; account deletion removes the tester identity while retaining a de-identified historical use count.
 - The account disclosure covers synced subscription lists, roles, invitation state, display-name attribution, synchronization revisions, notification preferences and history, hosted-calendar metadata, and the strict browser write-recovery record.
+- Pro integration access records a token label, scopes, expiry, revocation, last-used time, and bounded request-window count. Plaintext personal access tokens are shown once and stored by Outflow only as hashes; configured API and MCP clients process the plaintext credential under their own practices.
 - Hosted email, private calendar feeds, beta access, and one-time Stripe Checkout are described separately, including recipient processing, private feed URLs, limited entitlement/reconciliation records, and the fact that Outflow does not receive full card details or create recurring product subscriptions.
 - GitHub Pages and Releases, Supabase, Resend, and Stripe are named with their narrow product purposes. The policy states that Outflow has no advertising, behavioral tracking, data brokerage, direct bank connections, or sale of personal data.
-- User choices map to implemented controls: local use without an account, CSV/backup/calendar export, independent notification settings, sign-out, free account export, calendar revocation, member removal, cloud-account deletion, and local-storage removal.
+- User choices map to implemented controls: local use without an account, CSV/backup/calendar export, independent notification settings, sign-out, free account export, integration-token creation and revocation, calendar revocation, member removal, cloud-account deletion, and local-storage removal.
 
 This page describes implemented product behavior, not a blanket claim about an unreviewed future release. Enabling a new provider, SDK, telemetry path, native entitlement, data field, retention rule, or platform purchase flow requires a policy review and a policy-version change before release.
 

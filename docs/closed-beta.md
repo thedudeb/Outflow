@@ -12,7 +12,7 @@ Do not distribute a beta code until all applicable items pass for one exact `mai
 
 - Quality and Deploy web are green, including the published-site smoke and WCAG scans.
 - The protected staging boundary, account plane, browser sync, billing plane, and messaging plane workflows are green.
-- Supabase RLS, Realtime, Auth redirects, all migrations, and all seven public Edge Function policies match the service runbook.
+- Supabase RLS, Realtime, Auth redirects, all migrations, and all eight public Edge Function policies match the service runbook.
 - Stripe remains in test mode; Resend uses its documented test recipients until the operator performs a separately reviewed human-mailbox check.
 - Reminder operations have a named assignee and have demonstrated both incident creation and recovery.
 - Maintenance mode can be enabled and disabled by an administrator without blocking administrator recovery.

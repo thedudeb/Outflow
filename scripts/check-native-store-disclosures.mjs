@@ -10,7 +10,7 @@ import {
 
 export const disclosurePath = "store-disclosures/native-local-guest.json";
 export const privacyPolicyUrl = "https://thedudeb.github.io/Outflow/?view=privacy";
-export const privacyPolicyVersion = "2026-07-20";
+export const privacyPolicyVersion = "2026-07-21";
 
 const expectedCapabilities = {
   accounts: false,

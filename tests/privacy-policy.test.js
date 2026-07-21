@@ -9,7 +9,9 @@ test("the public privacy view is versioned, deep-linkable, and available inside 
   const app = read("src/App.jsx");
 
   assert.match(app, /const PRIVACY_VIEW = "privacy"/);
-  assert.match(app, /const PRIVACY_POLICY_VERSION = "2026-07-20"/);
+  assert.match(app, /const PRIVACY_POLICY_VERSION = "2026-07-21"/);
+  assert.match(app, /If you create API or MCP access/);
+  assert.match(app, /plaintext personal access token is shown once/);
   assert.match(app, /privacyPolicyHref = `\$\{import\.meta\.env\.BASE_URL\}\?view=\$\{PRIVACY_VIEW\}`/);
   assert.match(app, /new URLSearchParams\(location\.search\)\.get\("view"\) === PRIVACY_VIEW/);
   assert.match(app, /data-policy-version=\{PRIVACY_POLICY_VERSION\}/);

@@ -1,0 +1,201 @@
+openapi: 3.1.0
+info:
+  title: Outflow Integrations API
+  version: 1.0.0
+  description: Account-scoped access to synced Outflow subscription lists.
+servers:
+  - url: https://PROJECT.supabase.co/functions/v1/integrations-api
+security:
+  - personalAccessToken: []
+paths:
+  /v1:
+    get:
+      operationId: verifyIntegration
+      responses:
+        "200":
+          description: Authenticated API metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceResponse"
+  /v1/lists:
+    get:
+      operationId: listSubscriptionLists
+      responses:
+        "200":
+          description: Visible synced subscription lists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SubscriptionList"
+  /v1/lists/{listId}/subscriptions:
+    parameters:
+      - $ref: "#/components/parameters/ListId"
+    get:
+      operationId: listSubscriptions
+      parameters:
+        - name: includePaused
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: dueBefore
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Subscriptions sorted by next billing date.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    maxItems: 500
+                    items:
+                      $ref: "#/components/schemas/Subscription"
+    post:
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SubscriptionInput"
+                - type: object
+                  properties:
+                    id:
+                      $ref: "#/components/schemas/Identifier"
+      responses:
+        "201":
+          $ref: "#/components/responses/SubscriptionResponse"
+  /v1/lists/{listId}/subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: "#/components/parameters/ListId"
+      - name: subscriptionId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/Identifier"
+    patch:
+      operationId: updateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriptionPatch"
+      responses:
+        "200":
+          $ref: "#/components/responses/SubscriptionResponse"
+    delete:
+      operationId: deleteSubscription
+      responses:
+        "200":
+          description: Subscription deleted.
+components:
+  securitySchemes:
+    personalAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: outflow_pat
+  parameters:
+    ListId:
+      name: listId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/Identifier"
+  responses:
+    SubscriptionResponse:
+      description: Saved subscription.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data:
+                $ref: "#/components/schemas/Subscription"
+  schemas:
+    Identifier:
+      type: string
+      pattern: "^[A-Za-z0-9-]{1,100}$"
+    ServiceResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [product, apiVersion, authenticated]
+          properties:
+            product: { const: Outflow }
+            apiVersion: { const: v1 }
+            authenticated: { const: true }
+    SubscriptionList:
+      type: object
+      required: [id, name, kind, role, revision, canWrite, createdAt, updatedAt]
+      properties:
+        id: { $ref: "#/components/schemas/Identifier" }
+        name: { type: string, maxLength: 60 }
+        kind: { enum: [personal, household, team] }
+        role: { enum: [owner, editor, viewer] }
+        revision: { type: integer, minimum: 0 }
+        canWrite: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SubscriptionFields:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        amount: { type: number, exclusiveMinimum: 0, maximum: 1000000000 }
+        currency: { enum: [USD, CAD, EUR, GBP, AUD, NZD, JPY, CHF] }
+        cycle: { enum: [weekly, monthly, yearly] }
+        nextBillingDate: { type: string, format: date }
+        category: { type: string, minLength: 1, maxLength: 60 }
+        tags:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 30 }
+          default: []
+        color:
+          enum: ["#f59e0b", "#ef4444", "#22d3ee", "#84cc16", "#8b5cf6", "#94a3b8"]
+          default: "#f59e0b"
+        trialEndDate:
+          type: [string, "null"]
+          format: date
+        reminderLeadDays:
+          type: array
+          maxItems: 12
+          items: { type: integer, minimum: 0, maximum: 365 }
+          default: [7]
+        paused: { type: boolean, default: false }
+    SubscriptionInput:
+      allOf:
+        - $ref: "#/components/schemas/SubscriptionFields"
+      required: [name, amount, currency, cycle, nextBillingDate, category]
+    SubscriptionPatch:
+      $ref: "#/components/schemas/SubscriptionFields"
+    Subscription:
+      allOf:
+        - $ref: "#/components/schemas/SubscriptionFields"
+        - type: object
+          required: [id, listId, name, amount, currency, cycle, nextBillingDate, category, tags, color, reminderLeadDays, paused, revision, createdAt, updatedAt]
+          properties:
+            id: { $ref: "#/components/schemas/Identifier" }
+            listId: { $ref: "#/components/schemas/Identifier" }
+            revision: { type: integer, minimum: 0 }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }

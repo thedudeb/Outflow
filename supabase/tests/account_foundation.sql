@@ -1830,6 +1830,134 @@ $$;
 
 reset role;
 
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+do $$
+declare
+  credential jsonb;
+  metadata jsonb;
+begin
+  credential := public.create_integration_token('Review client', now() + interval '30 days');
+  if credential ->> 'token' !~ '^outflow_pat_[A-Za-z0-9_-]{43}$'
+    or credential ->> 'tokenHint' !~ '^outflow_pat_\.\.\.[A-Za-z0-9_-]{6}$'
+  then
+    raise exception 'integration token creation returned an invalid credential';
+  end if;
+  metadata := public.read_integration_tokens();
+  if jsonb_array_length(metadata) <> 1
+    or metadata::text like '%' || (credential ->> 'token') || '%'
+    or metadata -> 0 ? 'token'
+    or metadata -> 0 ? 'tokenHash'
+  then
+    raise exception 'integration token metadata exposed credential material';
+  end if;
+  if not public.revoke_integration_token((credential ->> 'id')::uuid) then
+    raise exception 'integration token revocation failed';
+  end if;
+end;
+$$;
+
+reset role;
+insert into public.integration_tokens (
+  user_id, label, token_hash, token_hint, scopes, expires_at
+) values (
+  '11111111-1111-4111-8111-111111111111',
+  'Database contract',
+  encode(extensions.digest('outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678', 'sha256'), 'hex'),
+  'outflow_pat_...345678',
+  array['read', 'write'],
+  now() + interval '30 days'
+);
+
+set role anon;
+do $$
+begin
+  begin
+    perform public.read_integration_tokens();
+    raise exception 'anonymous client read integration token metadata';
+  exception
+    when insufficient_privilege then null;
+  end;
+  begin
+    perform public.authenticate_integration_token('outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678');
+    raise exception 'anonymous client authenticated an integration token';
+  exception
+    when insufficient_privilege then null;
+  end;
+end;
+$$;
+
+reset role;
+set role service_role;
+do $$
+declare
+  principal jsonb;
+  lists jsonb;
+  list_id text;
+  saved jsonb;
+begin
+  principal := public.authenticate_integration_token('outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678');
+  if principal ->> 'userId' <> '11111111-1111-4111-8111-111111111111'
+    or (principal ->> 'rateLimited')::boolean
+    or (principal ->> 'requestsRemaining')::integer <> 299
+  then
+    raise exception 'integration authentication returned an invalid principal';
+  end if;
+  lists := public.integration_list_lists((principal ->> 'userId')::uuid);
+  if jsonb_array_length(lists) = 0 then
+    raise exception 'integration list access omitted the account lists';
+  end if;
+  select value ->> 'id' into list_id
+  from jsonb_array_elements(lists)
+  where (value ->> 'canWrite')::boolean
+  limit 1;
+  if list_id is null then
+    raise exception 'integration list access omitted writable lists';
+  end if;
+
+  begin
+    perform public.integration_save_subscription(
+      (principal ->> 'userId')::uuid,
+      list_id,
+      'api-invalid',
+      '{"paused":false}'::jsonb,
+      true
+    );
+    raise exception 'integration accepted a create without required fields';
+  exception
+    when sqlstate '22023' then null;
+  end;
+
+  saved := public.integration_save_subscription(
+    (principal ->> 'userId')::uuid,
+    list_id,
+    'api-contract',
+    '{"name":"API Contract","amount":12.5,"currency":"USD","cycle":"monthly","nextBillingDate":"2026-09-01","category":"Testing","tags":["api"],"color":"#22d3ee","trialEndDate":null,"reminderLeadDays":[3,7],"paused":false}'::jsonb,
+    true
+  );
+  if saved ->> 'name' <> 'API Contract'
+    or jsonb_array_length(public.integration_list_subscriptions((principal ->> 'userId')::uuid, list_id, true, null)) = 0
+  then
+    raise exception 'integration subscription write was not readable';
+  end if;
+  saved := public.integration_save_subscription(
+    (principal ->> 'userId')::uuid,
+    list_id,
+    'api-contract',
+    '{"paused":true}'::jsonb,
+    false
+  );
+  if not (saved ->> 'paused')::boolean then
+    raise exception 'integration subscription update failed';
+  end if;
+  if not public.integration_delete_subscription((principal ->> 'userId')::uuid, list_id, 'api-contract') then
+    raise exception 'integration subscription deletion failed';
+  end if;
+end;
+$$;
+
+reset role;
+
 delete from auth.users where id = '11111111-1111-4111-8111-111111111111';
 
 set role service_role;
@@ -1846,6 +1974,7 @@ begin
   if (select count(*) from public.subscriptions) <> 0 then raise exception 'account deletion did not cascade subscriptions'; end if;
   if (select count(*) from public.migration_receipts) <> 0 then raise exception 'account deletion did not cascade receipts'; end if;
   if (select count(*) from public.ledger_sync_operations) <> 0 then raise exception 'account deletion did not cascade sync operations'; end if;
+  if (select count(*) from public.integration_tokens) <> 0 then raise exception 'account deletion did not cascade integration tokens'; end if;
   if (select count(*) from public.stripe_purchases) <> 2 then raise exception 'account deletion removed de-identified provider purchase records'; end if;
   if exists (select 1 from public.stripe_purchases where user_id is not null) then raise exception 'account deletion retained a purchase-to-user link'; end if;
   if (select count(*) from public.billing_checkout_requests) <> 0 then raise exception 'account deletion did not remove checkout reservations'; end if;

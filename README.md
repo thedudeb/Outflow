@@ -8,7 +8,7 @@ Outflow is a local-first subscription tracker for seeing what is active, what wi
 
 - The responsive web app and installable PWA are publicly available in guest mode.
 - Local subscription tracking, forecasts, calendar views, alerts, exports, backups, and multiple local lists are implemented.
-- Optional accounts, synchronization, shared lists, beta Pro access, one-time checkout, email reminders, and hosted calendars are implemented behind an unprovisioned service boundary.
+- Optional accounts, synchronization, shared lists, beta Pro access, one-time checkout, email reminders, hosted calendars, and revocable API/MCP integrations are implemented behind an unprovisioned service boundary.
 - macOS, iPhone/iPad, and Android projects build in CI but remain release candidates, not publicly distributed native products.
 - Automated accessibility gates are active; manual assistive-technology acceptance remains required before a formal conformance claim.
 
@@ -54,6 +54,7 @@ The `Quality` workflow is the authoritative repository gate. It also builds and 
 - `tests/` contains Node and Playwright contracts for local, configured-service, PWA, accessibility, and release behavior.
 - `scripts/` contains fail-closed service and native release inspection tools.
 - `docs/` contains product boundaries, operator runbooks, privacy commitments, and release acceptance procedures.
+- `mcp/` contains the local stdio MCP server that delegates to the authenticated integrations API.
 
 ## Closed Beta
 
@@ -67,5 +68,6 @@ The next milestone is a 10-20 person account-enabled staging beta. Start with th
 - [macOS release and updates](docs/macos-release.md)
 - [iOS release readiness](docs/ios-release.md)
 - [Android release readiness](docs/android-release.md)
+- [API and MCP integrations](docs/integrations.md)
 
 Outflow intentionally excludes bank connections, payment initiation, general budgeting, automated cancellation, advertising, and sale of personal data.

@@ -6,10 +6,12 @@ import {
   cloudConfigured,
   cloudConfigError,
   createBetaAccessCode,
+  createIntegrationToken,
   createProCheckout,
   deleteCloudAccount,
   getCloud,
   hostedCalendarFeedUrl,
+  integrationApiUrl,
   publishHostedCalendarFeed,
   readAppServiceStatus,
   readBetaAccessCodes,
@@ -18,6 +20,7 @@ import {
   readCloudLedgerAccess,
   readCloudLedgerSnapshot,
   readHostedCalendarFeed,
+  readIntegrationTokens,
   readNotificationPreferences,
   readProEntitlement,
   readProOffer,
@@ -30,6 +33,7 @@ import {
   requestAdminLink,
   revokeCloudLedgerInvitation,
   revokeHostedCalendarFeed,
+  revokeIntegrationToken,
   saveHostedCalendarFeedOptions,
   saveAccountProfile,
   sendCloudLedgerInvitation,
@@ -117,7 +121,7 @@ const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
 const TRACKER_VIEW_KEY = "outflow:tracker-view";
 const PRIVACY_VIEW = "privacy";
 const ADMIN_VIEW = "admin";
-const PRIVACY_POLICY_VERSION = "2026-07-20";
+const PRIVACY_POLICY_VERSION = "2026-07-21";
 const privacyPolicyHref = `${import.meta.env.BASE_URL}?view=${PRIVACY_VIEW}`;
 const adminConsoleHref = `${import.meta.env.BASE_URL}?view=${ADMIN_VIEW}`;
 const trackerViews = [
@@ -2166,6 +2170,9 @@ function PrivacyPage({ onHome, onOpen }) {
             If you redeem a beta access code, Outflow records the code cohort, your account identifier, and redemption time to activate Pro and enforce the code limit. An administrator can see your account email, optional display name, and redemption time in the beta usage report. The plaintext code is shown to the administrator once and stored only as a hash. Deleting your cloud account removes your identity from the redemption while retaining a de-identified used-seat record.
           </p>
           <p>
+            If you create API or MCP access, Outflow stores a token label, allowed scopes, creation and expiry times, revocation state, last-used time, and a bounded request-window counter. The plaintext personal access token is shown once and stored by Outflow only as a one-way hash. A client holding that token can read or change only synced subscription lists permitted by your current membership and entitlement. The client or MCP host you configure stores and processes the plaintext token under its own security and privacy practices.
+          </p>
+          <p>
             One bounded pending sync may be retained in the browser for retry. It is tied to the account and subscription list but excludes email addresses, session credentials, provider responses, and server secrets.
           </p>
         </PrivacySection>
@@ -2207,7 +2214,7 @@ function PrivacyPage({ onHome, onOpen }) {
             Local guest data remains until you delete records, clear site or application data, uninstall the app, or restore a replacement workspace. Cloud account data remains while the account is active and is deleted through the account-deletion flow, subject to limited records that must be retained for security, fraud prevention, legal obligations, payment reconciliation, or provider-event deduplication.
           </p>
           <p>
-            De-identified reminder-operation summaries are designed to expire after 30 days. Invitation and private calendar credentials are stored as protected one-way values where supported, and server-only provider credentials are not shipped to the browser. Network transport uses HTTPS in hosted releases, and cloud data access is constrained by authenticated row-level authorization.
+            De-identified reminder-operation summaries are designed to expire after 30 days. Invitation, integration, and private calendar credentials are stored as protected one-way values where supported, and server-only provider credentials are not shipped to the browser. Network transport uses HTTPS in hosted releases, and cloud data access is constrained by authenticated row-level authorization.
           </p>
           <p>
             No system can guarantee absolute security. Do not place bank credentials, card numbers, passwords, or unrelated sensitive information in subscription names, categories, tags, list names, or shared display names.
@@ -2224,6 +2231,7 @@ function PrivacyPage({ onHome, onOpen }) {
                 "Sign out without deleting subscriptions stored on this device.",
                 "Download a free account-data archive when signed in.",
                 "Revoke hosted calendar links, remove shared members, and delete cloud account data from Account / Pro controls.",
+                "Create, inspect usage for, and revoke API or MCP access tokens from Account / Pro controls.",
                 "Clear browser or application storage to remove local data from that installation.",
               ].map((choice) => (
                 <li key={choice} className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 border-b border-zinc-900 pb-2 last:border-b-0">
@@ -2521,6 +2529,13 @@ function Tracker({ onExit, pwa }) {
   const [accountProfileLoading, setAccountProfileLoading] = useState(false);
   const [accountEntitlement, setAccountEntitlement] = useState(null);
   const [accountEntitlementLoading, setAccountEntitlementLoading] = useState(false);
+  const [integrationTokens, setIntegrationTokens] = useState([]);
+  const [integrationTokensLoading, setIntegrationTokensLoading] = useState(false);
+  const [integrationTokensRefresh, setIntegrationTokensRefresh] = useState(0);
+  const [integrationLabel, setIntegrationLabel] = useState("My integration");
+  const [integrationLifetimeDays, setIntegrationLifetimeDays] = useState("90");
+  const [createdIntegrationToken, setCreatedIntegrationToken] = useState(null);
+  const [revokeIntegrationTokenArmed, setRevokeIntegrationTokenArmed] = useState("");
   const [betaAccessCode, setBetaAccessCode] = useState("");
   const [emailPreferences, setEmailPreferences] = useState(() => ({
     emailEnabled: false,
@@ -2783,6 +2798,29 @@ function Tracker({ onExit, pwa }) {
       active = false;
     };
   }, [accountSession?.user?.id]);
+
+  useEffect(() => {
+    if (!accountOpen || !accountSession?.user?.id) {
+      setIntegrationTokens([]);
+      setIntegrationTokensLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setIntegrationTokensLoading(true);
+    readIntegrationTokens()
+      .then((tokens) => {
+        if (active) setIntegrationTokens(tokens);
+      })
+      .catch((error) => {
+        if (active) setAccountError(error instanceof Error ? error.message : "Outflow could not read integration access.");
+      })
+      .finally(() => {
+        if (active) setIntegrationTokensLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountOpen, accountSession?.user?.id, integrationTokensRefresh]);
 
   useEffect(() => {
     const userId = accountSession?.user?.id;
@@ -4335,6 +4373,8 @@ function Tracker({ onExit, pwa }) {
     setDeleteAccountArmed(false);
     setRemoveMemberArmed("");
     setRevokeInviteArmed("");
+    setRevokeIntegrationTokenArmed("");
+    setCreatedIntegrationToken(null);
     setAccountDisplayName(accountProfile.displayName);
     setAccountError("");
     setAccountMessage("");
@@ -4531,6 +4571,63 @@ function Tracker({ onExit, pwa }) {
     }
   }
 
+  async function createAccountIntegrationToken(event) {
+    event.preventDefault();
+    const label = integrationLabel.trim().replace(/\s+/g, " ");
+    const lifetimeDays = Number(integrationLifetimeDays);
+    if (!accountSession || accountBusy || accountEntitlement?.status !== "active" || !label || ![30, 90, 365].includes(lifetimeDays)) return;
+    setAccountBusy("create-integration-token");
+    setAccountError("");
+    setAccountMessage("");
+    setCreatedIntegrationToken(null);
+    setRevokeIntegrationTokenArmed("");
+    try {
+      const expiresAt = new Date(Date.now() + lifetimeDays * 24 * 60 * 60 * 1000).toISOString();
+      const created = await createIntegrationToken(label, expiresAt);
+      setCreatedIntegrationToken(created);
+      setIntegrationLabel("My integration");
+      setIntegrationTokensRefresh((current) => current + 1);
+      setAccountMessage("Integration token created. Store it now; Outflow will not show it again.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not create integration access.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
+  async function copyIntegrationValue(value, label) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setAccountError("");
+      setAccountMessage(`${label} copied.`);
+    } catch {
+      setAccountError(`${label} could not be copied. Select it manually.`);
+    }
+  }
+
+  async function revokeAccountIntegrationToken(tokenId) {
+    if (!accountSession || accountBusy) return;
+    if (revokeIntegrationTokenArmed !== tokenId) {
+      setRevokeIntegrationTokenArmed(tokenId);
+      setCreatedIntegrationToken(null);
+      return;
+    }
+    setAccountBusy(`revoke-integration:${tokenId}`);
+    setAccountError("");
+    setAccountMessage("");
+    try {
+      const revoked = await revokeIntegrationToken(tokenId);
+      if (!revoked) throw new Error("This integration token is no longer available.");
+      setRevokeIntegrationTokenArmed("");
+      setIntegrationTokensRefresh((current) => current + 1);
+      setAccountMessage("Integration token revoked. API and MCP clients using it can no longer connect.");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Outflow could not revoke integration access.");
+    } finally {
+      setAccountBusy("");
+    }
+  }
+
   async function signOutAccount() {
     if (!cloudClient || accountBusy || cloudSyncingRef.current) return;
     const userId = accountSession?.user?.id;
@@ -4547,6 +4644,9 @@ function Tracker({ onExit, pwa }) {
       setAccountSession(null);
       setAccountEntitlement(null);
       setBetaAccessCode("");
+      setIntegrationTokens([]);
+      setCreatedIntegrationToken(null);
+      setRevokeIntegrationTokenArmed("");
       setCloudLedgers([]);
       setAccountMessage("Signed out. Subscriptions on this device remain available.");
     } catch (error) {
@@ -6355,7 +6455,7 @@ function Tracker({ onExit, pwa }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="account-controls-title"
-            aria-busy={Boolean(accountBusy) || accountLoading || accountProfileLoading || accountEntitlementLoading || emailPreferencesLoading || proOfferLoading || cloudLedgersLoading}
+            aria-busy={Boolean(accountBusy) || accountLoading || accountProfileLoading || accountEntitlementLoading || emailPreferencesLoading || integrationTokensLoading || proOfferLoading || cloudLedgersLoading}
             tabIndex={-1}
             className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-2xl"
           >
@@ -6596,6 +6696,136 @@ function Tracker({ onExit, pwa }) {
                       Used for member lists and subscription change attribution. Your sign-in email stays private from collaborators. Blank removes the name.
                     </div>
                   </form>
+
+                  <section className="border-b border-zinc-800" aria-labelledby="integration-access-title">
+                    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-900 px-4 py-2">
+                      <span id="integration-access-title" className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">API / MCP access</span>
+                      <span className={`font-mono text-[9px] font-black uppercase ${accountEntitlement?.status === "active" ? "text-cyan-300" : "text-zinc-600"}`}>
+                        {integrationTokensLoading ? "Loading" : accountEntitlement?.status === "active" ? `${integrationTokens.filter((token) => !token.revokedAt && Date.parse(token.expiresAt) > Date.now()).length} active` : "Pro"}
+                      </span>
+                    </header>
+
+                    {accountEntitlement?.status !== "active" ? (
+                      <div className="px-4 py-4 font-mono text-[10px] uppercase leading-5 text-zinc-600">
+                        API and MCP access is included with the one-time Pro unlock. No integration credential exists for this account.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid gap-3 border-b border-zinc-900 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                          <div className="min-w-0">
+                            <div className="font-mono text-[9px] uppercase text-zinc-600">HTTPS endpoint</div>
+                            <code className="mt-1 block break-all text-[11px] text-zinc-300">{integrationApiUrl}</code>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => copyIntegrationValue(integrationApiUrl, "API endpoint")}
+                              className="h-9 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+                            >
+                              Copy endpoint
+                            </button>
+                            <a
+                              href="https://github.com/thedudeb/Outflow/blob/main/docs/integrations.md"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="grid h-9 place-items-center border border-cyan-800 px-3 font-mono text-[10px] font-black uppercase text-cyan-300 hover:border-cyan-400"
+                            >
+                              Setup guide
+                            </a>
+                          </div>
+                        </div>
+
+                        {createdIntegrationToken && (
+                          <LiveMessage kind="status" className="border-b border-amber-900 bg-amber-950/15 p-4">
+                            <div className="text-xs font-black uppercase tracking-[0.1em] text-amber-200">Token shown once</div>
+                            <div className="mt-1 font-mono text-[9px] uppercase leading-4 text-amber-300/70">Store it in your integration client. Closing this window removes the plaintext from view.</div>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                              <input
+                                type="text"
+                                value={createdIntegrationToken.token}
+                                readOnly
+                                aria-label="New integration token"
+                                spellCheck="false"
+                                className="h-10 min-w-0 border border-amber-800 bg-black px-3 font-mono text-[11px] text-amber-200 outline-none focus:border-amber-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => copyIntegrationValue(createdIntegrationToken.token, "Integration token")}
+                                className="h-10 border border-amber-500 px-4 font-mono text-[10px] font-black uppercase text-amber-200 hover:border-amber-300"
+                              >
+                                Copy token
+                              </button>
+                            </div>
+                          </LiveMessage>
+                        )}
+
+                        <form onSubmit={createAccountIntegrationToken} className="grid gap-3 border-b border-zinc-900 p-4 sm:grid-cols-[minmax(0,1fr)_120px_auto] sm:items-end">
+                          <Field label="Token label">
+                            <input
+                              type="text"
+                              value={integrationLabel}
+                              maxLength={60}
+                              autoComplete="off"
+                              onChange={(event) => setIntegrationLabel(event.target.value.slice(0, 60))}
+                              className="h-10 min-w-0 border border-zinc-700 bg-black px-3 text-sm text-zinc-100 outline-none focus:border-cyan-400"
+                            />
+                          </Field>
+                          <Field label="Expires">
+                            <select
+                              value={integrationLifetimeDays}
+                              onChange={(event) => setIntegrationLifetimeDays(event.target.value)}
+                              className="h-10 min-w-0 border border-zinc-700 bg-black px-3 font-mono text-[10px] text-zinc-200 outline-none focus:border-cyan-400"
+                            >
+                              <option value="30">30 days</option>
+                              <option value="90">90 days</option>
+                              <option value="365">1 year</option>
+                            </select>
+                          </Field>
+                          <button
+                            type="submit"
+                            disabled={Boolean(accountBusy) || integrationTokensLoading || !integrationLabel.trim()}
+                            className="h-10 border border-cyan-700 bg-black px-4 text-xs font-black uppercase tracking-[0.08em] text-cyan-300 hover:border-cyan-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                          >
+                            {accountBusy === "create-integration-token" ? "Creating..." : "Create token"}
+                          </button>
+                        </form>
+
+                        {!integrationTokensLoading && integrationTokens.length === 0 && (
+                          <div className="px-4 py-4 font-mono text-[10px] uppercase text-zinc-600">No integration tokens created.</div>
+                        )}
+                        {integrationTokens.map((token) => {
+                          const inactive = Boolean(token.revokedAt) || Date.parse(token.expiresAt) <= Date.now();
+                          const armed = revokeIntegrationTokenArmed === token.id;
+                          return (
+                            <div key={token.id} className="grid gap-3 border-b border-zinc-900 px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="truncate text-xs font-bold text-zinc-300">{token.label}</span>
+                                  <span className={`border px-1.5 py-0.5 font-mono text-[8px] font-black uppercase ${inactive ? "border-zinc-800 text-zinc-600" : "border-cyan-900 text-cyan-300"}`}>
+                                    {token.revokedAt ? "Revoked" : Date.parse(token.expiresAt) <= Date.now() ? "Expired" : "Active"}
+                                  </span>
+                                </div>
+                                <div className="mt-1 break-all font-mono text-[9px] uppercase leading-4 text-zinc-600">
+                                  {token.tokenHint} / expires {shortDate(token.expiresAt.slice(0, 10))} / {token.lastUsedAt ? `last used ${shortDate(token.lastUsedAt.slice(0, 10))}` : "never used"}
+                                </div>
+                              </div>
+                              {!token.revokedAt && (
+                                <button
+                                  type="button"
+                                  onClick={() => revokeAccountIntegrationToken(token.id)}
+                                  disabled={Boolean(accountBusy)}
+                                  aria-label={`${armed ? "Confirm revoke" : "Revoke"} integration token ${token.label}`}
+                                  className={`h-9 border px-3 font-mono text-[9px] font-black uppercase disabled:opacity-40 ${armed ? "border-red-500 bg-red-500 text-black" : "border-zinc-700 text-zinc-500 hover:border-red-700 hover:text-red-300"}`}
+                                >
+                                  {accountBusy === `revoke-integration:${token.id}` ? "Revoking..." : armed ? "Confirm revoke" : "Revoke"}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </section>
 
                   <section className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                     <div className="min-w-0">

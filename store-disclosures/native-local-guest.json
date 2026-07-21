@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "releaseBoundary": "native-local-guest",
-  "effectiveDate": "2026-07-20",
+  "effectiveDate": "2026-07-21",
   "operatorStatus": "draft-not-submitted",
   "submissionRequiresCandidateReview": true,
   "app": {
@@ -10,12 +10,12 @@
     "identifier": "com.thedudeb.outflow"
   },
   "privacy": {
-    "policyVersion": "2026-07-20",
+    "policyVersion": "2026-07-21",
     "policyUrl": "https://thedudeb.github.io/Outflow/?view=privacy",
     "privacyChoicesUrl": "https://thedudeb.github.io/Outflow/?view=privacy"
   },
   "sourceEvidence": {
-    "dependencyLockSha256": "57169b24ed3536bc8dfdc52fb718cf1155d8b7f47e4e50961016cf1d44d1bb5c",
+    "dependencyLockSha256": "d9c5402f033ed735ae671a5bf49e1d4528ba372d448da119d2db708f6a45d70e",
     "androidGradleSha256": "57644f477841e93308e84cddf14f19a0570895cf8de66f93ed6f07997243051a",
     "iosPrivacyManifestSha256": "37f23fa7aabe84ee3c9a1f162c2c036612e5142aa6e3ce1dfc711161572d3131",
     "androidManifestSha256": "5fd46fa993942621d525c2d726585f21b99a71e257392176fbad4fde7ef7f8cf",

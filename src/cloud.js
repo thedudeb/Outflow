@@ -40,6 +40,9 @@ export const cloudConfigError = secretKeyExposed
     : "";
 
 export const cloudConfigured = Boolean(projectUrl && publishableKey && !cloudConfigError);
+export const integrationApiUrl = cloudConfigured
+  ? `${projectUrl.replace(/\/$/, "")}/functions/v1/integrations-api`
+  : "";
 
 let cloudPromise;
 
@@ -198,6 +201,67 @@ export async function saveAccountProfile(displayName) {
     displayName: data.displayName || "",
     updatedAt: data.updatedAt || "",
   };
+}
+
+function sanitizeIntegrationToken(value, includeSecret = false) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Outflow returned invalid integration access metadata.");
+  const token = includeSecret && typeof value.token === "string" && /^outflow_pat_[A-Za-z0-9_-]{43}$/.test(value.token)
+    ? value.token
+    : "";
+  if (
+    typeof value.id !== "string"
+    || typeof value.label !== "string"
+    || value.label.length < 1
+    || value.label.length > 60
+    || typeof value.tokenHint !== "string"
+    || !/^outflow_pat_\.\.\.[A-Za-z0-9_-]{6}$/.test(value.tokenHint)
+    || !Array.isArray(value.scopes)
+    || value.scopes.some((scope) => !["read", "write"].includes(scope))
+    || !Number.isFinite(Date.parse(value.expiresAt))
+    || !Number.isFinite(Date.parse(value.createdAt))
+    || (includeSecret && !token)
+  ) {
+    throw new Error("Outflow returned invalid integration access metadata.");
+  }
+  return {
+    id: value.id,
+    label: value.label,
+    token,
+    tokenHint: value.tokenHint,
+    scopes: [...new Set(value.scopes)],
+    expiresAt: value.expiresAt,
+    lastUsedAt: value.lastUsedAt && Number.isFinite(Date.parse(value.lastUsedAt)) ? value.lastUsedAt : "",
+    revokedAt: value.revokedAt && Number.isFinite(Date.parse(value.revokedAt)) ? value.revokedAt : "",
+    createdAt: value.createdAt,
+  };
+}
+
+export async function readIntegrationTokens() {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("read_integration_tokens");
+  if (error) throw error;
+  if (!Array.isArray(data) || data.length > 100) throw new Error("Outflow returned invalid integration access metadata.");
+  return data.map((token) => sanitizeIntegrationToken(token));
+}
+
+export async function createIntegrationToken(label, expiresAt) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("create_integration_token", {
+    requested_label: label,
+    requested_expires_at: expiresAt,
+  });
+  if (error) throw error;
+  return sanitizeIntegrationToken(data, true);
+}
+
+export async function revokeIntegrationToken(tokenId) {
+  const cloud = await getCloud();
+  if (!cloud) throw new Error("Outflow cloud is not configured.");
+  const { data, error } = await cloud.rpc("revoke_integration_token", { target_token_id: tokenId });
+  if (error) throw error;
+  return data === true;
 }
 
 const accountExportForbiddenKeys = new Set([

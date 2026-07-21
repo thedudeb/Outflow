@@ -98,6 +98,8 @@ function createCloudState({
     calendarFeedToken: "",
     calendarFeedTokens: [],
     calendarOperations: [],
+    integrationTokens: [],
+    integrationTokenSequence: 0,
     ledger: {
       id: "studio-cloud",
       name: "Studio Cloud",
@@ -559,6 +561,33 @@ async function installCloudFixture(page, {
       return reply(cloudState.accountExportOverride === undefined
         ? accountExportFromCloudState(cloudState)
         : cloudState.accountExportOverride);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/read_integration_tokens") && cloudState) {
+      return reply(cloudState.integrationTokens);
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/create_integration_token") && cloudState) {
+      if (cloudState.entitlementStatus !== "active") return reply({ message: "Outflow Pro is required for API and MCP access." }, 403);
+      cloudState.integrationTokenSequence += 1;
+      const createdAt = new Date().toISOString();
+      const secret = "outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678";
+      const created = {
+        id: `55555555-5555-4555-8555-${String(cloudState.integrationTokenSequence).padStart(12, "0")}`,
+        label: entry.body?.requested_label,
+        tokenHint: "outflow_pat_...345678",
+        scopes: ["read", "write"],
+        expiresAt: entry.body?.requested_expires_at,
+        lastUsedAt: null,
+        revokedAt: null,
+        createdAt,
+      };
+      cloudState.integrationTokens.unshift(created);
+      return reply({ ...created, token: secret });
+    }
+    if (url.pathname.endsWith("/rest/v1/rpc/revoke_integration_token") && cloudState) {
+      const token = cloudState.integrationTokens.find((candidate) => candidate.id === entry.body?.target_token_id);
+      if (!token) return reply(false);
+      token.revokedAt ||= new Date().toISOString();
+      return reply(true);
     }
     if (url.pathname.endsWith("/rest/v1/rpc/save_account_profile") && cloudState && verifiedUser) {
       const normalized = String(entry.body?.requested_display_name || "").trim().replace(/\s+/g, " ");
@@ -1634,6 +1663,45 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
     token: secondToken,
   });
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
+});
+
+test("Pro account creates one-time API and MCP access then revokes it", async ({ page }) => {
+  const cloudState = createCloudState();
+  const fixture = await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
+  await seedStoredSession(page);
+  await openTracker(page);
+
+  await page.getByRole("button", { name: /Open account controls/ }).click();
+  let dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog.getByText("API / MCP access", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("No integration tokens created.", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Token label").fill("Claude review client");
+  await dialog.getByLabel("Expires").selectOption("30");
+  await dialog.getByRole("button", { name: "Create token", exact: true }).click();
+
+  const oneTimeToken = dialog.getByRole("textbox", { name: "New integration token", exact: true });
+  await expect(oneTimeToken).toHaveValue("outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678");
+  await expect(dialog.getByText("Integration token created. Store it now; Outflow will not show it again.", { exact: true })).toBeVisible();
+  expect(cloudState.integrationTokens).toHaveLength(1);
+  expect(cloudState.integrationTokens[0]).not.toHaveProperty("token");
+  const metadataReads = fixture.traffic.filter((request) => request.path.endsWith("/rest/v1/rpc/read_integration_tokens"));
+  expect(JSON.stringify(metadataReads)).not.toContain("outflow_pat_abcdefghijklmnopqrstuvwxyzABCDEFGH012345678");
+
+  const { violations } = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(wcagTags)
+    .analyze();
+  expect(violations.length, violationSummary(violations)).toBe(0);
+
+  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await page.getByRole("button", { name: /Open account controls/ }).click();
+  dialog = page.getByRole("dialog", { name: "Account / Pro" });
+  await expect(dialog.getByRole("textbox", { name: "New integration token", exact: true })).toHaveCount(0);
+  const revoke = dialog.getByRole("button", { name: "Revoke integration token Claude review client", exact: true });
+  await revoke.click();
+  await dialog.getByRole("button", { name: "Confirm revoke integration token Claude review client", exact: true }).click();
+  await expect(dialog.getByText("Integration token revoked. API and MCP clients using it can no longer connect.", { exact: true })).toBeVisible();
+  expect(cloudState.integrationTokens[0].revokedAt).toBeTruthy();
 });
 
 test("verified Pro unlocks reviewed CSV import and advanced reminders", async ({ page }) => {

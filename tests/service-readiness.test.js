@@ -30,9 +30,9 @@ function legacyKey(role) {
 test("repository service inventory and JWT policy are complete", async () => {
   const result = await validateRepository();
   assert.deepEqual(result.errors, []);
-  assert.equal(result.functionCount, 7);
+  assert.equal(result.functionCount, 8);
   assert.equal(result.jwtProtectedCount, 3);
-  assert.equal(result.publicBoundaryCount, 4);
+  assert.equal(result.publicBoundaryCount, 5);
   assert.ok(result.migrationCount >= 7);
 });
 

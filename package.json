@@ -42,10 +42,12 @@
     "test:web-security": "node --test tests/web-security.test.js",
     "test:dialog-dismissal": "node --test tests/dialog-dismissal.test.js",
     "check:reminder-incident": "node scripts/sync-reminder-operations-incident.mjs",
-    "test:function-types": "deno check --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/delete-account/index.ts supabase/functions/send-ledger-invite/index.ts supabase/functions/create-pro-checkout/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/send-due-reminders/index.ts supabase/functions/resend-webhook/index.ts supabase/functions/calendar-feed/index.ts",
-    "test:function-runtime": "deno test --allow-env=NODE_ENV --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts supabase/functions/resend-webhook/webhook.test.ts supabase/functions/calendar-feed/calendar.test.ts supabase/functions/send-due-reminders/reminder.test.ts",
+    "test:function-types": "deno check --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/delete-account/index.ts supabase/functions/send-ledger-invite/index.ts supabase/functions/create-pro-checkout/index.ts supabase/functions/stripe-webhook/index.ts supabase/functions/send-due-reminders/index.ts supabase/functions/resend-webhook/index.ts supabase/functions/calendar-feed/index.ts supabase/functions/integrations-api/index.ts",
+    "test:function-runtime": "deno test --allow-env=NODE_ENV --frozen --lock=deno.lock --node-modules-dir=auto supabase/functions/_shared/supabase-runtime.test.ts supabase/functions/resend-webhook/webhook.test.ts supabase/functions/calendar-feed/calendar.test.ts supabase/functions/send-due-reminders/reminder.test.ts supabase/functions/integrations-api/integration.test.ts",
     "test:account-foundation": "sh scripts/test-account-foundation.sh",
     "test:account-service": "playwright test --config=playwright.account.config.js",
+    "test:integrations": "node --test tests/integrations.test.js",
+    "mcp": "node mcp/outflow-mcp.mjs",
     "test:browser-compatibility": "playwright test --config=playwright.browser-compatibility.config.js",
     "test:pwa-cache": "node --test tests/pwa-cache.test.js",
     "test:pages-deployment": "node --test tests/pages-deployment.test.js",
@@ -84,6 +86,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@supabase/supabase-js": "2.75.0",
     "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-process": "2.3.1",
@@ -91,7 +94,13 @@
     "ics": "^3.12.0",
     "papaparse": "^5.5.3",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zod": "3.25.76"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": {
+      "@hono/node-server": "2.0.5"
+    }
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

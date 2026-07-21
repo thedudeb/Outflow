@@ -11,11 +11,17 @@ function fixtureFetch({ corsOrigin = appOrigin, calendarStatus = 404, calendarHe
   const calls = [];
   const fetchImpl = async (input, init = {}) => {
     const url = new URL(input);
-    const functionName = url.pathname.split("/").at(-1);
+    const functionName = url.pathname.includes("/functions/v1/integrations-api/")
+      ? "integrations-api"
+      : url.pathname.split("/").at(-1);
     const headers = new Headers(init.headers);
     calls.push({ functionName, headers, method: init.method, url });
     if (init.method === "OPTIONS") {
-      const allowedMethods = functionName === "create-pro-checkout" ? "GET, POST, OPTIONS" : "POST, OPTIONS";
+      const allowedMethods = functionName === "create-pro-checkout"
+        ? "GET, POST, OPTIONS"
+        : functionName === "integrations-api"
+          ? "GET, POST, PATCH, DELETE, OPTIONS"
+          : "POST, OPTIONS";
       return new Response(null, {
         status: 204,
         headers: {
@@ -38,6 +44,7 @@ function fixtureFetch({ corsOrigin = appOrigin, calendarStatus = 404, calendarHe
         headers: calendarHeaders ? { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } : {},
       });
     }
+    if (functionName === "integrations-api") return Response.json({ error: "invalid token" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     return Response.json({ error: "unexpected" }, { status: 500 });
   };
   return { calls, fetchImpl };
@@ -78,11 +85,11 @@ test("public staging configuration accepts hosted keys and rejects secret browse
   }).errors.some((error) => error.startsWith("OUTFLOW_ALLOWED_ORIGINS: expected")));
 });
 
-test("the probe verifies ten non-destructive boundaries without server credentials", async () => {
+test("the probe verifies twelve non-destructive boundaries without server credentials", async () => {
   const fixture = fixtureFetch();
   const completed = await probeStagingBoundaries({ projectUrl, publishableKey, appOrigin, fetchImpl: fixture.fetchImpl });
-  assert.equal(completed.length, 10);
-  assert.equal(fixture.calls.length, 10);
+  assert.equal(completed.length, 12);
+  assert.equal(fixture.calls.length, 12);
   for (const call of fixture.calls.filter(({ functionName }) => ["delete-account", "send-ledger-invite", "create-pro-checkout"].includes(functionName))) {
     assert.equal(call.headers.get("apikey"), publishableKey);
   }
@@ -124,7 +131,7 @@ test("the staging report records bounded evidence without credentials or full-ac
   const report = buildStagingBoundaryReport({
     projectUrl,
     appOrigin,
-    completed: Array.from({ length: 10 }, (_, index) => `check-${index}`),
+    completed: Array.from({ length: 12 }, (_, index) => `check-${index}`),
     migrations: ["20260719133000_account_foundation.sql", "unsafe name.sql"],
     commit: "5c173bd",
     actor: "release-owner",
@@ -132,7 +139,7 @@ test("the staging report records bounded evidence without credentials or full-ac
     runUrl: "https://github.com/thedudeb/Outflow/actions/runs/123",
   });
 
-  assert.match(report, /\*\*PASS\*\* \(10 non-destructive checks across 7 functions\)/);
+  assert.match(report, /\*\*PASS\*\* \(12 non-destructive checks across 8 functions\)/);
   assert.match(report, /Migration Inventory \(1\)/);
   assert.match(report, /outflow-stage\.supabase\.co/);
   assert.match(report, /20260719133000_account_foundation\.sql/);
