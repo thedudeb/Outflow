@@ -15,7 +15,9 @@ test("subscription catalog filters, prefills editable details, and supports keyb
   await nameField.fill("spot");
   const spotify = suggestions.getByRole("option").filter({ hasText: "Spotify" });
   await expect(spotify).toHaveCount(1);
-  await expect(spotify.locator('[data-subscription-mark="spotify"]')).toBeVisible();
+  const spotifyMark = spotify.locator('[data-subscription-mark="spotify"]');
+  await expect(spotifyMark).toHaveAttribute("data-company-icon", "true");
+  await expect(spotifyMark.locator("svg")).toBeVisible();
   await spotify.click();
 
   await expect(suggestions).toBeHidden();
@@ -31,7 +33,9 @@ test("subscription catalog filters, prefills editable details, and supports keyb
   await expect(suggestions.getByRole("option").filter({ hasText: "GitHub Copilot" })).toHaveCount(1);
   await nameField.press("Enter");
   await expect(nameField).toHaveValue("GitHub Copilot");
-  await expect(page.locator('[data-subscription-mark="github-copilot"]')).toBeVisible();
+  const githubMark = page.locator('[data-subscription-mark="github-copilot"]');
+  await expect(githubMark).toHaveAttribute("data-company-icon", "true");
+  await expect(githubMark.locator("svg")).toBeVisible();
 
   await nameField.fill("Private VPN");
   await expect(suggestions).toBeHidden();

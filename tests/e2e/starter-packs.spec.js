@@ -19,6 +19,7 @@ test("starter packs review estimates, avoid duplicates, and batch-add selected s
   const dialog = page.getByRole("dialog", { name: "Starter packs", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Tech pack", { exact: true })).toBeVisible();
+  await expect(dialog.locator('[data-subscription-mark="claude"] svg')).toBeVisible();
   await expect(dialog.getByRole("checkbox", { name: "Include Claude Pro", exact: true })).toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "iCloud+ is already tracked", exact: true })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "Add selected / 3", exact: true })).toBeEnabled();

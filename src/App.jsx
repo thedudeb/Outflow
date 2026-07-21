@@ -2,6 +2,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { createEvents } from "ics";
 import {
+  SiAdobecreativecloud,
+  SiApple,
+  SiApplemusic,
+  SiAppletv,
+  SiCanva,
+  SiClaude,
+  SiDropbox,
+  SiFigma,
+  SiGithubcopilot,
+  SiIcloud,
+  SiNetflix,
+  SiNotion,
+  SiOpenai,
+  SiSlack,
+  SiSpotify,
+  SiYoutube,
+  SiZoom,
+} from "react-icons/si";
+import { FaGoogle, FaMicrosoft } from "react-icons/fa6";
+import {
   acceptCloudLedgerInvitation,
   cloudConfigured,
   cloudConfigError,
@@ -151,6 +171,35 @@ const subscriptionCatalog = [
   { id: "apple-tv", name: "Apple TV+", aliases: ["apple tv", "apple tv plus"], mark: "TV", markBackground: "#f4f4f5", markColor: "#09090b", amount: 9.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#94a3b8" },
   { id: "applecare", name: "AppleCare+", aliases: ["applecare", "apple care"], mark: "AC", markBackground: "#27272a", markColor: "#f4f4f5", amount: 9.99, currency: "USD", cycle: "monthly", category: "Device Care", tags: ["personal", "device"], color: "#94a3b8" },
 ];
+const subscriptionCompanyIcons = {
+  netflix: SiNetflix,
+  spotify: SiSpotify,
+  icloud: SiIcloud,
+  "github-copilot": SiGithubcopilot,
+  notion: SiNotion,
+  figma: SiFigma,
+  slack: SiSlack,
+  adobe: SiAdobecreativecloud,
+  youtube: SiYoutube,
+  dropbox: SiDropbox,
+  chatgpt: SiOpenai,
+  canva: SiCanva,
+  "google-one": FaGoogle,
+  "microsoft-365": FaMicrosoft,
+  claude: SiClaude,
+  zoom: SiZoom,
+  "apple-music": SiApplemusic,
+  "apple-tv": SiAppletv,
+  applecare: SiApple,
+};
+
+function catalogServiceForName(name) {
+  const normalizedName = String(name || "").trim().toLocaleLowerCase();
+  return subscriptionCatalog.find((service) => (
+    service.name.toLocaleLowerCase() === normalizedName
+    || service.aliases.some((alias) => alias.toLocaleLowerCase() === normalizedName)
+  )) || null;
+}
 const starterPacks = [
   { id: "tech", code: "TEC", name: "Tech", description: "AI, cloud storage, and developer tools.", serviceIds: ["claude", "chatgpt", "icloud", "github-copilot", "google-one"] },
   { id: "entertainment", code: "ENT", name: "Entertainment", description: "Common video and music subscriptions.", serviceIds: ["netflix", "spotify", "disney", "youtube"] },
@@ -644,7 +693,7 @@ function loadCustomPacks() {
 }
 
 function customPackItemFromSubscription(subscription) {
-  const catalogService = subscriptionCatalog.find((service) => service.name.toLocaleLowerCase() === subscription.name.trim().toLocaleLowerCase());
+  const catalogService = catalogServiceForName(subscription.name);
   return sanitizeCustomPackItem({
     id: crypto.randomUUID(),
     catalogId: catalogService?.id || "",
@@ -1375,15 +1424,21 @@ function buildStarterPackDraft(pack, subscriptions) {
   });
 }
 
-function SubscriptionMark({ service, name, className = "h-9 w-9 text-xs" }) {
+function SubscriptionMark({ service, name, className = "h-9 w-9 text-xs", accentColor = "" }) {
+  const iconId = service?.catalogId || service?.id;
+  const CompanyIcon = subscriptionCompanyIcons[iconId];
   return (
     <span
       aria-hidden="true"
       data-subscription-mark={service?.id || "custom"}
+      data-company-icon={CompanyIcon ? "true" : "false"}
       className={`grid shrink-0 place-items-center border border-white/20 font-mono font-black tracking-normal ${className}`}
-      style={service ? { background: service.markBackground, color: service.markColor } : undefined}
+      style={{
+        ...(service ? { background: service.markBackground, color: service.markColor } : {}),
+        ...(accentColor ? { boxShadow: `inset 4px 0 0 ${accentColor}` } : {}),
+      }}
     >
-      {service?.mark || initials(name)}
+      {CompanyIcon ? <CompanyIcon className="h-[58%] w-[58%]" focusable="false" /> : service?.mark || initials(name)}
     </span>
   );
 }
@@ -2303,7 +2358,10 @@ function LandingPage({ onOpen, pwa }) {
             <div key={subscription.id} className="grid min-h-28 gap-3 sm:grid-cols-[220px_minmax(0,1fr)_280px]">
               <div className="border border-violet-400 bg-violet-950 p-4">
                 <div className="font-mono text-2xl font-black text-violet-100">{money(subscription.amount, subscription.currency)}</div>
-                <div className="mt-6 text-xs uppercase text-violet-300">{initials(subscription.name)} / {subscription.cycle}</div>
+                <div className="mt-6 flex items-center gap-2 text-xs uppercase text-violet-300">
+                  <SubscriptionMark service={catalogServiceForName(subscription.name)} name={subscription.name} className="h-6 w-6 text-[8px]" />
+                  <span>{subscription.cycle}</span>
+                </div>
               </div>
               <div className="hidden border border-red-400 bg-red-950 p-4 sm:block">
                 <div className="text-xl font-black uppercase text-red-50">{subscription.name}</div>
@@ -2367,7 +2425,7 @@ function LandingPage({ onOpen, pwa }) {
                 <div key={subscription.id} className="grid gap-2 border border-zinc-800 bg-black p-2 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:gap-3">
                   <div className="border border-violet-500/60 bg-violet-950/50 p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="grid h-10 w-10 place-items-center border border-violet-300 bg-black font-mono font-black text-violet-100">{initials(subscription.name)}</span>
+                      <SubscriptionMark service={catalogServiceForName(subscription.name)} name={subscription.name} className="h-10 w-10 text-xs" />
                       <span className="font-mono text-xl font-black text-violet-100">{money(subscription.amount, subscription.currency)}</span>
                     </div>
                   </div>
@@ -2624,10 +2682,7 @@ function Tracker({ onExit, pwa }) {
     () => editingId ? [] : subscriptionCatalogMatches(form.name),
     [editingId, form.name],
   );
-  const selectedCatalogService = useMemo(
-    () => subscriptionCatalog.find((service) => service.name.toLocaleLowerCase() === form.name.trim().toLocaleLowerCase()) || null,
-    [form.name],
-  );
+  const selectedCatalogService = useMemo(() => catalogServiceForName(form.name), [form.name]);
   const catalogVisible = catalogOpen && catalogSuggestions.length > 0;
   const selectedStarterPack = starterPacks.find((pack) => pack.id === starterPackId)
     || customPacks.find((pack) => pack.id === starterPackId)
@@ -6004,12 +6059,12 @@ function Tracker({ onExit, pwa }) {
                       >
                         <div className="min-w-0 border border-violet-500/60 bg-violet-950/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                           <div className="flex items-center justify-between gap-3">
-                            <div
-                              className="grid h-12 w-12 shrink-0 place-items-center border border-violet-300/70 bg-black font-mono text-sm font-black text-violet-200"
-                              style={{ boxShadow: `inset 4px 0 0 ${subscription.color}` }}
-                            >
-                              {initials(subscription.name)}
-                            </div>
+                            <SubscriptionMark
+                              service={catalogServiceForName(subscription.name)}
+                              name={subscription.name}
+                              className="h-12 w-12 text-sm"
+                              accentColor={subscription.color}
+                            />
                             <div className="text-right">
                               <div className="font-mono text-xl font-black leading-none text-violet-100">{money(subscription.amount, subscription.currency)}</div>
                               <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-violet-300/70">

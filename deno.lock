@@ -16,6 +16,7 @@
     "npm:papaparse@^5.5.3": "5.5.4",
     "npm:postcss@^8.4.49": "8.5.20",
     "npm:react-dom@19": "19.2.7_react@19.2.7",
+    "npm:react-icons@5.5.0": "5.5.0_react@19.2.7",
     "npm:react@19": "19.2.7",
     "npm:stripe@22.0.0": "22.0.0",
     "npm:tailwindcss@^3.4.17": "3.4.19",
@@ -301,8 +302,8 @@
       "os": ["win32"],
       "cpu": ["x64"]
     },
-    "@hono/node-server@2.0.5_hono@4.12.31": {
-      "integrity": "sha512-yQFvDmyDo3y6rEOJZDUYPJ49DIKTPpIk4kGvm40xx4Ejne0Pu9a1+exxPN+C1UppWK/WGZX9F++/Xs231tE86g==",
+    "@hono/node-server@2.0.11_hono@4.12.31": {
+      "integrity": "sha512-bjD221KPLoJTWUwso1J6fGKiTXEUFedG/s0visavY4zakFPkeGURMRNly+FhBHs7T8Dz4qHaZIMX9ZoJHSJtKA==",
       "dependencies": [
         "hono"
       ]
@@ -1448,6 +1449,12 @@
         "scheduler"
       ]
     },
+    "react-icons@5.5.0_react@19.2.7": {
+      "integrity": "sha512-MEFcXdkP3dLo8uumGI5xN3lDFNsRtrjbOEKDLD7yv76v4wpnEq2Lt2qeHaQOr34I/wPN3s3+N08WkQ+CW37Xiw==",
+      "dependencies": [
+        "react"
+      ]
+    },
     "react-refresh@0.17.0": {
       "integrity": "sha512-z6F7K9bV85EfseRCp2bzrpyQ0Gkw1uLoCel9XBVWPg/TjRj94SkJzUTGfOa4bs7iJvBWtQG0Wq7wnI0syw3EBQ=="
     },
@@ -1825,6 +1832,7 @@
         "npm:papaparse@^5.5.3",
         "npm:postcss@^8.4.49",
         "npm:react-dom@19",
+        "npm:react-icons@5.5.0",
         "npm:react@19",
         "npm:tailwindcss@^3.4.17",
         "npm:typescript@^5.7.2",
@@ -1833,7 +1841,7 @@
       ],
       "overrides": {
         "@modelcontextprotocol/sdk": {
-          "@hono/node-server": "2.0.5"
+          "@hono/node-server": "2.0.11"
         }
       }
     }

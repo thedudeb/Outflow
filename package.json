@@ -95,11 +95,12 @@
     "papaparse": "^5.5.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-icons": "5.5.0",
     "zod": "3.25.76"
   },
   "overrides": {
     "@modelcontextprotocol/sdk": {
-      "@hono/node-server": "2.0.5"
+      "@hono/node-server": "2.0.11"
     }
   },
   "devDependencies": {
