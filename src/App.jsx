@@ -66,7 +66,6 @@ import {
   MAX_REMINDER_LEAD_TIMES,
   canToggleReminderLeadDay,
   canUseCsvImport,
-  canUseCurrency,
   hasLifetimePro,
   isStandardReminderLeadDay,
   isValidReminderLeadDay,
@@ -111,6 +110,7 @@ const ALERT_SETTINGS_KEY = "outflow:alert-settings";
 const LEDGER_META_KEY = "outflow:ledger-meta";
 const WORKSPACE_KEY = "outflow:workspace";
 const CUSTOM_PACKS_KEY = "outflow:custom-packs";
+const PREFERRED_CURRENCY_KEY = "outflow:preferred-currency";
 const WORKSPACE_SCHEMA_VERSION = 1;
 const BACKUP_SCHEMA_VERSION = 1;
 const ACCOUNT_NUDGE_KEY = "outflow:account-nudge";
@@ -179,6 +179,35 @@ const ledgerKinds = [
 const validLedgerKinds = new Set(["personal", ...ledgerKinds.map((kind) => kind.value)]);
 const currencies = ["USD", "CAD", "EUR", "GBP", "AUD", "NZD", "JPY", "CHF"];
 const validCurrencies = new Set(currencies);
+const regionalCurrencies = {
+  AU: "AUD",
+  AT: "EUR",
+  BE: "EUR",
+  CA: "CAD",
+  CH: "CHF",
+  CY: "EUR",
+  DE: "EUR",
+  EE: "EUR",
+  ES: "EUR",
+  FI: "EUR",
+  FR: "EUR",
+  GB: "GBP",
+  GR: "EUR",
+  HR: "EUR",
+  IE: "EUR",
+  IT: "EUR",
+  JP: "JPY",
+  LT: "EUR",
+  LU: "EUR",
+  LV: "EUR",
+  MT: "EUR",
+  NL: "EUR",
+  NZ: "NZD",
+  PT: "EUR",
+  SI: "EUR",
+  SK: "EUR",
+  US: "USD",
+};
 const reminderLeadOptions = [
   { label: "Same day", value: 0 },
   { label: "1 day before", value: 1 },
@@ -216,6 +245,26 @@ function browserTimezone() {
   } catch {
     return "UTC";
   }
+}
+
+function detectedPreferredCurrency() {
+  try {
+    const locale = new Intl.Locale(navigator.language);
+    return regionalCurrencies[locale.region] || "USD";
+  } catch {
+    const region = String(navigator.language || "").match(/[-_]([A-Za-z]{2})$/)?.[1]?.toUpperCase();
+    return regionalCurrencies[region] || "USD";
+  }
+}
+
+function loadCurrencyPreference() {
+  try {
+    const currency = localStorage.getItem(PREFERRED_CURRENCY_KEY);
+    if (validCurrencies.has(currency)) return { currency, promptOpen: false };
+  } catch {
+    // The preference remains available for this session when storage is unavailable.
+  }
+  return { currency: detectedPreferredCurrency(), promptOpen: true };
 }
 
 function preferredScrollBehavior() {
@@ -2380,6 +2429,9 @@ function LandingPage({ onOpen, pwa }) {
 function Tracker({ onExit, pwa }) {
   const [workspace, setWorkspace] = useState(loadWorkspace);
   const [customPacks, setCustomPacks] = useState(loadCustomPacks);
+  const [currencyPreference, setCurrencyPreference] = useState(loadCurrencyPreference);
+  const preferredCurrency = currencyPreference.currency;
+  const displayCurrencyTotals = (totals) => formatCurrencyTotals(totals, preferredCurrency);
   const [cloudLedgerSession, setCloudLedgerSession] = useState(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState("off");
   const [cloudSyncMessage, setCloudSyncMessage] = useState("");
@@ -2499,7 +2551,7 @@ function Tracker({ onExit, pwa }) {
   const [accountMessage, setAccountMessage] = useState("");
   const [accountError, setAccountError] = useState("");
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
-  const [form, setForm] = useState(blankForm);
+  const [form, setForm] = useState(() => ({ ...blankForm, currency: preferredCurrency }));
   const [customReminderLeadDay, setCustomReminderLeadDay] = useState("");
   const [customReminderError, setCustomReminderError] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -2574,7 +2626,6 @@ function Tracker({ onExit, pwa }) {
     || Number(row.amount) > 1000000000
   ));
   const starterPackExceedsCapacity = selectedStarterPackRows.length > Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
-  const starterPackHasRestrictedCurrency = selectedStarterPackRows.some((row) => !canUseCurrency(row.service.currency, accountEntitlement));
   const selectedCustomPackItems = customPackItemDraft.filter((row) => row.selected);
   const accountDialogRef = useDialogLifecycle(accountOpen, closeAccountControls, Boolean(accountBusy));
   const calendarDialogRef = useDialogLifecycle(calendarExportOpen, closeCalendarExport, Boolean(calendarFeedBusy));
@@ -3206,11 +3257,6 @@ function Tracker({ onExit, pwa }) {
       title: "Review imported records with Pro.",
       detail: "CSV export remains free for data ownership. The mapped preview and confirmed bulk import require a verified lifetime entitlement.",
     },
-    "pro-currency": {
-      code: "Lifetime Pro / currencies",
-      title: "Track new non-USD charges with Pro.",
-      detail: "Free lists use USD for new records. Existing currency data remains visible and editable after account or entitlement changes.",
-    },
     "pro-reminders": {
       code: "Lifetime Pro / alert timing",
       title: "Add multiple or custom lead times with Pro.",
@@ -3487,11 +3533,6 @@ function Tracker({ onExit, pwa }) {
       setStarterPackError(`This list has room for ${Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0)} more subscriptions.`);
       return;
     }
-    if (starterPackHasRestrictedCurrency) {
-      setStarterPackError("This pack contains currencies that require Lifetime Pro.");
-      return;
-    }
-
     const existingNames = new Set(subscriptions.map((subscription) => subscription.name.trim().toLocaleLowerCase()));
     const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
     const timestamp = new Date().toISOString();
@@ -3620,8 +3661,28 @@ function Tracker({ onExit, pwa }) {
     setCustomReminderError("");
   }
 
+  function choosePreferredCurrency(currency) {
+    if (!validCurrencies.has(currency)) return;
+    setCurrencyPreference((current) => ({ ...current, currency }));
+  }
+
+  function savePreferredCurrency(currency = preferredCurrency) {
+    if (!validCurrencies.has(currency)) return;
+    try {
+      localStorage.setItem(PREFERRED_CURRENCY_KEY, currency);
+    } catch {
+      // Keep the selected preference for this session when storage is unavailable.
+    }
+    setCurrencyPreference({ currency, promptOpen: false });
+    if (!editingId) setForm((current) => ({ ...current, currency }));
+  }
+
+  function dismissCurrencyPrompt() {
+    setCurrencyPreference((current) => ({ ...current, promptOpen: false }));
+  }
+
   function resetForm() {
-    setForm(blankForm);
+    setForm({ ...blankForm, currency: preferredCurrency });
     setCatalogOpen(false);
     setCatalogActiveIndex(0);
     setCustomReminderLeadDay("");
@@ -3641,7 +3702,7 @@ function Tracker({ onExit, pwa }) {
       originalLeadDays: existingSubscription?.reminderLeadDays,
     });
     if (restrictedFeature) {
-      openAccountControls(restrictedFeature === "currency" ? "pro-currency" : "pro-reminders");
+      openAccountControls("pro-reminders");
       return;
     }
     const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
@@ -5067,27 +5128,15 @@ function Tracker({ onExit, pwa }) {
                   className="h-10 min-w-0 border border-zinc-700 bg-zinc-950 px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400"
                 >
                   {currencies.map((currency) => (
-                    <option
-                      key={currency}
-                      value={currency}
-                      disabled={!canUseCurrency(currency, accountEntitlement, editingSubscription?.currency)}
-                    >
-                      {currency}{!canUseCurrency(currency, accountEntitlement, editingSubscription?.currency) ? " / Pro" : ""}
-                    </option>
+                    <option key={currency} value={currency}>{currency}</option>
                   ))}
                 </select>
               </Field>
             </div>
 
-            {!hasProAccess && (
-              <button
-                type="button"
-                onClick={() => openAccountControls("pro-currency")}
-                className="text-left font-mono text-[9px] uppercase leading-4 text-zinc-600 hover:text-amber-300"
-              >
-                USD on Free / existing currencies retained / Pro adds currencies
-              </button>
-            )}
+            <div className="font-mono text-[9px] uppercase leading-4 text-zinc-600">
+              All currencies are free / existing records keep their currency / no FX conversion
+            </div>
 
             <div className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
               Cycle
@@ -5333,7 +5382,7 @@ function Tracker({ onExit, pwa }) {
                 </div>
                 <div className="px-3 py-2">
                   <span className="text-zinc-600">30D </span>
-                  <span className="text-zinc-100">{formatCurrencyTotals(thirtyDayTotals)}</span>
+                  <span className="text-zinc-100">{displayCurrencyTotals(thirtyDayTotals)}</span>
                 </div>
               </div>
             </div>
@@ -5375,6 +5424,17 @@ function Tracker({ onExit, pwa }) {
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <label className="flex h-[30px] items-center border border-zinc-700 bg-black font-mono text-[10px] font-black uppercase text-zinc-500">
+                  <span className="border-r border-zinc-800 px-2">Local currency</span>
+                  <select
+                    aria-label="Preferred currency"
+                    value={preferredCurrency}
+                    onChange={(event) => savePreferredCurrency(event.target.value)}
+                    className="h-full border-0 bg-black px-2 font-mono text-[10px] font-black text-amber-300 outline-none focus:ring-1 focus:ring-inset focus:ring-amber-400"
+                  >
+                    {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                  </select>
+                </label>
                 {pwa.offlineReady && (
                   <span className="border border-emerald-900 px-2 py-1.5 font-mono text-[10px] font-black uppercase text-emerald-400">
                     {pwa.nativeApp ? "Native local" : "Offline ready"}
@@ -5444,6 +5504,48 @@ function Tracker({ onExit, pwa }) {
               </div>
             </div>
           </header>
+
+          {currencyPreference.promptOpen && (
+            <section
+              aria-labelledby="currency-startup-title"
+              className="grid gap-3 border border-amber-800 bg-amber-950/15 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+            >
+              <div className="min-w-0">
+                <div className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">Local setup / free</div>
+                <h2 id="currency-startup-title" className="mt-1 text-sm font-black uppercase tracking-[0.06em] text-zinc-100">Choose your preferred currency</h2>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-500">
+                  Used for new blank entries and empty totals. Existing subscriptions keep their recorded currency; Outflow does not guess exchange rates.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2 sm:justify-end">
+                <label className="grid gap-1 font-mono text-[9px] font-black uppercase text-zinc-500">
+                  Preferred currency
+                  <select
+                    aria-label="Startup preferred currency"
+                    value={preferredCurrency}
+                    onChange={(event) => choosePreferredCurrency(event.target.value)}
+                    className="h-10 border border-zinc-700 bg-black px-3 font-mono text-xs font-black text-zinc-100 outline-none focus:border-amber-400"
+                  >
+                    {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => savePreferredCurrency()}
+                  className="h-10 border border-amber-400 bg-amber-400 px-3 text-[10px] font-black uppercase tracking-[0.1em] text-black hover:bg-amber-300"
+                >
+                  Use {preferredCurrency}
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissCurrencyPrompt}
+                  className="h-10 border border-zinc-700 px-3 font-mono text-[10px] font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-zinc-100"
+                >
+                  Not now
+                </button>
+              </div>
+            </section>
+          )}
 
           {accountPromptContext && accountPromptDetails && cloudConfigured && !accountSession && (
             <section
@@ -5516,10 +5618,10 @@ function Tracker({ onExit, pwa }) {
           )}
 
           <div className={`${mobileView === "overview" ? "grid" : "hidden lg:grid"} gap-3 sm:grid-cols-2 xl:grid-cols-4`}>
-            <StatCell label="Monthly outflow" value={formatCurrencyTotals(monthlyTotals)} sublabel={`${activeSubscriptions.length} active subscriptions / no FX conversion`} tone="hot" code="MRC" />
+            <StatCell label="Monthly outflow" value={displayCurrencyTotals(monthlyTotals)} sublabel={`${activeSubscriptions.length} active subscriptions / no FX conversion`} tone="hot" code="MRC" />
             <StatCell label="Next charge" value={nextCharge ? money(nextCharge.amount, nextCharge.currency) : "$0.00"} sublabel={nextCharge ? `${nextCharge.name} / ${fullDate(nextCharge.date)}` : "No active charges"} code="DUE" />
-            <StatCell label="30 day pull" value={formatCurrencyTotals(thirtyDayTotals)} sublabel={`${timeline.length} scheduled debit events / no FX conversion`} code="T+30" />
-            <StatCell label="Annualized" value={formatCurrencyTotals(yearlyRunRateTotals)} sublabel="Projected run rate / no FX conversion" code="ARR" />
+            <StatCell label="30 day pull" value={displayCurrencyTotals(thirtyDayTotals)} sublabel={`${timeline.length} scheduled debit events / no FX conversion`} code="T+30" />
+            <StatCell label="Annualized" value={displayCurrencyTotals(yearlyRunRateTotals)} sublabel="Projected run rate / no FX conversion" code="ARR" />
           </div>
 
           <Panel
@@ -5583,7 +5685,7 @@ function Tracker({ onExit, pwa }) {
                 <div className="grid grid-cols-3 border-b border-zinc-800 font-mono">
                   <div className="border-r border-zinc-800 px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Scheduled</div>
-                    <div className="mt-1 truncate text-sm font-black text-amber-300 sm:text-lg">{formatCurrencyTotals(forecastTotals)}</div>
+                    <div className="mt-1 truncate text-sm font-black text-amber-300 sm:text-lg">{displayCurrencyTotals(forecastTotals)}</div>
                   </div>
                   <div className="border-r border-zinc-800 px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Debits</div>
@@ -5592,7 +5694,7 @@ function Tracker({ onExit, pwa }) {
                   <div className="px-3 py-3">
                     <div className="text-[9px] uppercase text-zinc-600 sm:text-[10px]">Avg / week</div>
                     <div className="mt-1 truncate text-sm font-black text-zinc-100 sm:text-lg">
-                      {formatCurrencyTotals(forecastWeeklyAverageTotals)}
+                      {displayCurrencyTotals(forecastWeeklyAverageTotals)}
                     </div>
                   </div>
                 </div>
@@ -5612,7 +5714,7 @@ function Tracker({ onExit, pwa }) {
                           <div className="h-full bg-amber-400" style={{ width: `${width}%` }} />
                         </div>
                         <div className="text-right font-mono text-[10px] font-bold text-zinc-300 sm:text-xs">
-                          {formatCurrencyTotals(week.totals)}
+                          {displayCurrencyTotals(week.totals)}
                           <span className="ml-1 text-[9px] text-zinc-700">/{week.count}</span>
                         </div>
                       </div>
@@ -5633,7 +5735,7 @@ function Tracker({ onExit, pwa }) {
                         <div key={category.name}>
                           <div className="flex items-center justify-between gap-3 text-xs">
                             <span className="truncate font-bold uppercase text-zinc-400">{category.name}</span>
-                            <span className="shrink-0 font-mono text-zinc-200">{formatCurrencyTotals(category.totals)}</span>
+                            <span className="shrink-0 font-mono text-zinc-200">{displayCurrencyTotals(category.totals)}</span>
                           </div>
                           <div className="mt-1.5 flex h-1.5 bg-zinc-900">
                             <div className="bg-red-500" style={{ width: `${width}%` }} />
@@ -5656,7 +5758,7 @@ function Tracker({ onExit, pwa }) {
             className={mobileView === "calendar" ? "" : "hidden lg:block"}
             action={(
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-amber-300">{formatCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>
+                <span className="font-mono text-[10px] text-amber-300">{displayCurrencyTotals(calendarMonthTotals)} / {calendarEvents.length}</span>
                 <button
                   type="button"
                   onClick={() => setCalendarExportOpen(true)}
@@ -5703,7 +5805,7 @@ function Tracker({ onExit, pwa }) {
                       <button
                         key={value}
                         type="button"
-                        aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${formatCurrencyTotals(dayTotals)}` : ", no charges"}`}
+                        aria-label={`${fullDate(value)}${events.length ? `, ${events.length} ${events.length === 1 ? "charge" : "charges"} totaling ${displayCurrencyTotals(dayTotals)}` : ", no charges"}`}
                         aria-pressed={selected}
                         aria-current={today ? "date" : undefined}
                         tabIndex={selected ? 0 : -1}
@@ -5733,7 +5835,7 @@ function Tracker({ onExit, pwa }) {
                                 <span key={event.eventId} className="h-1 w-2 sm:h-1.5 sm:w-3" style={{ background: event.color }} />
                               ))}
                             </div>
-                            <div className="mt-1 truncate font-mono text-[8px] font-black text-amber-300 sm:text-[10px]">{formatCurrencyTotals(dayTotals)}</div>
+                            <div className="mt-1 truncate font-mono text-[8px] font-black text-amber-300 sm:text-[10px]">{displayCurrencyTotals(dayTotals)}</div>
                             <div className="mt-1 hidden truncate text-[9px] uppercase text-zinc-600 sm:block">{events[0].name}</div>
                           </div>
                         )}
@@ -5748,7 +5850,7 @@ function Tracker({ onExit, pwa }) {
                   <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">Selected day</div>
                   <div className="mt-1 font-mono text-sm font-black text-zinc-200">{fullDate(selectedDate)}</div>
                   <div className="mt-1 font-mono text-xs text-amber-300">
-                    {formatCurrencyTotals(totalsByCurrency(selectedDayEvents))} / {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "debit" : "debits"}
+                    {displayCurrencyTotals(totalsByCurrency(selectedDayEvents))} / {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "debit" : "debits"}
                   </div>
                 </div>
                 <div className="divide-y divide-zinc-900">
@@ -6044,6 +6146,10 @@ function Tracker({ onExit, pwa }) {
             {customPackEditorMode ? (
               <form onSubmit={saveCustomPack} className="flex min-h-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1 overflow-auto">
+                  <div className="border-b border-amber-900/60 bg-amber-950/10 px-4 py-3">
+                    <div className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">Custom pack builder</div>
+                    <div className="mt-1 text-xs leading-5 text-zinc-500">Save subscriptions from the current list for reuse. This does not add a starter pack.</div>
+                  </div>
                   <div className="grid gap-3 border-b border-zinc-800 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                     <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
                       Pack name
@@ -6093,7 +6199,7 @@ function Tracker({ onExit, pwa }) {
                     onClick={() => setCustomPackEditorMode("")}
                     className="h-10 border border-zinc-700 bg-black px-3 text-xs font-black uppercase text-zinc-300 hover:border-zinc-400"
                   >
-                    Cancel
+                    Back to packs
                   </button>
                   <button
                     type="submit"
@@ -6105,7 +6211,7 @@ function Tracker({ onExit, pwa }) {
                 </footer>
               </form>
             ) : selectedStarterPack ? (
-              <form onSubmit={addStarterPackSubscriptions} className="flex min-h-0 flex-1 flex-col">
+              <form noValidate onSubmit={addStarterPackSubscriptions} className="flex min-h-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1 overflow-auto">
                   {starterPackIsMine && (
                     <div className="grid gap-2 border-b border-zinc-800 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] sm:items-end">
@@ -6206,11 +6312,11 @@ function Tracker({ onExit, pwa }) {
                 )}
                 <footer className="grid gap-3 border-t border-zinc-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                   <div className="font-mono text-[9px] uppercase leading-4 text-zinc-500">
-                    Prices are editable estimates / fresh dates required / no provider connection
+                    Add flow / enter a fresh next billing date for every included service / prices are editable estimates
                   </div>
                   <button
                     type="submit"
-                    disabled={!selectedStarterPackRows.length || starterPackHasInvalidRows || starterPackExceedsCapacity || starterPackHasRestrictedCurrency}
+                    disabled={!selectedStarterPackRows.length || starterPackExceedsCapacity}
                     className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
                   >
                     Add selected / {selectedStarterPackRows.length}
@@ -6315,9 +6421,10 @@ function Tracker({ onExit, pwa }) {
                     <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
                       <li className="py-1.5">Local subscription tracking</li>
                       <li className="py-1.5">Forecasts and billing calendar</li>
+                      <li className="py-1.5">Starter and custom packs</li>
                       <li className="py-1.5">One device or trial reminder per record</li>
+                      <li className="py-1.5">All supported currencies / no conversion</li>
                       <li className="py-1.5">CSV, backup, and calendar exports</li>
-                      <li className="py-1.5">USD entry / existing data retained</li>
                     </ul>
                   </div>
                   <div className="p-4">
@@ -6334,7 +6441,6 @@ function Tracker({ onExit, pwa }) {
                     <ul className="mt-3 divide-y divide-zinc-900 font-mono text-[10px] uppercase leading-5 text-zinc-500">
                       <li className="py-1.5">Cross-device sync and shared access</li>
                       <li className="py-1.5">Reviewed CSV import</li>
-                      <li className="py-1.5">Multiple currencies / no conversion</li>
                       <li className="py-1.5">Multiple and custom reminder lead times</li>
                       <li className="py-1.5">Durable email reminders</li>
                       <li className="py-1.5">Hosted calendar subscription</li>
@@ -7119,7 +7225,7 @@ function Tracker({ onExit, pwa }) {
 
             <footer className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="font-mono text-[10px] uppercase text-zinc-600">
-                {formatCurrencyTotals(calendarExportTotals)} monthly / private / transparent
+                {displayCurrencyTotals(calendarExportTotals)} monthly / private / transparent
               </div>
               <button
                 type="button"
@@ -7381,7 +7487,7 @@ function Tracker({ onExit, pwa }) {
                         Exported {backupSession.exportedAt ? new Date(backupSession.exportedAt).toLocaleString() : "date unavailable"}
                       </div>
                       <div className="mt-2 font-mono text-xs text-amber-300">
-                        {formatCurrencyTotals(totalsByCurrency(backupSession.subscriptions, monthlyEquivalent))} monthly
+                        {displayCurrencyTotals(totalsByCurrency(backupSession.subscriptions, monthlyEquivalent))} monthly
                       </div>
                       <div className="mt-1 font-mono text-[10px] uppercase text-zinc-500">
                         Custom packs {backupSession.customPacks.length} / {backupPackMergeCount} new / {backupPackDuplicateCount} existing

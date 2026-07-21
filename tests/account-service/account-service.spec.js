@@ -1636,7 +1636,7 @@ test("hosted calendar feed keeps its token one-time, rotates, suspends, and revo
   expect(await page.evaluate(() => localStorage.getItem("outflow:workspace"))).toBe(localWorkspace);
 });
 
-test("verified Pro unlocks reviewed CSV import, currencies, and advanced reminders", async ({ page }) => {
+test("verified Pro unlocks reviewed CSV import and advanced reminders", async ({ page }) => {
   const cloudState = createCloudState();
   await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
   await seedStoredSession(page);
@@ -1739,7 +1739,7 @@ test("signed-in account redeems a beta code and activates server-backed Pro", as
   expect(betaState.codes[0].redemptions[0].email).toBe(fixtureUser.email);
 });
 
-test("entitlement loss preserves existing currency and reminder data without allowing expansion", async ({ page }) => {
+test("entitlement loss keeps currency free while advanced reminder expansion stays gated", async ({ page }) => {
   const cloudState = createCloudState({ entitlementStatus: "refunded", canSync: false });
   await installCloudFixture(page, { verifiedUser: fixtureUser, cloudState });
   await seedStoredSession(page);
@@ -1760,7 +1760,7 @@ test("entitlement loss preserves existing currency and reminder data without all
   await card.getByRole("button", { name: "Edit", exact: true }).click();
   const currency = page.getByRole("combobox", { name: "Currency", exact: true });
   await expect(currency.locator('option[value="CAD"]')).not.toHaveAttribute("disabled", "");
-  await expect(currency.locator('option[value="EUR"]')).toHaveAttribute("disabled", "");
+  await expect(currency.locator('option[value="EUR"]')).not.toHaveAttribute("disabled", "");
   await page.getByRole("spinbutton", { name: "Amount", exact: true }).fill("16");
   await page.getByRole("button", { name: "Commit changes", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Account / Pro" })).toHaveCount(0);

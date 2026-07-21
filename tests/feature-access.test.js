@@ -19,12 +19,14 @@ test("only a verified active entitlement unlocks Pro features", () => {
   assert.equal(canUseCsvImport(pro), true);
 });
 
-test("Free currency changes are USD-only while existing currency data remains editable", () => {
+test("supported currency codes are available without an entitlement", () => {
   assert.equal(canUseCurrency("USD", null), true);
-  assert.equal(canUseCurrency("CAD", null), false);
+  assert.equal(canUseCurrency("CAD", null), true);
   assert.equal(canUseCurrency("CAD", null, "CAD"), true);
-  assert.equal(canUseCurrency("EUR", null, "CAD"), false);
+  assert.equal(canUseCurrency("EUR", null, "CAD"), true);
   assert.equal(canUseCurrency("EUR", pro, "CAD"), true);
+  assert.equal(canUseCurrency("usd", null), false);
+  assert.equal(canUseCurrency("US", null), false);
 });
 
 test("Free reminders allow one lead time and preserve existing advanced rules", () => {
@@ -53,7 +55,7 @@ test("downgraded users can remove and restore existing rules but cannot expand t
 });
 
 test("draft validation identifies the first restricted capability", () => {
-  assert.equal(restrictedDraftFeature({ currency: "CAD", reminderLeadDays: [], entitlement: null }), "currency");
+  assert.equal(restrictedDraftFeature({ currency: "CAD", reminderLeadDays: [], entitlement: null }), "");
   assert.equal(restrictedDraftFeature({ currency: "USD", reminderLeadDays: [7, 1], entitlement: null }), "reminders");
   assert.equal(restrictedDraftFeature({ currency: "CAD", reminderLeadDays: [7, 1], entitlement: pro }), "");
   assert.equal(restrictedDraftFeature({

@@ -20,12 +20,14 @@ test("guest upgrade comparison keeps the local free core available", async ({ pa
   await expect(dialog).toContainText("One payment / no renewal");
 
   await expect(free).toContainText("$0");
-  await expect(free.getByRole("listitem")).toHaveCount(5);
+  await expect(free.getByRole("listitem")).toHaveCount(6);
   await expect(free).toContainText("Local subscription tracking");
+  await expect(free).toContainText("Starter and custom packs");
+  await expect(free).toContainText("All supported currencies / no conversion");
   await expect(free).toContainText("CSV, backup, and calendar exports");
 
   await expect(pro).toContainText("Paid once");
-  await expect(pro.getByRole("listitem")).toHaveCount(6);
+  await expect(pro.getByRole("listitem")).toHaveCount(5);
   await expect(pro).toContainText("Cross-device sync and shared access");
   await expect(pro).toContainText("Reviewed CSV import");
 
@@ -46,7 +48,7 @@ test("guest upgrade comparison keeps the local free core available", async ({ pa
   await expect(page.getByRole("article").filter({ hasText: "Still Local" })).toHaveCount(1);
 });
 
-test("guest Pro gates are contextual and leave the local workspace byte-exact", async ({ page }) => {
+test("guest Pro gates stay contextual while currencies remain local and free", async ({ page }) => {
   await openTracker(page);
   const workspace = await page.evaluate(() => localStorage.getItem("outflow:workspace"));
 
@@ -59,12 +61,9 @@ test("guest Pro gates are contextual and leave the local workspace byte-exact", 
 
   const currency = page.getByRole("combobox", { name: "Currency", exact: true });
   await expect(currency.locator('option[value="USD"]')).not.toHaveAttribute("disabled", "");
-  await expect(currency.locator('option[value="CAD"]')).toHaveAttribute("disabled", "");
-  await page.getByRole("button", { name: /USD on Free.*Pro adds currencies/ }).click();
-  dialog = page.getByRole("dialog", { name: "Account / Pro" });
-  await expect(dialog).toContainText("Lifetime Pro / currencies");
-  await expect(dialog).toContainText("Existing currency data remains visible and editable");
-  await dialog.getByRole("button", { name: "Close account controls", exact: true }).click();
+  await expect(currency.locator('option[value="CAD"]')).not.toHaveAttribute("disabled", "");
+  await expect(currency.locator('option[value="EUR"]')).not.toHaveAttribute("disabled", "");
+  await currency.selectOption("CAD");
 
   const reminderGroup = page.getByRole("group", { name: "Alert lead times" });
   await expect(reminderGroup.getByRole("checkbox").nth(3)).toBeChecked();

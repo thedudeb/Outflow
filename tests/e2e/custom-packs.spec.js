@@ -35,6 +35,9 @@ test("custom packs save, persist, apply to another list, and remain manageable",
   await expect(dialog.getByText("Mine / 0 packs", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Save current list as pack", exact: true }).click();
 
+  await expect(dialog.getByText("Custom pack builder", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("This does not add a starter pack.", { exact: false })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Back to packs", exact: true })).toBeVisible();
   await dialog.getByLabel("Pack name", { exact: true }).fill("Media essentials");
   for (const name of ["iCloud+", "GitHub Copilot", "Notion Plus"]) {
     await dialog.getByRole("checkbox", { name: `Save ${name} in pack`, exact: true }).uncheck();
@@ -58,7 +61,9 @@ test("custom packs save, persist, apply to another list, and remain manageable",
   await expect(page.getByRole("article")).toHaveCount(0);
   dialog = await openStarterPacks(page);
   await dialog.getByRole("button", { name: "Mine", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "Add selected / 2", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Add selected / 2", exact: true })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Add selected / 2", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Enter a valid estimated price and next billing date for every selected subscription.");
   await dialog.getByLabel("Netflix next billing date", { exact: true }).fill("2030-08-03");
   await dialog.getByLabel("Spotify next billing date", { exact: true }).fill("2030-08-10");
   await dialog.getByRole("button", { name: "Add selected / 2", exact: true }).click();

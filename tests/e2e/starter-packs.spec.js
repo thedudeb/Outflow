@@ -21,7 +21,9 @@ test("starter packs review estimates, avoid duplicates, and batch-add selected s
   await expect(dialog.getByText("Tech pack", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("checkbox", { name: "Include Claude Pro", exact: true })).toBeChecked();
   await expect(dialog.getByRole("checkbox", { name: "iCloud+ is already tracked", exact: true })).toBeDisabled();
-  await expect(dialog.getByRole("button", { name: "Add selected / 3", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Add selected / 3", exact: true })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Add selected / 3", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Enter a valid estimated price and next billing date for every selected subscription.");
   await expectNoDialogViolations(page);
 
   for (const packName of ["Entertainment", "Creative", "Work", "Apple"]) {

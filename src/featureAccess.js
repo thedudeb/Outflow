@@ -1,4 +1,3 @@
-export const FREE_CURRENCY = "USD";
 export const FREE_REMINDER_LIMIT = 1;
 export const STANDARD_REMINDER_LEAD_DAYS = [0, 1, 3, 7, 14, 30];
 export const MAX_REMINDER_LEAD_DAY = 365;
@@ -20,10 +19,8 @@ export function canUseCsvImport(entitlement) {
   return hasLifetimePro(entitlement);
 }
 
-export function canUseCurrency(currency, entitlement, originalCurrency = "") {
-  return hasLifetimePro(entitlement)
-    || currency === FREE_CURRENCY
-    || (Boolean(originalCurrency) && currency === originalCurrency);
+export function canUseCurrency(currency) {
+  return typeof currency === "string" && /^[A-Z]{3}$/.test(currency);
 }
 
 export function canUseReminderLeadDays(leadDays, entitlement, originalLeadDays = []) {
@@ -50,13 +47,10 @@ export function canToggleReminderLeadDay({
 }
 
 export function restrictedDraftFeature({
-  currency,
   reminderLeadDays,
   entitlement,
-  originalCurrency = "",
   originalLeadDays = [],
 }) {
-  if (!canUseCurrency(currency, entitlement, originalCurrency)) return "currency";
   if (!canUseReminderLeadDays(reminderLeadDays, entitlement, originalLeadDays)) return "reminders";
   return "";
 }

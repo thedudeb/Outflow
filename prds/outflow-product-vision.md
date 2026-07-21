@@ -21,7 +21,7 @@ The product will remain deliberately narrower than a general personal-finance pl
 
 ## Current Delivery State
 
-- **Shipped guest product:** Public HTTPS guest ledger with an automated desktop/mobile free-core contract covering subscription CRUD, pause/resume, trial-end/first-charge ordering and reminders, overdue cycle rollover, month-end and leap-day handling, persistence, and exact 30/60/90-day forecasts; reusable built-in starter packs plus device-local custom packs with save, edit, duplicate, delete, cross-list application, fresh-date entry, and portable backup coverage; an internal billing calendar and semantic 30-day timeline with automated navigation, selected-day, recurrence, paused-exclusion, empty-state, exact-total, and roving keyboard-focus verification; categories, tags, Free USD entry with downgrade-safe retention of existing currencies and advanced reminder rules, free canonical CSV export, Pro-gated reviewed CSV import and new multi-currency records, one Free preset device-alert lead time and Pro-gated bounded custom/multiple lead times, paused-alert opt-in, permission-state announcements, privacy-limited payloads, and reload-safe delivery deduplication under automated desktop/mobile portability, notification, entitlement-policy, configured-service, cloud-sync, and durable-email contracts; versioned active-ledger backup/restore with automated export/merge/replace/rejection verification, isolated personal/household/team ledger switching with automated total, record, persistence, attribution, and deletion-protection verification, recurring iCalendar export with automated identity/update/paused-scope verification, base-path-portable installable web metadata, content-aware update invalidation, complete shell precaching, and local-ledger offline relaunch/edit/navigation under automated root and repository-path production-preview contracts plus post-deployment desktop/mobile host verification of layout, ledger/account boundary, install assets, worker scope, and local reload persistence; a versioned, direct-linkable public privacy and data-control surface that distinguishes the local guest build from optional account, email, calendar, and payment providers under source, accessibility, 320-pixel reflow, offline, and post-deployment checks; persisted dismissible account prompts after meaningful activity, backup, sharing, and installation moments, a service-independent Free versus lifetime-Pro comparison with contextual feature gates, exact local-data preservation, and automated guest and cancelled-checkout-return verification, a shared keyboard-contained dialog lifecycle, visible focus treatment, reduced-motion handling, semantic dynamic status, error, and busy-state announcements, and an automated desktop/mobile WCAG A/AA regression gate with 320 CSS-pixel reflow, dialog-containment, and forced-colors focus checks enforced in CI.
+- **Shipped guest product:** Public HTTPS guest list with automated desktop/mobile coverage for subscription CRUD, recurrence, forecasts, the billing calendar, alerts, portability, accessibility, offline relaunch, and responsive navigation; reusable built-in starter packs plus device-local custom packs with save, edit, duplicate, delete, cross-list application, fresh-date validation, and backup coverage; categories, tags, free canonical CSV export, Pro-gated reviewed CSV import, one Free preset alert lead time, and Pro-gated custom or multiple lead times; all supported currencies are available in the Free core through a persistent device-local preference for new entries and empty totals, while existing records retain their stored currency and mixed totals never imply exchange-rate conversion; optional account, cloud, collaboration, email, calendar, payment, PWA, and native-shell boundaries remain covered by their dedicated contracts.
 - **Browser compatibility evidence:** The public guest tracker has a direct desktop Chromium, Firefox, and WebKit guest compatibility gate for shell rendering, subscription CRUD and recurrence, calendar and timeline behavior, CSV and iCalendar downloads, backup/restore, and local-list isolation. Desktop and mobile Chromium remain the broader PWA, notification, reflow, and automated accessibility profiles.
 - **Operator control-plane evidence:** A versioned GitHub environment contract binds staging plus macOS, iOS, and Android production workflows to exact setting-name inventories, `main`-only deployment policies, and required reviewers without requesting secret values. All four repository environments are provisioned with `@thedudeb` review and exact `main` policies through a dry-run-first, idempotent provisioner that preserves existing reviewers and refuses destructive policy reconciliation; external settings and credentials remain operator-owned and unconfigured.
 - **Beta access evidence:** Administrators can generate hashed, optionally expiring Pro access codes for cohorts of 1 to 20 signed-in testers, disable unused capacity, and review identifiable redemption usage. Atomic database redemption, one-code-per-account enforcement, hourly attempt throttling, de-identified account deletion, strict client response validation, and desktop/mobile multi-engine browser flows are implemented; the default guest build cannot issue or redeem codes until Supabase is provisioned.
@@ -70,7 +70,7 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 - Add optional accounts for backup and cross-device access, with Pro unlocking synchronization and shared household/team lists.
 - Support manual entry and CSV import/export while explicitly excluding direct bank-account connections.
 - Let users start from curated packs or save reusable custom packs without carrying billing dates, pause state, trials, or reminder rules into another list.
-- Add free-trial tracking, customizable alerts, multiple currencies, external calendar integration, and flexible categories/tags.
+- Add free-trial tracking, customizable alerts, free local currency preferences, external calendar integration, and flexible categories/tags.
 - Expand from responsive web to installable web, native mobile, and desktop experiences while maintaining recognizable product behavior.
 
 ## User Experience
@@ -116,6 +116,7 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 - Users must be able to apply curated starter packs and create, edit, duplicate, delete, and reuse device-local custom packs.
 - Custom packs must store reusable subscription identity and pricing fields but must not copy billing dates, trial state, pause state, or reminder settings between lists.
 - Free users must have access to basic upcoming-charge and trial-ending notifications on supported devices.
+- Free users must be able to choose any supported currency as a device-local default for new entries without changing existing records or implying exchange-rate conversion.
 - Local guest data must remain usable if the user dismisses every account or upgrade prompt.
 
 ### Accounts And Data Control
@@ -128,7 +129,7 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 ### One-Time Pro
 
 - Pro must be sold as a one-time unlock with no recurring product subscription fee.
-- Pro must unlock cross-device sync, shared subscription lists, reviewed CSV import, creation of new records in multiple currencies, external calendar integration, and advanced alert rules. Canonical CSV export remains free for data ownership.
+- Pro must unlock cross-device sync, shared subscription lists, reviewed CSV import, external calendar integration, and advanced alert rules. Canonical CSV export and all supported currencies remain free for data ownership and local use.
 - Purchase and restore states must be available across supported platforms, subject to platform-store requirements.
 - Existing free data and workflows must continue working after purchase, restore, or account changes.
 
@@ -150,7 +151,7 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 
 - CSV import must provide a preview, field mapping, validation feedback, duplicate warnings, and an explicit confirmation step.
 - CSV export must include the complete user-visible subscription record in a documented, reusable format.
-- Each subscription must support a currency, and totals must not imply conversion when no exchange-rate source is available.
+- Each subscription must support a currency, the preferred currency must persist locally across restarts, and totals must not imply conversion when no exchange-rate source is available.
 - External calendar entries must remain identifiable as Outflow charges and support updates when a billing date changes.
 
 ### Platform Experience
@@ -163,7 +164,7 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 ## Phased Roadmap
 
 1. **Foundation:** Strengthen the current local tracker, add trial dates, custom categories/tags, basic alerts, CSV export, and account-ready onboarding.
-2. **Accounts And Pro:** Launch optional accounts, one-time Pro purchase, backup/sync, CSV import, advanced alerts, and multiple currencies.
+2. **Accounts And Pro:** Launch optional accounts, one-time Pro purchase, backup/sync, CSV import, and advanced alerts.
 3. **Collaboration:** Add personal/shared list switching, household/team invitations, permissions, and change attribution.
 4. **Expansion:** Add external calendar integration, installable web support, native mobile applications, and desktop applications.
 
@@ -179,4 +180,4 @@ Measure these criteria through beta-code redemption, opt-in check-ins, issue out
 
 - What public-launch and one-year activation, retention, and Pro-conversion targets should replace the closed-beta thresholds after a credible baseline is available?
 - How should one-time Pro purchases transfer across app stores and direct web purchases?
-- Which currencies and locales should be supported in the first multi-currency release?
+- Which additional currencies and locale-specific amount formats should follow the initial supported set?
