@@ -31,6 +31,11 @@ test("every guest dialog closes from its backdrop but not from its panel", async
     page.getByRole("button", { name: "Alert rules / Off", exact: true }),
     "Alert controls",
   );
+  await expectPanelAndBackdropBehavior(
+    page,
+    page.getByRole("button", { name: "Starter packs", exact: true }),
+    "Starter packs",
+  );
   await showTrackerView(page, "Calendar");
   await expectPanelAndBackdropBehavior(
     page,

@@ -12,7 +12,15 @@ const dialogs = [
     close: "Close account controls",
   },
   {
+    name: "starter packs",
+    view: "Subscriptions",
+    trigger: "Starter packs",
+    title: "Starter packs",
+    close: "Close starter packs",
+  },
+  {
     name: "calendar",
+    view: "Calendar",
     trigger: "Export calendar",
     title: "Calendar export",
     close: "Close calendar export",
@@ -168,7 +176,7 @@ test("primary pointer controls meet the WCAG 2.2 minimum target size", async ({ 
   await expectPointerTargets(page);
 
   for (const dialogCase of dialogs) {
-    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
+    if (dialogCase.view) await showTrackerView(page, dialogCase.view);
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
     await expect(page.getByRole("dialog", { name: dialogCase.title })).toBeVisible();
     await expectPointerTargets(page, '[role="dialog"]');
@@ -197,7 +205,7 @@ test("user text spacing does not clip or horizontally overflow primary workflows
 for (const dialogCase of dialogs) {
   test(`${dialogCase.name} dialog meets the automated WCAG A and AA gate`, async ({ page }) => {
     await openTracker(page);
-    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
+    if (dialogCase.view) await showTrackerView(page, dialogCase.view);
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: dialogCase.title });
@@ -240,7 +248,7 @@ test("core dialogs remain contained and reflow at 320 CSS pixels", async ({ page
   await openTracker(page);
 
   for (const dialogCase of dialogs) {
-    if (dialogCase.name === "calendar") await showTrackerView(page, "Calendar");
+    if (dialogCase.view) await showTrackerView(page, dialogCase.view);
     await page.getByRole("button", { name: dialogCase.trigger, exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: dialogCase.title });

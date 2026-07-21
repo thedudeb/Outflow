@@ -125,21 +125,33 @@ const trackerViews = [
   { id: "calendar", code: "CAL", label: "Calendar" },
 ];
 const subscriptionCatalog = [
-  { id: "netflix", name: "Netflix", aliases: ["netflix standard", "netflix premium"], mark: "N", markBackground: "#141414", markColor: "#e50914", amount: 15.49, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#ef4444" },
+  { id: "netflix", name: "Netflix", aliases: ["netflix standard", "netflix premium"], mark: "N", markBackground: "#e50914", markColor: "#09090b", amount: 15.49, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#ef4444" },
   { id: "spotify", name: "Spotify", aliases: ["spotify premium"], mark: "S", markBackground: "#1ed760", markColor: "#04140a", amount: 10.99, currency: "USD", cycle: "monthly", category: "Music", tags: ["personal", "audio"], color: "#84cc16" },
   { id: "icloud", name: "iCloud+", aliases: ["icloud", "apple icloud"], mark: "iC", markBackground: "#e0f2fe", markColor: "#0369a1", amount: 2.99, currency: "USD", cycle: "monthly", category: "Storage", tags: ["cloud", "personal"], color: "#22d3ee" },
   { id: "github-copilot", name: "GitHub Copilot", aliases: ["github", "copilot"], mark: "GH", markBackground: "#f4f4f5", markColor: "#18181b", amount: 10, currency: "USD", cycle: "monthly", category: "Dev Tools", tags: ["work", "development"], color: "#94a3b8" },
   { id: "notion", name: "Notion Plus", aliases: ["notion"], mark: "N", markBackground: "#fafafa", markColor: "#09090b", amount: 96, currency: "USD", cycle: "yearly", category: "Productivity", tags: ["work"], color: "#f59e0b" },
-  { id: "figma", name: "Figma Professional", aliases: ["figma"], mark: "F", markBackground: "#a259ff", markColor: "#ffffff", amount: 15, currency: "USD", cycle: "monthly", category: "Design", tags: ["work", "design"], color: "#8b5cf6" },
+  { id: "figma", name: "Figma Professional", aliases: ["figma"], mark: "F", markBackground: "#a259ff", markColor: "#09090b", amount: 15, currency: "USD", cycle: "monthly", category: "Design", tags: ["work", "design"], color: "#8b5cf6" },
   { id: "slack", name: "Slack Pro", aliases: ["slack"], mark: "SL", markBackground: "#4a154b", markColor: "#ffffff", amount: 8.75, currency: "USD", cycle: "monthly", category: "Communication", tags: ["work", "team"], color: "#8b5cf6" },
-  { id: "adobe", name: "Adobe Creative Cloud", aliases: ["adobe", "creative cloud"], mark: "CC", markBackground: "#fa0f00", markColor: "#ffffff", amount: 59.99, currency: "USD", cycle: "monthly", category: "Design", tags: ["work", "creative"], color: "#ef4444" },
-  { id: "youtube", name: "YouTube Premium", aliases: ["youtube", "youtube music"], mark: "YT", markBackground: "#ff0000", markColor: "#ffffff", amount: 13.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#ef4444" },
+  { id: "adobe", name: "Adobe Creative Cloud", aliases: ["adobe", "creative cloud"], mark: "CC", markBackground: "#fa0f00", markColor: "#09090b", amount: 59.99, currency: "USD", cycle: "monthly", category: "Design", tags: ["work", "creative"], color: "#ef4444" },
+  { id: "youtube", name: "YouTube Premium", aliases: ["youtube", "youtube music"], mark: "YT", markBackground: "#ff0000", markColor: "#09090b", amount: 13.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#ef4444" },
   { id: "disney", name: "Disney+", aliases: ["disney plus", "disney"], mark: "D+", markBackground: "#113ccf", markColor: "#ffffff", amount: 13.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#22d3ee" },
   { id: "dropbox", name: "Dropbox Plus", aliases: ["dropbox"], mark: "DB", markBackground: "#0061ff", markColor: "#ffffff", amount: 11.99, currency: "USD", cycle: "monthly", category: "Storage", tags: ["cloud", "personal"], color: "#22d3ee" },
-  { id: "chatgpt", name: "ChatGPT Plus", aliases: ["chatgpt", "openai"], mark: "AI", markBackground: "#10a37f", markColor: "#ffffff", amount: 20, currency: "USD", cycle: "monthly", category: "AI Tools", tags: ["work", "productivity"], color: "#84cc16" },
+  { id: "chatgpt", name: "ChatGPT Plus", aliases: ["chatgpt", "openai"], mark: "AI", markBackground: "#10a37f", markColor: "#061b14", amount: 20, currency: "USD", cycle: "monthly", category: "AI Tools", tags: ["work", "productivity"], color: "#84cc16" },
   { id: "canva", name: "Canva Pro", aliases: ["canva"], mark: "C", markBackground: "#00c4cc", markColor: "#08181a", amount: 15, currency: "USD", cycle: "monthly", category: "Design", tags: ["work", "creative"], color: "#22d3ee" },
-  { id: "google-one", name: "Google One", aliases: ["google storage", "google drive"], mark: "G1", markBackground: "#4285f4", markColor: "#ffffff", amount: 1.99, currency: "USD", cycle: "monthly", category: "Storage", tags: ["cloud", "personal"], color: "#f59e0b" },
-  { id: "microsoft-365", name: "Microsoft 365 Personal", aliases: ["microsoft 365", "office 365"], mark: "MS", markBackground: "#d83b01", markColor: "#ffffff", amount: 99.99, currency: "USD", cycle: "yearly", category: "Productivity", tags: ["work", "office"], color: "#f59e0b" },
+  { id: "google-one", name: "Google One", aliases: ["google storage", "google drive"], mark: "G1", markBackground: "#4285f4", markColor: "#071225", amount: 1.99, currency: "USD", cycle: "monthly", category: "Storage", tags: ["cloud", "personal"], color: "#f59e0b" },
+  { id: "microsoft-365", name: "Microsoft 365 Personal", aliases: ["microsoft 365", "office 365"], mark: "MS", markBackground: "#f25022", markColor: "#09090b", amount: 99.99, currency: "USD", cycle: "yearly", category: "Productivity", tags: ["work", "office"], color: "#f59e0b" },
+  { id: "claude", name: "Claude Pro", aliases: ["claude", "anthropic"], mark: "CL", markBackground: "#d97757", markColor: "#160d09", amount: 20, currency: "USD", cycle: "monthly", category: "AI Tools", tags: ["work", "productivity"], color: "#ef4444" },
+  { id: "zoom", name: "Zoom Workplace Pro", aliases: ["zoom", "zoom pro"], mark: "Z", markBackground: "#2d8cff", markColor: "#061427", amount: 15.99, currency: "USD", cycle: "monthly", category: "Communication", tags: ["work", "meetings"], color: "#22d3ee" },
+  { id: "apple-music", name: "Apple Music", aliases: ["apple music"], mark: "AM", markBackground: "#fa243c", markColor: "#1b0306", amount: 10.99, currency: "USD", cycle: "monthly", category: "Music", tags: ["personal", "audio"], color: "#ef4444" },
+  { id: "apple-tv", name: "Apple TV+", aliases: ["apple tv", "apple tv plus"], mark: "TV", markBackground: "#f4f4f5", markColor: "#09090b", amount: 9.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#94a3b8" },
+  { id: "applecare", name: "AppleCare+", aliases: ["applecare", "apple care"], mark: "AC", markBackground: "#27272a", markColor: "#f4f4f5", amount: 9.99, currency: "USD", cycle: "monthly", category: "Device Care", tags: ["personal", "device"], color: "#94a3b8" },
+];
+const starterPacks = [
+  { id: "tech", code: "TEC", name: "Tech", description: "AI, cloud storage, and developer tools.", serviceIds: ["claude", "chatgpt", "icloud", "github-copilot", "google-one"] },
+  { id: "entertainment", code: "ENT", name: "Entertainment", description: "Common video and music subscriptions.", serviceIds: ["netflix", "spotify", "disney", "youtube"] },
+  { id: "creative", code: "CRT", name: "Creative", description: "Design, media, and creative production tools.", serviceIds: ["adobe", "figma", "canva", "dropbox", "notion"] },
+  { id: "work", code: "WRK", name: "Work", description: "Communication, documents, meetings, and planning.", serviceIds: ["microsoft-365", "slack", "notion", "zoom", "dropbox"] },
+  { id: "apple", code: "APL", name: "Apple", description: "Storage, media, and device coverage.", serviceIds: ["icloud", "apple-music", "apple-tv", "applecare"] },
 ];
 
 const colorTags = [
@@ -1153,6 +1165,21 @@ function subscriptionCatalogMatches(value) {
     .sort((left, right) => left.rank - right.rank || left.service.name.localeCompare(right.service.name))
     .slice(0, 6)
     .map(({ service }) => service);
+}
+
+function buildStarterPackDraft(pack, subscriptions) {
+  const trackedNames = new Set(subscriptions.map((subscription) => subscription.name.trim().toLocaleLowerCase()));
+  return pack.serviceIds.map((serviceId) => {
+    const service = subscriptionCatalog.find((entry) => entry.id === serviceId);
+    const tracked = trackedNames.has(service.name.toLocaleLowerCase());
+    return {
+      serviceId,
+      selected: !tracked,
+      tracked,
+      amount: String(service.amount),
+      nextBillingDate: "",
+    };
+  });
 }
 
 function SubscriptionMark({ service, name, className = "h-9 w-9 text-xs" }) {
@@ -2337,6 +2364,10 @@ function Tracker({ onExit, pwa }) {
   const [editingId, setEditingId] = useState(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogActiveIndex, setCatalogActiveIndex] = useState(0);
+  const [starterPackOpen, setStarterPackOpen] = useState(false);
+  const [starterPackId, setStarterPackId] = useState(starterPacks[0].id);
+  const [starterPackDraft, setStarterPackDraft] = useState([]);
+  const [starterPackError, setStarterPackError] = useState("");
   const [forecastHorizon, setForecastHorizon] = useState(30);
   const [mobileView, setMobileView] = useState(() => {
     const storedView = sessionStorage.getItem(TRACKER_VIEW_KEY);
@@ -2385,11 +2416,21 @@ function Tracker({ onExit, pwa }) {
     [form.name],
   );
   const catalogVisible = catalogOpen && catalogSuggestions.length > 0;
+  const selectedStarterPack = starterPacks.find((pack) => pack.id === starterPackId) || starterPacks[0];
+  const selectedStarterPackRows = starterPackDraft.filter((row) => row.selected && !row.tracked);
+  const starterPackHasInvalidRows = selectedStarterPackRows.some((row) => (
+    !isValidDate(row.nextBillingDate)
+    || !Number.isFinite(Number(row.amount))
+    || Number(row.amount) <= 0
+    || Number(row.amount) > 1000000000
+  ));
+  const starterPackExceedsCapacity = selectedStarterPackRows.length > Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0);
   const accountDialogRef = useDialogLifecycle(accountOpen, closeAccountControls, Boolean(accountBusy));
   const calendarDialogRef = useDialogLifecycle(calendarExportOpen, closeCalendarExport, Boolean(calendarFeedBusy));
   const ledgerDialogRef = useDialogLifecycle(ledgerOpen, closeLedgerControls);
   const alertDialogRef = useDialogLifecycle(alertSettingsOpen, () => setAlertSettingsOpen(false));
   const csvDialogRef = useDialogLifecycle(importOpen, closeCsvImport);
+  const starterPackDialogRef = useDialogLifecycle(starterPackOpen, closeStarterPacks);
 
   useEffect(() => {
     localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspace));
@@ -3130,6 +3171,85 @@ function Tracker({ onExit, pwa }) {
       const direction = event.key === "ArrowDown" ? 1 : -1;
       setCatalogActiveIndex((current) => (current + direction + catalogSuggestions.length) % catalogSuggestions.length);
     }
+  }
+
+  function chooseStarterPack(packId) {
+    const pack = starterPacks.find((entry) => entry.id === packId) || starterPacks[0];
+    setStarterPackId(pack.id);
+    setStarterPackDraft(buildStarterPackDraft(pack, subscriptions));
+    setStarterPackError("");
+  }
+
+  function openStarterPacks() {
+    if (cloudLedgerWriteDisabled) return;
+    setCatalogOpen(false);
+    chooseStarterPack(starterPackId);
+    setStarterPackOpen(true);
+  }
+
+  function closeStarterPacks() {
+    setStarterPackOpen(false);
+    setStarterPackError("");
+  }
+
+  function updateStarterPackRow(serviceId, field, value) {
+    setStarterPackDraft((current) => current.map((row) => (
+      row.serviceId === serviceId ? { ...row, [field]: value } : row
+    )));
+    setStarterPackError("");
+  }
+
+  function addStarterPackSubscriptions(event) {
+    event.preventDefault();
+    if (cloudLedgerWriteDisabled) return;
+    if (!selectedStarterPackRows.length) {
+      setStarterPackError("Select at least one untracked subscription.");
+      return;
+    }
+    if (starterPackHasInvalidRows) {
+      setStarterPackError("Enter a valid estimated price and next billing date for every selected subscription.");
+      return;
+    }
+    if (starterPackExceedsCapacity) {
+      setStarterPackError(`This list has room for ${Math.max(MAX_SUBSCRIPTIONS - subscriptions.length, 0)} more subscriptions.`);
+      return;
+    }
+
+    const existingNames = new Set(subscriptions.map((subscription) => subscription.name.trim().toLocaleLowerCase()));
+    const actorLabel = usingCloudLedger ? "Cloud member" : "Local guest";
+    const timestamp = new Date().toISOString();
+    const additions = selectedStarterPackRows
+      .map((row) => ({ row, service: subscriptionCatalog.find((service) => service.id === row.serviceId) }))
+      .filter(({ service }) => service && !existingNames.has(service.name.toLocaleLowerCase()))
+      .map(({ row, service }) => sanitizeSubscription({
+        id: crypto.randomUUID(),
+        name: service.name,
+        amount: Number(row.amount),
+        currency: service.currency,
+        cycle: service.cycle,
+        nextBillingDate: row.nextBillingDate,
+        category: service.category,
+        tags: service.tags,
+        color: service.color,
+        trialEndDate: "",
+        reminderLeadDays: [7],
+        paused: false,
+        revision: 0,
+        updatedAt: timestamp,
+        createdBy: actorLabel,
+        updatedBy: actorLabel,
+      }))
+      .filter(Boolean)
+      .map(normalizeBillingDate);
+
+    if (!additions.length) {
+      setStarterPackError("Those subscriptions are already tracked in this list.");
+      return;
+    }
+
+    setSubscriptions((current) => [...current, ...additions].slice(0, MAX_SUBSCRIPTIONS));
+    recordGuestAccountActivity();
+    closeStarterPacks();
   }
 
   function updateTrialEndDate(value) {
@@ -4547,13 +4667,22 @@ function Tracker({ onExit, pwa }) {
               <h2 className="text-[11px] font-black uppercase tracking-[0.18em] text-zinc-300">
                 {editingId ? "Edit subscription" : "Add subscription"}
               </h2>
-              {editingId && (
+              {editingId ? (
                 <button
                   type="button"
                   onClick={resetForm}
                   className="border border-zinc-700 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-zinc-400 hover:border-zinc-500 hover:text-zinc-100"
                 >
                   Clear
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openStarterPacks}
+                  disabled={cloudLedgerWriteDisabled}
+                  className="border border-amber-700 bg-amber-950/20 px-2 py-1 font-mono text-[10px] font-black uppercase text-amber-300 hover:border-amber-400 hover:text-amber-100 disabled:border-zinc-800 disabled:bg-black disabled:text-zinc-700"
+                >
+                  Starter packs
                 </button>
               )}
             </div>
@@ -5582,6 +5711,148 @@ function Tracker({ onExit, pwa }) {
           })}
         </div>
       </nav>
+
+      {starterPackOpen && (
+        <DialogOverlay onClose={closeStarterPacks}>
+          <section
+            ref={starterPackDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="starter-packs-title"
+            tabIndex={-1}
+            className="flex max-h-[calc(100vh-24px)] min-w-0 w-full max-w-full flex-col overflow-hidden border border-zinc-700 bg-[#090a0b] shadow-2xl sm:max-h-[calc(100vh-48px)] sm:max-w-3xl"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-amber-300">Quick setup / free</div>
+                <h2 id="starter-packs-title" className="mt-1 truncate text-lg font-black uppercase tracking-[0.1em] text-zinc-100">Starter packs</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeStarterPacks}
+                aria-label="Close starter packs"
+                data-dialog-initial-focus
+                className="h-9 border border-zinc-700 px-3 font-mono text-xs font-black uppercase text-zinc-400 hover:border-zinc-400 hover:text-white"
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="grid grid-cols-2 border-b border-zinc-800 sm:grid-cols-5" aria-label="Available starter packs">
+              {starterPacks.map((pack, index) => (
+                <button
+                  key={pack.id}
+                  type="button"
+                  aria-label={pack.name}
+                  aria-pressed={starterPackId === pack.id}
+                  onClick={() => chooseStarterPack(pack.id)}
+                  className={`min-h-14 border-zinc-800 px-3 py-2 text-left font-mono ${
+                    index % 2 === 0 && index < starterPacks.length - 1 ? "border-r" : ""
+                  } ${index < 4 ? "border-b" : ""} ${index < starterPacks.length - 1 ? "sm:border-r sm:border-b-0" : "sm:border-r-0 sm:border-b-0"} ${
+                    starterPackId === pack.id ? "bg-amber-400 text-black" : "bg-black text-zinc-500 hover:bg-zinc-950 hover:text-zinc-100"
+                  }`}
+                >
+                  <span className="block text-[9px] font-black">{pack.code}</span>
+                  <span className="mt-1 block text-[11px] font-black uppercase">{pack.name}</span>
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={addStarterPackSubscriptions} className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-auto">
+                <div className="border-b border-zinc-800 px-4 py-3">
+                  <div className="text-sm font-black uppercase tracking-[0.08em] text-zinc-100">{selectedStarterPack.name} pack</div>
+                  <div className="mt-1 font-mono text-[10px] uppercase leading-4 text-zinc-600">{selectedStarterPack.description}</div>
+                </div>
+
+                <div className="divide-y divide-zinc-800">
+                  {starterPackDraft.map((row) => {
+                    const service = subscriptionCatalog.find((entry) => entry.id === row.serviceId);
+                    if (!service) return null;
+                    return (
+                      <div key={service.id} className={`px-4 py-3 ${row.selected && !row.tracked ? "bg-zinc-950/50" : "bg-black"}`}>
+                        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={row.selected}
+                            disabled={row.tracked}
+                            onChange={(event) => updateStarterPackRow(service.id, "selected", event.target.checked)}
+                            aria-label={row.tracked ? `${service.name} is already tracked` : `Include ${service.name}`}
+                            className="h-6 w-6 accent-amber-400"
+                          />
+                          <div className="flex min-w-0 items-center gap-3">
+                            <SubscriptionMark service={service} name={service.name} />
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-black text-zinc-100">{service.name}</div>
+                              <div className="mt-0.5 truncate font-mono text-[9px] uppercase text-zinc-600">{service.category} / {service.cycle}</div>
+                            </div>
+                          </div>
+                          <span className={`border px-2 py-1 font-mono text-[9px] font-black uppercase ${
+                            row.tracked ? "border-emerald-900 text-emerald-300" : row.selected ? "border-amber-800 text-amber-300" : "border-zinc-800 text-zinc-600"
+                          }`}>
+                            {row.tracked ? "Tracked" : row.selected ? "Include" : "Skip"}
+                          </span>
+                        </div>
+
+                        {!row.tracked && (
+                          <div className="mt-3 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 pl-7 sm:pl-[68px]">
+                            <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-600">
+                              Estimated price / USD
+                              <input
+                                type="number"
+                                min="0.01"
+                                max="1000000000"
+                                step="0.01"
+                                inputMode="decimal"
+                                value={row.amount}
+                                disabled={!row.selected}
+                                onChange={(event) => updateStarterPackRow(service.id, "amount", event.target.value)}
+                                aria-label={`${service.name} estimated price`}
+                                required={row.selected}
+                                className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
+                              />
+                            </label>
+                            <label className="grid gap-1 font-mono text-[9px] uppercase text-zinc-600">
+                              Next billing date
+                              <input
+                                type="date"
+                                value={row.nextBillingDate}
+                                disabled={!row.selected}
+                                onInput={(event) => updateStarterPackRow(service.id, "nextBillingDate", event.currentTarget.value)}
+                                aria-label={`${service.name} next billing date`}
+                                required={row.selected}
+                                className="h-10 min-w-0 border border-zinc-700 bg-black px-2 font-mono text-xs text-zinc-100 outline-none focus:border-amber-400 disabled:border-zinc-900 disabled:text-zinc-700"
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {starterPackError && (
+                <LiveMessage kind="alert" className="border-t border-red-900 bg-red-950/30 px-4 py-2 text-xs text-red-200">
+                  {starterPackError}
+                </LiveMessage>
+              )}
+              <footer className="grid gap-3 border-t border-zinc-800 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="font-mono text-[9px] uppercase leading-4 text-zinc-600">
+                  Prices are editable estimates / dates required / no provider connection
+                </div>
+                <button
+                  type="submit"
+                  disabled={!selectedStarterPackRows.length || starterPackHasInvalidRows || starterPackExceedsCapacity}
+                  className="h-10 border border-amber-400 bg-amber-400 px-4 text-xs font-black uppercase tracking-[0.12em] text-black hover:bg-amber-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                >
+                  Add selected / {selectedStarterPackRows.length}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </DialogOverlay>
+      )}
 
       {accountOpen && (
         <DialogOverlay onClose={closeAccountControls} closeDisabled={Boolean(accountBusy)}>
