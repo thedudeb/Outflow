@@ -3,20 +3,26 @@ import Papa from "papaparse";
 import { createEvents } from "ics";
 import {
   SiAdobecreativecloud,
+  SiAmazonprime,
   SiApple,
   SiApplemusic,
   SiAppletv,
   SiCanva,
   SiClaude,
+  SiDoordash,
   SiDropbox,
   SiFigma,
   SiGithubcopilot,
   SiIcloud,
+  SiInstacart,
+  SiLyft,
   SiNetflix,
   SiNotion,
   SiOpenai,
   SiSlack,
   SiSpotify,
+  SiUber,
+  SiWalmart,
   SiYoutube,
   SiZoom,
 } from "react-icons/si";
@@ -170,6 +176,13 @@ const subscriptionCatalog = [
   { id: "apple-music", name: "Apple Music", aliases: ["apple music"], mark: "AM", markBackground: "#fa243c", markColor: "#1b0306", amount: 10.99, currency: "USD", cycle: "monthly", category: "Music", tags: ["personal", "audio"], color: "#ef4444" },
   { id: "apple-tv", name: "Apple TV+", aliases: ["apple tv", "apple tv plus"], mark: "TV", markBackground: "#f4f4f5", markColor: "#09090b", amount: 9.99, currency: "USD", cycle: "monthly", category: "Streaming", tags: ["personal", "video"], color: "#94a3b8" },
   { id: "applecare", name: "AppleCare+", aliases: ["applecare", "apple care"], mark: "AC", markBackground: "#27272a", markColor: "#f4f4f5", amount: 9.99, currency: "USD", cycle: "monthly", category: "Device Care", tags: ["personal", "device"], color: "#94a3b8" },
+  { id: "uber-one", name: "Uber One", aliases: ["uber", "uber eats"], mark: "U", markBackground: "#f4f4f5", markColor: "#09090b", amount: 9.99, currency: "USD", cycle: "monthly", category: "Mobility", tags: ["personal", "rides", "delivery"], color: "#94a3b8" },
+  { id: "dashpass", name: "DoorDash DashPass", aliases: ["doordash", "dash pass", "dashpass"], mark: "DD", markBackground: "#ff3008", markColor: "#ffffff", amount: 9.99, currency: "USD", cycle: "monthly", category: "Delivery", tags: ["personal", "food", "delivery"], color: "#ef4444" },
+  { id: "amazon-prime", name: "Amazon Prime", aliases: ["amazon", "prime"], mark: "AP", markBackground: "#00a8e1", markColor: "#06141b", amount: 14.99, currency: "USD", cycle: "monthly", category: "Shopping", tags: ["personal", "shopping", "delivery"], color: "#22d3ee" },
+  { id: "instacart-plus", name: "Instacart+", aliases: ["instacart", "instacart plus"], mark: "I+", markBackground: "#43b02a", markColor: "#071805", amount: 9.99, currency: "USD", cycle: "monthly", category: "Delivery", tags: ["personal", "grocery", "delivery"], color: "#84cc16" },
+  { id: "walmart-plus", name: "Walmart+", aliases: ["walmart", "walmart plus"], mark: "W+", markBackground: "#0071dc", markColor: "#ffc220", amount: 12.95, currency: "USD", cycle: "monthly", category: "Shopping", tags: ["personal", "shopping", "delivery"], color: "#22d3ee" },
+  { id: "costco", name: "Costco Gold Star", aliases: ["costco", "costco membership"], mark: "CO", markBackground: "#f4f4f5", markColor: "#e31837", amount: 65, currency: "USD", cycle: "yearly", category: "Shopping", tags: ["household", "shopping"], color: "#ef4444" },
+  { id: "lyft-pink", name: "Lyft Pink", aliases: ["lyft", "lyft membership"], mark: "LY", markBackground: "#ff00bf", markColor: "#160011", amount: 9.99, currency: "USD", cycle: "monthly", category: "Mobility", tags: ["personal", "rides"], color: "#8b5cf6" },
 ];
 const subscriptionCompanyIcons = {
   netflix: SiNetflix,
@@ -191,6 +204,12 @@ const subscriptionCompanyIcons = {
   "apple-music": SiApplemusic,
   "apple-tv": SiAppletv,
   applecare: SiApple,
+  "uber-one": SiUber,
+  dashpass: SiDoordash,
+  "amazon-prime": SiAmazonprime,
+  "instacart-plus": SiInstacart,
+  "walmart-plus": SiWalmart,
+  "lyft-pink": SiLyft,
 };
 
 function catalogServiceForName(name) {
@@ -206,6 +225,7 @@ const starterPacks = [
   { id: "creative", code: "CRT", name: "Creative", description: "Design, media, and creative production tools.", serviceIds: ["adobe", "figma", "canva", "dropbox", "notion"] },
   { id: "work", code: "WRK", name: "Work", description: "Communication, documents, meetings, and planning.", serviceIds: ["microsoft-365", "slack", "notion", "zoom", "dropbox"] },
   { id: "apple", code: "APL", name: "Apple", description: "Storage, media, and device coverage.", serviceIds: ["icloud", "apple-music", "apple-tv", "applecare"] },
+  { id: "everyday", code: "DAY", name: "Everyday", description: "Delivery, shopping, grocery, and ride memberships.", serviceIds: ["uber-one", "dashpass", "amazon-prime", "instacart-plus", "walmart-plus", "costco", "lyft-pink"] },
 ];
 
 const colorTags = [

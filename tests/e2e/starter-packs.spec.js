@@ -33,6 +33,11 @@ test("starter packs review estimates, avoid duplicates, and batch-add selected s
     await expectNoDialogViolations(page);
   }
   await expect(dialog.getByRole("checkbox", { name: "Include Apple Music", exact: true })).toBeChecked();
+  await dialog.getByRole("button", { name: "Everyday", exact: true }).click();
+  await expect(dialog.getByText("Everyday pack", { exact: true })).toBeVisible();
+  await expect(dialog.locator('[data-subscription-mark="uber-one"] svg')).toBeVisible();
+  await expect(dialog.locator('[data-subscription-mark="costco"]')).toHaveAttribute("data-company-icon", "false");
+  await expect(dialog.getByRole("checkbox", { name: "Include Costco Gold Star", exact: true })).toBeChecked();
   await dialog.getByRole("button", { name: "Tech", exact: true }).click();
 
   await dialog.getByRole("checkbox", { name: "Include ChatGPT Plus", exact: true }).uncheck();

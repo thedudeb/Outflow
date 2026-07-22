@@ -33,9 +33,14 @@ test("subscription catalog filters, prefills editable details, and supports keyb
   await expect(suggestions.getByRole("option").filter({ hasText: "GitHub Copilot" })).toHaveCount(1);
   await nameField.press("Enter");
   await expect(nameField).toHaveValue("GitHub Copilot");
-  const githubMark = page.locator('[data-subscription-mark="github-copilot"]');
+  const githubMark = page.getByRole("complementary").locator('[data-subscription-mark="github-copilot"]');
   await expect(githubMark).toHaveAttribute("data-company-icon", "true");
   await expect(githubMark.locator("svg")).toBeVisible();
+
+  await nameField.fill("uber");
+  const uber = suggestions.getByRole("option").filter({ hasText: "Uber One" });
+  await expect(uber).toHaveCount(1);
+  await expect(uber.locator('[data-subscription-mark="uber-one"] svg')).toBeVisible();
 
   await nameField.fill("Private VPN");
   await expect(suggestions).toBeHidden();
